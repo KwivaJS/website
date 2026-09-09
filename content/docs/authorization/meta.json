@@ -1,7 +1,6 @@
 {
   "title": "Authorization",
   "pages": [
-    "index",
     "policies",
     "permissions",
     "roles",

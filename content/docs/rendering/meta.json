@@ -1,7 +1,6 @@
 {
   "title": "Rendering",
   "pages": [
-    "index",
     "ssr",
     "streaming",
     "hydration",

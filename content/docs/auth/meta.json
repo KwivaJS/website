@@ -1,7 +1,6 @@
 {
   "title": "Authentication",
   "pages": [
-    "index",
     "configuration",
     "sessions",
     "providers",

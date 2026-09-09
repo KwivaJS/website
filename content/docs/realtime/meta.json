@@ -1,7 +1,6 @@
 {
   "title": "Realtime",
   "pages": [
-    "index",
     "channels",
     "events",
     "client-usage",

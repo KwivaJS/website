@@ -1,7 +1,6 @@
 {
   "title": "Frontend",
   "pages": [
-    "index",
     "pages",
     "routing",
     "layouts",

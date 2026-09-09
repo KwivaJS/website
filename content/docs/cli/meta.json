@@ -1,7 +1,6 @@
 {
   "title": "CLI",
   "pages": [
-    "index",
     "project-commands",
     "generators",
     "database-commands",

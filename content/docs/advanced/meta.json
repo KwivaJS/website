@@ -1,7 +1,6 @@
 {
   "title": "Advanced",
   "pages": [
-    "index",
     "architecture-internals",
     "request-lifecycle",
     "model-ir",
