@@ -260,13 +260,13 @@ export function BlueprintHero() {
       </div>
 
       {/* Blueprint canvas */}
-      <div className="rounded-lg border border-fd-border bg-fd-card/40 p-3">
+      <div className="kw-panel rounded-lg border border-fd-border bg-fd-card/40 p-3">
         <DesktopBlueprint activeArea={activeArea} activeKey={activeKey} />
         <MobileBlueprint activeArea={activeArea} />
       </div>
 
       {/* Declaration panel */}
-      <div className="overflow-hidden rounded-lg border border-fd-border bg-fd-background">
+      <div className="kw-panel overflow-hidden rounded-lg border border-fd-border bg-fd-background">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-fd-border bg-fd-secondary/40 px-4 py-2">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className="size-2 shrink-0 rounded-full bg-kwiva-500" />

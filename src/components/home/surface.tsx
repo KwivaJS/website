@@ -131,7 +131,7 @@ export function CapabilitySurface() {
       </div>
 
       {/* Feature list */}
-      <div className="overflow-hidden rounded-lg border border-fd-border bg-fd-background">
+      <div className="kw-panel overflow-hidden rounded-lg border border-fd-border bg-fd-background">
         <div className="flex items-center justify-between gap-3 border-b border-fd-border bg-fd-secondary/40 px-5 py-3">
           <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-fd-muted-foreground">
             {cat.label.toLowerCase()} · {cat.features.length} capabilities

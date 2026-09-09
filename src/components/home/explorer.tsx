@@ -56,7 +56,7 @@ export function DefinexExplorer({ factories }: { factories: FactoryItem[] }) {
   };
 
   return (
-    <div className="overflow-hidden rounded-lg border border-fd-border bg-fd-card/40">
+    <div className="kw-panel overflow-hidden rounded-lg border border-fd-border bg-fd-card/40">
       {/* Group filter */}
       <div
         role="group"

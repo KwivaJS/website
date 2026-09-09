@@ -61,11 +61,11 @@ const LAYERS: Layer[] = [
     n: "04",
     icon: GitBranch,
     title: "References",
-    tag: "inspire only — 0 deps",
+      tag: "inspire only — 0 deps",
     desc: "Elysia shapes @kwiva/http's lifecycle. TanStack Router shapes @kwiva/router's ergonomics. Vite+ shapes the CLI pipeline. Laravel shapes the app structure. Questpie shapes model derivation. None of them ship a single line of runtime code.",
     members: ["Elysia", "TanStack Router", "Vite+", "Laravel", "Questpie"],
     rule: "References shape the API design — zero runtime dependency (ADR-0016).",
-    href: "/adr",
+    href: "/architecture/design-principles",
     hrefLabel: "Decision records",
   },
   {
@@ -135,7 +135,7 @@ export function LayerExplorer() {
       </ol>
 
       {/* Detail panel */}
-      <div className="relative overflow-hidden rounded-lg border border-fd-border bg-fd-background p-6 sm:p-8">
+      <div className="kw-panel relative overflow-hidden rounded-lg border border-fd-border bg-fd-background p-6 sm:p-8">
         <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-gradient-to-b from-kwiva-500/60 via-kwiva-500/20 to-transparent" />
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-center gap-3">

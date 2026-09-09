@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "fumapress/client";
 import { CopyButton } from "./home/interactive";
 
 /* GitHub mark (lucide no longer ships brand icons) */
@@ -16,6 +17,30 @@ export function Kbd({ children }: { children: ReactNode }) {
     <code className="rounded bg-kwiva-500/10 px-1.5 py-0.5 font-mono text-[0.85em] font-medium text-kwiva-700 dark:text-kwiva-300">
       {children}
     </code>
+  );
+}
+
+/* Dot + tracked-out label — the "eyebrow" used above hero and CTA
+   statements. `tone="accent"` is for use on the dark kwiva-950 CTA
+   surface, where the muted-foreground token reads too low-contrast. */
+export function Eyebrow({
+  children,
+  tone = "muted",
+  className = "",
+}: {
+  children: ReactNode;
+  tone?: "muted" | "accent";
+  className?: string;
+}) {
+  return (
+    <p
+      className={`flex items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.22em] ${
+        tone === "accent" ? "text-kwiva-300/80" : "text-fd-muted-foreground"
+      } ${className}`}
+    >
+      <span className={`size-1.5 shrink-0 rounded-full ${tone === "accent" ? "bg-kwiva-400" : "bg-kwiva-500"}`} />
+      {children}
+    </p>
   );
 }
 
@@ -62,7 +87,7 @@ export function CodeWindow({
   copy?: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-fd-border bg-fd-background">
+    <div className="kw-panel overflow-hidden rounded-lg border border-fd-border bg-fd-background">
       <div className="flex items-center justify-between gap-3 border-b border-fd-border bg-fd-secondary/40 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="size-1.5 shrink-0 rounded-full bg-kwiva-500" />
@@ -72,5 +97,99 @@ export function CodeWindow({
       </div>
       <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.8]">{children}</pre>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Button — the single CTA implementation for both pages               */
+/* ------------------------------------------------------------------ */
+/*
+ * Consolidates what were four near-identical, independently drifting
+ * className strings (hero primary/secondary, final-CTA primary/GitHub)
+ * into one component with four variants. `href` is routed automatically:
+ * an internal path (or explicit `external={false}`) renders fumapress's
+ * client-side `Link`; an `https://` URL (or `external`) renders a plain
+ * anchor with `rel="noreferrer"`.
+ *
+ * The primary variant carries the page's one saturated, tinted shadow —
+ * every other surface uses the neutral `--shadow-soft-*` scale, so the
+ * brand color only shows up where it means "the primary action."
+ */
+type ButtonVariant = "primary" | "secondary" | "ghost" | "inverse" | "contrast";
+
+export function Button({
+  href,
+  variant = "secondary",
+  size = "md",
+  icon,
+  iconPosition = "trailing",
+  iconOnly = false,
+  external,
+  ariaLabel,
+  className = "",
+  children,
+}: {
+  href: string;
+  variant?: ButtonVariant;
+  size?: "sm" | "md" | "icon";
+  /** An arrow, the GitHub mark, etc. */
+  icon?: ReactNode;
+  /** "leading" for a brand mark that reads before its label (GitHub); "trailing" (default) for a direction cue like an arrow. */
+  iconPosition?: "leading" | "trailing";
+  /** Render only `icon` (requires `ariaLabel`) — for icon-only buttons like the GitHub link. */
+  iconOnly?: boolean;
+  external?: boolean;
+  ariaLabel?: string;
+  className?: string;
+  children?: ReactNode;
+}) {
+  const isExternal = external ?? /^https?:\/\//.test(href);
+
+  const sizing =
+    size === "icon"
+      ? "size-10"
+      : size === "sm"
+        ? "h-9 gap-1.5 px-4 text-[13px]"
+        : "h-10 gap-2 px-5 text-sm";
+
+  const variants: Record<ButtonVariant, string> = {
+    primary:
+      "bg-kwiva-600 text-white shadow-[var(--shadow-glow-kwiva)] hover:bg-kwiva-700 hover:shadow-[var(--shadow-glow-kwiva-lg)] hover:-translate-y-px",
+    secondary:
+      "border border-fd-border bg-fd-background text-fd-foreground shadow-[var(--shadow-soft-xs)] hover:border-kwiva-500/50 hover:bg-fd-accent hover:shadow-[var(--shadow-soft-sm)]",
+    ghost: "text-fd-muted-foreground hover:bg-fd-accent/60 hover:text-fd-foreground",
+    inverse: "border border-white/25 bg-white/10 text-white backdrop-blur-sm hover:bg-white/20",
+    contrast:
+      "bg-white text-kwiva-900 shadow-[var(--shadow-soft-sm)] hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft-md)]",
+  };
+
+  const cls = `group relative inline-flex shrink-0 items-center justify-center rounded-md font-semibold transition-all duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kwiva-500 active:translate-y-0 ${sizing} ${variants[variant]} ${className}`;
+
+  const content = iconOnly ? (
+    icon
+  ) : iconPosition === "leading" ? (
+    <>
+      {icon}
+      {children}
+    </>
+  ) : (
+    <>
+      {children}
+      {icon}
+    </>
+  );
+
+  if (isExternal) {
+    return (
+      <a href={href} aria-label={ariaLabel} rel="noreferrer" className={cls}>
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <Link href={href} aria-label={ariaLabel} className={cls}>
+      {content}
+    </Link>
   );
 }

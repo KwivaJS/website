@@ -1,10 +1,28 @@
 import { Link } from "fumapress/client";
 import { ArrowRight, ArrowUpRight } from "lucide-react";
 import { Reveal } from "../components/home/interactive";
-import { CodeWindow, GithubMark, Kbd, SectionHead } from "../components/brand";
+import { Parallax, ScrollRail, type RailSection } from "../components/home/motion";
+import { Button, CodeWindow, Eyebrow, GithubMark, Kbd, SectionHead } from "../components/brand";
 
 const ACC = "text-kwiva-600 dark:text-kwiva-400";
 const STR = "text-emerald-600 dark:text-emerald-400";
+
+/* Narrative order for the architecture rail — shared with the homepage
+   so the same signature interaction reads as one design system, not
+   two independently-built pages. */
+const railSections: RailSection[] = [
+  { id: "hero", label: "About" },
+  { id: "why", label: "01 · Why" },
+  { id: "philosophy", label: "02 · Philosophy" },
+  { id: "boundary", label: "03 · Boundary" },
+  { id: "decisions", label: "04 · Decisions" },
+  { id: "definex", label: "05 · defineX" },
+  { id: "inspiration", label: "06 · Inspiration" },
+  { id: "beliefs", label: "07 · Beliefs" },
+  { id: "evolution", label: "08 · Evolution" },
+  { id: "direction", label: "09 · Direction" },
+  { id: "cta", label: "Docs" },
+];
 
 /* ------------------------------------------------------------------ */
 /* Data                                                                */
@@ -150,15 +168,19 @@ export default function Page() {
       <title>About — Kwiva</title>
       <meta name="description" content="Why Kwiva exists: the philosophy, boundaries and design decisions behind a batteries-included TypeScript application framework." />
 
+      <ScrollRail sections={railSections} />
+
       {/* ============================ HERO ============================ */}
-      <section className="kw-hero-glow relative isolate overflow-hidden border-b border-fd-border">
+      <section id="hero" className="kw-hero-glow relative isolate overflow-hidden border-b border-fd-border">
         <div className="kw-grid pointer-events-none absolute inset-0 -z-10 [mask-image:radial-gradient(ellipse_80%_70%_at_50%_-10%,black,transparent)]" />
+        <div className="kw-noise pointer-events-none absolute inset-0 -z-10" />
+        <Parallax
+          strength={18}
+          className="pointer-events-none absolute -top-20 left-1/2 -z-10 h-[24rem] w-[36rem] -translate-x-1/2 rounded-full bg-kwiva-500/10 blur-3xl"
+        />
         <div className="mx-auto max-w-3xl py-16 text-center lg:py-24">
           <Reveal>
-            <p className="flex items-center justify-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.22em] text-fd-muted-foreground">
-              <span className="size-1.5 rounded-full bg-kwiva-500" />
-              About — Kwiva
-            </p>
+            <Eyebrow className="justify-center">About — Kwiva</Eyebrow>
           </Reveal>
           <Reveal delay={60}>
             <h1 className="mt-6 font-display font-expanded text-balance text-4xl font-bold leading-[1.06] tracking-tight text-fd-foreground sm:text-5xl lg:text-[3.2rem]">
@@ -186,7 +208,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 01 / WHY ============================ */}
-      <section className="py-16 lg:py-20">
+      <section id="why" className="py-16 lg:py-20">
         <div className="mx-auto grid max-w-4xl gap-10 lg:grid-cols-[1fr_260px] lg:gap-14">
           <Reveal>
             <div className="space-y-5 text-[15.5px] leading-relaxed text-fd-muted-foreground">
@@ -230,7 +252,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 02 / PHILOSOPHY ============================ */}
-      <section className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
+      <section id="philosophy" className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
         <div className="mx-auto max-w-4xl">
           <SectionHead
             n="02"
@@ -264,7 +286,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 03 / BOUNDARY ============================ */}
-      <section className="py-20 lg:py-24">
+      <section id="boundary" className="py-20 lg:py-24">
         <div className="mx-auto max-w-4xl">
           <SectionHead
             n="03"
@@ -273,7 +295,7 @@ export default function Page() {
             sub="One rule protects all of it: the app depends only on the framework. App code never imports an engine or a reference by name."
           />
           <Reveal>
-            <div className="overflow-hidden rounded-lg border border-fd-border bg-fd-background">
+            <div className="kw-panel overflow-hidden rounded-lg border border-fd-border bg-fd-background">
               {boundaryLayers.map((layer, i) => (
                 <div key={layer.label}>
                   {i === 1 ? (
@@ -291,7 +313,12 @@ export default function Page() {
                   ) : i > 0 ? (
                     <div className="border-t border-fd-border" />
                   ) : null}
-                  <div className="grid gap-1.5 px-5 py-4 sm:grid-cols-[220px_1fr_90px] sm:items-baseline">
+                  <div
+                    className="grid gap-1.5 px-5 py-4 sm:grid-cols-[220px_1fr_90px] sm:items-baseline"
+                    style={{
+                      backgroundColor: `color-mix(in oklab, var(--color-fd-secondary) ${i * 6}%, transparent)`,
+                    }}
+                  >
                     <p className="font-mono text-[12.5px] font-semibold text-fd-foreground">
                       {layer.label}
                     </p>
@@ -321,7 +348,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 04 / DECISIONS ============================ */}
-      <section className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
+      <section id="decisions" className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
         <div className="mx-auto max-w-4xl">
           <SectionHead
             n="04"
@@ -356,7 +383,7 @@ export default function Page() {
                 href="/architecture/design-principles"
                 className="group inline-flex items-center gap-1.5 font-mono text-[12px] font-medium text-kwiva-600 transition-colors hover:text-kwiva-700 dark:text-kwiva-400 dark:hover:text-kwiva-300"
               >
-                the design principles behind them
+                all 21 decision records
                 <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
               </Link>
             </p>
@@ -365,7 +392,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 05 / DEFINE-X ============================ */}
-      <section className="py-20 lg:py-24">
+      <section id="definex" className="py-20 lg:py-24">
         <div className="mx-auto max-w-4xl">
           <SectionHead
             n="05"
@@ -400,7 +427,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 06 / INSPIRATION ============================ */}
-      <section className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
+      <section id="inspiration" className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
         <div className="mx-auto max-w-4xl">
           <SectionHead
             n="06"
@@ -430,7 +457,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 07 / BELIEFS ============================ */}
-      <section className="py-20 lg:py-24">
+      <section id="beliefs" className="py-20 lg:py-24">
         <div className="mx-auto max-w-4xl space-y-14">
           {beliefs.map((belief, i) => (
             <Reveal key={belief} delay={i * 60}>
@@ -448,7 +475,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 08 / EVOLUTION ============================ */}
-      <section className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
+      <section id="evolution" className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
         <div className="mx-auto max-w-4xl">
           <SectionHead
             n="08"
@@ -475,7 +502,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 09 / DIRECTION ============================ */}
-      <section className="py-20 lg:py-24">
+      <section id="direction" className="py-20 lg:py-24">
         <div className="mx-auto max-w-4xl">
           <SectionHead
             n="09"
@@ -502,8 +529,20 @@ export default function Page() {
                   desc: "Modules and first-party packages, upgrade codemods, edge hardening, dev overlay — toward the public 1.0.",
                 },
               ].map((p, i) => (
-                <div key={p.title} className="rounded-lg border border-fd-border bg-fd-background p-5">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-fd-muted-foreground">
+                <div
+                  key={p.title}
+                  className={`kw-panel relative rounded-lg border p-5 ${
+                    i === 0 ? "border-kwiva-500/40 bg-fd-background" : "border-fd-border bg-fd-background"
+                  }`}
+                >
+                  {i === 0 ? (
+                    <div className="absolute inset-y-0 left-0 w-0.5 rounded-l-lg bg-gradient-to-b from-kwiva-500 via-kwiva-500/40 to-transparent" />
+                  ) : null}
+                  <p
+                    className={`font-mono text-[10px] uppercase tracking-[0.18em] ${
+                      i === 0 ? "text-kwiva-600 dark:text-kwiva-400" : "text-fd-muted-foreground"
+                    }`}
+                  >
                     phase {i + 1} — {p.phase}
                   </p>
                   <h3 className="mt-2.5 font-display font-expanded-md text-base font-bold text-fd-foreground">
@@ -527,7 +566,7 @@ export default function Page() {
       </section>
 
       {/* ============================ CTA ============================ */}
-      <section className="border-t border-fd-border bg-fd-card/40 py-16 lg:py-20">
+      <section id="cta" className="border-t border-fd-border bg-fd-card/40 py-16 lg:py-20">
         <Reveal>
           <div className="mx-auto max-w-3xl text-center">
             <h2 className="font-display font-expanded text-balance text-2xl font-bold tracking-tight text-fd-foreground sm:text-3xl">
@@ -538,26 +577,24 @@ export default function Page() {
               <Kbd>defineX</Kbd> to deployment.
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-2.5">
-              <Link
+              <Button
                 href="/docs/getting-started"
-                className="group inline-flex h-10 items-center gap-2 rounded-md bg-kwiva-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-kwiva-700"
+                variant="primary"
+                icon={<ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />}
               >
                 Start the tutorial
-                <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-              </Link>
-              <Link
-                href="/architecture"
-                className="inline-flex h-10 items-center gap-2 rounded-md border border-fd-border bg-fd-background px-5 text-sm font-semibold text-fd-foreground transition-colors hover:border-kwiva-500/50 hover:bg-fd-accent"
-              >
+              </Button>
+              <Button href="/architecture" variant="secondary">
                 Understand the architecture
-              </Link>
-              <a
+              </Button>
+              <Button
                 href="https://github.com/kwiva/kwiva"
-                className="inline-flex h-10 items-center gap-2 rounded-md border border-fd-border bg-fd-background px-5 text-sm font-semibold text-fd-foreground transition-colors hover:border-kwiva-500/50 hover:bg-fd-accent"
+                variant="secondary"
+                icon={<GithubMark className="size-4" />}
+                iconPosition="leading"
               >
-                <GithubMark className="size-4" />
                 GitHub
-              </a>
+              </Button>
             </div>
           </div>
         </Reveal>

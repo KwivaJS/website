@@ -25,7 +25,8 @@ import { BlueprintHero } from "../components/home/blueprint";
 import { DefinexExplorer, type FactoryGroup, type FactoryItem } from "../components/home/explorer";
 import { LayerExplorer } from "../components/home/layers";
 import { CapabilitySurface } from "../components/home/surface";
-import { CodeWindow, GithubMark, Kbd, SectionHead } from "../components/brand";
+import { Parallax, ScrollRail, type RailSection } from "../components/home/motion";
+import { Button, CodeWindow, Eyebrow, GithubMark, Kbd, SectionHead } from "../components/brand";
 
 /* ------------------------------------------------------------------ */
 /* Local tokens                                                        */
@@ -342,6 +343,24 @@ const journeySteps: { label: string; href?: string }[] = [
   { label: "Extend", href: "/docs/core-concepts/definex" },
 ];
 
+/* Narrative order for the architecture rail — mirrors the numbered
+   sections below exactly, so the rail's "you are here" tick always
+   matches the section heading the visitor is reading. */
+const railSections: RailSection[] = [
+  { id: "hero", label: "Kwiva" },
+  { id: "problem", label: "01 · Problem" },
+  { id: "definex", label: "02 · defineX" },
+  { id: "architecture", label: "03 · Architecture" },
+  { id: "source-of-truth", label: "04 · Source of truth" },
+  { id: "request-flow", label: "05 · Request flow" },
+  { id: "surface", label: "06 · Surface" },
+  { id: "platform", label: "07 · Platform" },
+  { id: "lifecycle", label: "08 · Production" },
+  { id: "journey", label: "09 · The path" },
+  { id: "documentation", label: "10 · Documentation" },
+  { id: "cta", label: "11 · Build" },
+];
+
 const docsIndex = {
   "Getting started": [
     { label: "Create a project", href: "/docs/getting-started/create-project" },
@@ -375,18 +394,22 @@ export default function Page() {
       <title>Kwiva — Batteries-included TypeScript application framework</title>
       <meta name="description" content="Kwiva is a batteries-included TypeScript application framework with a Laravel-shaped, framework-owned architecture — one CLI, one configuration model, one defineX language." />
 
+      <ScrollRail sections={railSections} />
+
       {/* ============================ 00 / HERO ============================ */}
-      <section className="kw-hero-glow relative isolate overflow-hidden">
+      <section id="hero" className="kw-hero-glow relative isolate overflow-hidden">
         <div className="kw-grid pointer-events-none absolute inset-0 -z-10 [mask-image:radial-gradient(ellipse_85%_65%_at_50%_-5%,black,transparent)]" />
+        <div className="kw-noise pointer-events-none absolute inset-0 -z-10" />
+        <Parallax
+          strength={20}
+          className="pointer-events-none absolute -top-16 right-[-8%] -z-10 h-[26rem] w-[26rem] rounded-full bg-kwiva-500/10 blur-3xl sm:right-[2%]"
+        />
 
         <div className="grid items-center gap-12 py-14 lg:grid-cols-[0.92fr_1.08fr] lg:gap-10 lg:py-20">
           {/* Positioning */}
           <div className="max-w-xl">
             <Reveal>
-              <p className="flex items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.22em] text-fd-muted-foreground">
-                <span className="size-1.5 rounded-full bg-kwiva-500" />
-                Kwiva · TypeScript application framework
-              </p>
+              <Eyebrow>Kwiva · TypeScript application framework</Eyebrow>
             </Reveal>
 
             <Reveal delay={50}>
@@ -409,26 +432,24 @@ export default function Page() {
 
             <Reveal delay={150}>
               <div className="mt-8 flex flex-wrap items-center gap-2.5">
-                <Link
+                <Button
                   href="/docs/getting-started"
-                  className="group inline-flex h-10 items-center gap-2 rounded-md bg-kwiva-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-kwiva-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kwiva-500"
+                  variant="primary"
+                  icon={<ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />}
                 >
                   Get started
-                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                </Link>
-                <Link
-                  href="/architecture"
-                  className="inline-flex h-10 items-center gap-2 rounded-md border border-fd-border bg-fd-background px-5 text-sm font-semibold text-fd-foreground transition-colors hover:border-kwiva-500/50 hover:bg-fd-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kwiva-500"
-                >
+                </Button>
+                <Button href="/architecture" variant="secondary">
                   Explore the architecture
-                </Link>
-                <a
+                </Button>
+                <Button
                   href="https://github.com/kwiva/kwiva"
-                  aria-label="Kwiva on GitHub"
-                  className="inline-flex size-10 items-center justify-center rounded-md border border-fd-border bg-fd-background text-fd-muted-foreground transition-colors hover:border-kwiva-500/50 hover:text-fd-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kwiva-500"
-                >
-                  <GithubMark />
-                </a>
+                  variant="secondary"
+                  size="icon"
+                  iconOnly
+                  ariaLabel="Kwiva on GitHub"
+                  icon={<GithubMark className="size-4 text-fd-muted-foreground transition-colors group-hover:text-fd-foreground" />}
+                />
               </div>
             </Reveal>
 
@@ -472,7 +493,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 01 / PROBLEM ============================ */}
-      <section className="py-20 lg:py-24">
+      <section id="problem" className="py-20 lg:py-24">
         <SectionHead
           n="01"
           kicker="The problem"
@@ -483,7 +504,7 @@ export default function Page() {
         <div className="grid gap-4 lg:grid-cols-2">
           {/* Fragmentation */}
           <Reveal>
-            <div className="h-full rounded-lg border border-fd-border bg-fd-background p-6">
+            <div className="kw-panel h-full rounded-lg border border-fd-border bg-fd-background p-6">
               <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-fd-muted-foreground">
                 The typical stack — assembled by you
               </p>
@@ -505,7 +526,7 @@ export default function Page() {
 
           {/* The system */}
           <Reveal delay={80}>
-            <div className="relative h-full rounded-lg border border-kwiva-500/40 bg-fd-background p-6">
+            <div className="kw-panel relative h-full rounded-lg border border-kwiva-500/40 bg-fd-background p-6">
               <div className="absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-kwiva-500 via-kwiva-500/40 to-transparent" />
               <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-kwiva-600 dark:text-kwiva-400">
                 Kwiva — one coherent system
@@ -537,7 +558,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 02 / LANGUAGE ============================ */}
-      <section className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
+      <section id="definex" className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
         <div className="mx-auto max-w-6xl">
           <SectionHead
             n="02"
@@ -566,7 +587,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 03 / ARCHITECTURE ============================ */}
-      <section className="py-20 lg:py-24">
+      <section id="architecture" className="py-20 lg:py-24">
         <div className="mx-auto max-w-6xl">
           <SectionHead
             n="03"
@@ -581,7 +602,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 04 / SOURCE OF TRUTH ============================ */}
-      <section className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
+      <section id="source-of-truth" className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
         <div className="mx-auto max-w-6xl">
           <SectionHead
             n="04"
@@ -612,7 +633,7 @@ export default function Page() {
             </Reveal>
 
             <Reveal delay={80}>
-              <div className="overflow-hidden rounded-lg border border-fd-border bg-fd-background">
+              <div className="kw-panel overflow-hidden rounded-lg border border-fd-border bg-fd-background">
                 <div className="border-b border-fd-border bg-fd-secondary/40 px-5 py-3">
                   <p className="font-mono text-[11px] text-fd-muted-foreground">
                     models/*.ts <span className={ACC}>→</span> IR{" "}
@@ -645,7 +666,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 05 / REQUEST FLOW ============================ */}
-      <section className="py-20 lg:py-24">
+      <section id="request-flow" className="py-20 lg:py-24">
         <div className="mx-auto max-w-6xl">
           <SectionHead
             n="05"
@@ -701,7 +722,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 06 / SURFACE ============================ */}
-      <section className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
+      <section id="surface" className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
         <div className="mx-auto max-w-6xl">
           <SectionHead
             n="06"
@@ -716,7 +737,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 07 / PLATFORM ============================ */}
-      <section className="py-20 lg:py-24">
+      <section id="platform" className="py-20 lg:py-24">
         <div className="mx-auto max-w-6xl">
           <SectionHead
             n="07"
@@ -728,7 +749,7 @@ export default function Page() {
           <div className="grid gap-4 lg:grid-cols-2">
             {/* Tenancy */}
             <Reveal>
-              <div className="h-full rounded-lg border border-fd-border bg-fd-background p-6">
+              <div className="kw-panel h-full rounded-lg border border-fd-border bg-fd-background p-6">
                 <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-fd-muted-foreground">
                   <Users className="size-3.5 text-kwiva-500" />
                   Tenancy-first data access
@@ -775,7 +796,7 @@ export default function Page() {
 
             {/* Agents */}
             <Reveal delay={80}>
-              <div className="h-full rounded-lg border border-fd-border bg-fd-background p-6">
+              <div className="kw-panel h-full rounded-lg border border-fd-border bg-fd-background p-6">
                 <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-fd-muted-foreground">
                   <Bot className="size-3.5 text-kwiva-500" />
                   An interface for agents
@@ -810,7 +831,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 08 / LIFECYCLE ============================ */}
-      <section className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
+      <section id="lifecycle" className="border-y border-fd-border bg-fd-card/40 py-20 lg:py-24">
         <div className="mx-auto max-w-6xl">
           <SectionHead
             n="08"
@@ -848,7 +869,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 09 / JOURNEY ============================ */}
-      <section className="py-20 lg:py-24">
+      <section id="journey" className="py-20 lg:py-24">
         <div className="mx-auto max-w-6xl">
           <SectionHead
             n="09"
@@ -901,7 +922,7 @@ export default function Page() {
       </section>
 
       {/* ============================ 10 / DOCUMENTATION ============================ */}
-      <section className="border-t border-fd-border bg-fd-card/40 py-20 lg:py-24">
+      <section id="documentation" className="border-t border-fd-border bg-fd-card/40 py-20 lg:py-24">
         <div className="mx-auto max-w-5xl">
           <SectionHead
             n="10"
@@ -910,7 +931,7 @@ export default function Page() {
             sub="The full portal — guides, architecture notes, decision records and API reference — is one click deep."
           />
           <Reveal>
-            <div className="overflow-hidden rounded-lg border border-fd-border bg-fd-background">
+            <div className="kw-panel overflow-hidden rounded-lg border border-fd-border bg-fd-background">
               <div className="grid divide-y divide-fd-border sm:grid-cols-2 sm:divide-x sm:divide-y-0">
                 {(Object.entries(docsIndex) as [string, { label: string; href: string }[]][]).map(
                   ([group, pages]) => (
@@ -939,7 +960,7 @@ export default function Page() {
                 {[
                   { label: "guides", href: "/guides" },
                   { label: "architecture", href: "/architecture" },
-                  { label: "design principles", href: "/architecture/design-principles" },
+                  { label: "decision records", href: "/architecture/design-principles" },
                   { label: "api reference", href: "/api" },
                   { label: "blog", href: "/blog" },
                 ].map((l) => (
@@ -954,28 +975,32 @@ export default function Page() {
               </div>
             </div>
             <div className="mt-8 text-center">
-              <Link
+              <Button
                 href="/docs/getting-started"
-                className="group inline-flex h-11 items-center gap-2 rounded-md bg-kwiva-600 px-6 text-sm font-semibold text-white transition-colors hover:bg-kwiva-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kwiva-500"
+                variant="primary"
+                icon={<ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />}
               >
                 Start learning Kwiva
-                <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-              </Link>
+              </Button>
             </div>
           </Reveal>
         </div>
       </section>
 
       {/* ============================ 11 / CTA ============================ */}
-      <section className="py-20 lg:py-24">
+      <section id="cta" className="py-20 lg:py-24">
         <Reveal>
-          <div className="relative overflow-hidden rounded-2xl border border-kwiva-700/50 bg-kwiva-950 px-6 py-16 text-center sm:px-12">
-            <div className="kw-grid pointer-events-none absolute inset-0 opacity-25" />
-            <div className="pointer-events-none absolute -top-32 left-1/2 h-64 w-[36rem] -translate-x-1/2 rounded-full bg-kwiva-500/25 blur-3xl" />
+          <div className="relative isolate overflow-hidden rounded-2xl border border-kwiva-700/50 bg-kwiva-950 px-6 py-16 text-center shadow-[var(--shadow-soft-md)] sm:px-12">
+            <div className="kw-grid pointer-events-none absolute inset-0 -z-10 opacity-25" />
+            <div className="kw-noise pointer-events-none absolute inset-0 -z-10" />
+            <Parallax
+              strength={16}
+              className="pointer-events-none absolute -top-32 left-1/2 -z-10 h-64 w-[36rem] -translate-x-1/2 rounded-full bg-kwiva-500/25 blur-3xl"
+            />
             <div className="relative">
-              <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-kwiva-300/80">
+              <Eyebrow tone="accent" className="justify-center">
                 11 — Build
-              </p>
+              </Eyebrow>
               <h2 className="mx-auto mt-4 max-w-2xl font-display font-expanded text-balance text-3xl font-bold tracking-tight text-white sm:text-5xl">
                 Build with Kwiva.
               </h2>
@@ -984,22 +1009,23 @@ export default function Page() {
                 you ship.
               </p>
               <div className="mt-8 flex flex-wrap items-center justify-center gap-2.5">
-                <Link
+                <Button
                   href="/docs/getting-started"
-                  className="group inline-flex h-10 items-center gap-2 rounded-md bg-white px-5 text-sm font-semibold text-kwiva-900 transition-transform hover:-translate-y-0.5"
+                  variant="contrast"
+                  icon={<ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />}
                 >
-                  Get started
-                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                </Link>
-                <a
+                  Create your first app
+                </Button>
+                <Button
                   href="https://github.com/kwiva/kwiva"
-                  className="inline-flex h-10 items-center gap-2 rounded-md border border-white/25 bg-white/10 px-5 text-sm font-semibold text-white backdrop-blur transition-colors hover:bg-white/20"
+                  variant="inverse"
+                  icon={<GithubMark className="size-4" />}
+                  iconPosition="leading"
                 >
-                  <GithubMark className="size-4" />
                   GitHub
-                </a>
+                </Button>
               </div>
-              <div className="mx-auto mt-8 flex max-w-md items-center gap-3 rounded-md border border-white/15 bg-black/30 px-4 py-3 text-left">
+              <div className="mx-auto mt-8 flex max-w-md items-center gap-3 rounded-md border border-white/15 bg-black/30 px-4 py-3 text-left shadow-[var(--shadow-soft-sm)]">
                 <span className="font-mono text-sm text-kwiva-300">$</span>
                 <code className="flex-1 truncate font-mono text-sm text-white">bun create kwiva</code>
                 <CopyButton variant="inverse" value="bun create kwiva" label="" />
