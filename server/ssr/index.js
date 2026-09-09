@@ -10053,7 +10053,7 @@ var sanitizeLog = (value) => {
 //#endregion
 //#region node_modules/waku/dist/lib/utils/ssr.js
 function getRecoveryBuildId() {
-	return "xzNNWhn-";
+	return "R5h_BinR";
 }
 function getVersionSkewRecoveryCode() {
 	const buildId = getRecoveryBuildId();

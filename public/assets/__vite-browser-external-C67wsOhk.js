@@ -1,0 +1,1 @@
+import{t as e}from"./flexsearch-static-Cbh_yjma.js";export default e();
