@@ -30,7 +30,7 @@ The combination is deliberately boring: an agent gets the same data, the same va
 
 The path from a model to an agent tool is the same derivation pipeline everything else uses:
 
-```
+```plaintext title="how-the-ir-becomes-ai-callable-tools.txt"
 src/app/models/*.ts ──► model IR ──► @kwiva/mcp ──► agent-callable tools
 src/app/http/controllers/*.ts ──► route manifest ──► controller actions as tools
 ```
@@ -42,7 +42,7 @@ Two sources feed the surface:
 
 Enablement is one config module. Opt in the models and controllers you want to expose, choose a transport and an auth strategy, and set a read-only switch for your entire agent surface:
 
-```ts
+```ts title="src/config/mcp.ts"
 // src/config/mcp.ts
 import { defineConfig } from '@kwiva/config'
 

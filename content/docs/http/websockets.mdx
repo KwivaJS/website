@@ -11,7 +11,7 @@ A WebSocket route is not a separate subsystem. It lives in a controller, contrib
 
 WebSocket endpoints are declared with `c.ws` inside a controller:
 
-```ts
+```ts title="declaring-a-websocket-route.ts"
 c.ws('/feed', {
   open: (ws) => posts.subscribe(ws),
   message: (ws, { data }) => {
@@ -35,7 +35,7 @@ The `ws` handle exposes `send` to push messages to that client and `subscribe`/`
 
 A WebSocket route is a route like any other: it lives under the controller prefix, inherits controller middleware and guards, and participates in the route manifest.
 
-```ts
+```ts title="route-integration.ts"
 defineController('chat', (c) => c.guard({
   beforeHandle: ({ session, error }) => {
     if (!session.user) return error('UNAUTHORIZED')
@@ -55,7 +55,7 @@ A mounted guard runs its checks on the connection before the upgrade completes, 
 
 For application messaging, the channels API is the recommended surface. Channels are named, policy-checked, and broadcast to subscribed clients:
 
-```ts
+```ts title="channels.ts"
 import { channel } from '@kwiva/http'
 
 const posts = channel('posts')
@@ -93,7 +93,7 @@ One `ws` handle corresponds to one client; state you need per connection belongs
 
 The client subscribes to channels or opens a route connection through the typed realtime layer:
 
-```ts
+```ts title="client-side.ts"
 const feed = useChannel('posts')
 ```
 
@@ -107,7 +107,7 @@ Real-time messages are validated by the same schema-driven runtime as HTTP input
 
 A controller can serve REST routes and a WebSocket route under the same prefix, sharing the same guards:
 
-```ts
+```ts title="rest-and-websockets-in-one-controller.ts"
 defineController('chat', (c) => c.guard({
   middleware: ['auth'],
 }, (g) => ({

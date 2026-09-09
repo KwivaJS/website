@@ -9,15 +9,15 @@ Pagination shapes every list — API responses, Studio tables, and client pages.
 
 Offset pagination is the default list mode: page number plus page size, with a deterministic envelope.
 
-```ts
+```ts title="offset-pagination.ts"
 const posts = await Post.query().page(3, 20)
 ```
 
-```ts
+```ts title="offset-pagination-2.ts"
 GET /api/posts?page=3&limit=20
 ```
 
-```json
+```json title="offset-pagination-3.json"
 {
   "data": [...],
   "total": 142,
@@ -39,7 +39,7 @@ Offset is a pure function of numbers, which makes it ideal for tables, deep link
 
 The generated list endpoint is strict about pagination input:
 
-```ts
+```ts title="offset-limits-and-validation.ts"
 GET /api/posts?page=1&limit=20          // ok
 GET /api/posts?page=0&limit=20          // 400 — pages are 1-based
 GET /api/posts?limit=100000             // clamped to maxLimit
@@ -52,15 +52,15 @@ GET /api/posts?page=abc                 // 400 — not a number
 
 Cursor pagination walks a stable position instead of counting rows: the client passes an opaque cursor and receives the next one. Results cannot shift between pages because the cursor is bound to ordering keys, not to the number of skipped rows.
 
-```ts
+```ts title="cursor-pagination.ts"
 const posts = await Post.query().cursorPaginate(20, { cursor: 'abc123' })
 ```
 
-```ts
+```ts title="cursor-pagination-2.ts"
 GET /api/posts?cursor=abc123&limit=20
 ```
 
-```json
+```json title="cursor-pagination-3.json"
 {
   "data": [...],
   "nextCursor": "def456",
@@ -80,7 +80,7 @@ Internally a cursor records the ordering key values of the last row on the page;
 
 Cursor pagination runs on an ordered query — the cursor encodes where the previous page stopped:
 
-```ts
+```ts title="cursor-ordering-requirements.ts"
 Post.query().orderBy({ createdAt: 'desc' }).cursorPaginate(20, { cursor })
 ```
 
@@ -111,7 +111,7 @@ The "performance at depth" row is the deciding factor at scale: offset paginatio
 
 The API config controls the envelope defaults:
 
-```ts
+```ts title="defaults.ts"
 export default defineConfig('api', {
   defaults: {
     pagination: {
@@ -133,7 +133,7 @@ Generated endpoints validate `page`, `limit`, and `cursor` against these bounds,
 
 Pagination composes with the rest of the builder: eager loads run per-page (not across all pages), and aggregates like `total` are computed without paginating the whole set:
 
-```ts
+```ts title="pagination-with-eager-loading.ts"
 const page = await Post.query()
   .where('status', 'published')
   .with('author', 'comments')

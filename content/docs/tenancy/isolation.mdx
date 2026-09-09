@@ -26,7 +26,7 @@ The pattern is uniform: **every key, path, and payload gains the tenant identity
 
 When the storage config is scoped (the default), uploaded and generated files land in tenant-prefixed paths:
 
-```
+```plaintext title="storage-isolation.txt"
 storage/{tenantId}/logos/plan.png
 storage/{tenantId}/exports/report.pdf
 ```
@@ -39,7 +39,7 @@ The storage layer composes with the rest of isolation: keys are prefixed by the 
 
 Cache keys are scoped the same way — `cache.set` and friends compose the tenant prefix into the key:
 
-```
+```plaintext title="cache-scoping.txt"
 {tenantId}:posts:list:page-1
 {tenantId}:counts:dashboard
 ```
@@ -111,7 +111,7 @@ The scalability promise — add instances, not locks — holds because tenant st
 
 Isolation participates in the test harness exactly like scoping:
 
-```ts
+```ts title="testing-isolation.ts"
 withApp(async (app) => {
   const acme = app.asTenant('acme')
   const client = createTestClient(app, { tenant: acme })

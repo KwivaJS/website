@@ -9,7 +9,7 @@ Scoping is where tenancy does its heaviest lifting. Once a tenant is resolved fo
 
 A model participates in scoping through the `tenantField` option:
 
-```ts
+```ts title="opting-a-model-in.ts"
 defineModel('projects', (f) => ({ ... }), { tenantField: 'tenantId' })
 ```
 
@@ -31,7 +31,7 @@ Scoping is enforced across the full lifecycle of a model's data:
 
 Because the predicate is injected by the query engine, handlers written against scoped models simply work:
 
-```ts
+```ts title="the-scoping-rules.ts"
 // list returns only this tenant's rows — nothing special written here
 const projects = await Project.query()
   .where('status', 'active')
@@ -60,7 +60,7 @@ That uniformity is what makes the guarantee verifiable: **a cross-tenant read or
 
 Scoping is deliberately non-disclosing. When a request targets a row that exists but belongs to another tenant:
 
-```
+```plaintext title="indistinguishable-from-404.txt"
 GET /api/projects/xyz   (xyz belongs to tenant B, request is tenant A)
 → 404
 ```
@@ -71,7 +71,7 @@ The response is indistinguishable from a missing row. The caller cannot distingu
 
 Legitimate platform operations sometimes need to cross tenant boundaries — support staff viewing a customer's account, an admin repairing a broken tenant. That is what the policy-level escape hatch is for:
 
-```ts
+```ts title="the-escape-hatch-policies-only.ts"
 // inside a policy only
 const rows = await tenant.asAdmin(() => Project.query().all())
 ```
@@ -110,7 +110,7 @@ The injected predicate is only as fast as its index. The `tenantId` column is ge
 
 The harness treats cross-tenant behavior as an assertable property:
 
-```ts
+```ts title="testing-scoping.ts"
 withApp(async (app) => {
   const acme = app.asTenant('acme')
   const globex = app.asTenant('globex')

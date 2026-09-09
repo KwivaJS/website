@@ -9,7 +9,7 @@ Production configuration is where defaults meet reality. Kwiva's answer is envir
 
 The `defineConfig` machinery supports per-environment modules. A production preset that enforces the strict CSP, discards pretty-printed logs, and tightens sessions is the same shape as the development preset that reports CSP violations and pretty-prints:
 
-```ts
+```ts title="environment-gated-configuration.ts"
 export default defineConfig('security', {
   production: {
     securityHeaders: {
@@ -25,7 +25,7 @@ The preflight gate (`verify` in the build preset) blocks the deploy when the env
 
 Production code reads configuration through `env`, not by reaching into the process environment object. Plain runtime access to untrusted process environment is not allowed; configuration is verified and typed:
 
-```ts
+```ts title="typed-environment-access.ts"
 env('DATABASE_URL')        // typed, verified, allowed
 process.env.X              // not accessible at runtime in app code
 ```
@@ -46,7 +46,7 @@ A secret rotation is a roll of the key file, not a code change: `key:generate` w
 
 Sessions, and any value that depends on the application key, are signed by `key:generate` output. Rotating the key invalidates outstanding sessions — the expected semantic for a confidential credential — and the rotation flow makes it deliberate:
 
-```bash
+```bash title="terminal"
 kwiva key:generate --rotate
 ```
 
@@ -116,7 +116,7 @@ Neither behavior changes at scale in the framework's model — but production is
 
 The production page composes with the deploy checklist. Before a deploy is green:
 
-```text
+```text title="the-checklist-before-each-deploy.txt"
 key:generate has been run and the key is out of the repository
 secret rotation flow reviewed — sessions can be invalidated deliberately
 CSP enforced (production preset), no development-only CSP allowlists

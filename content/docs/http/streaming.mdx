@@ -11,7 +11,7 @@ Streaming routes are regular routes. They run through the same middleware, guard
 
 The rule is simple: return a web `Response` and the pipeline passes it through. A stream body flows to the client as it is produced:
 
-```ts
+```ts title="response-passthrough.ts"
 c.get('/export', () => {
   const stream = new ReadableStream({
     async start(controller) {
@@ -34,7 +34,7 @@ Because the pipeline does not buffer the body, backpressure flows to your produc
 
 Event-stream endpoints can use the SSE helper on the context, which owns framing, heartbeat, and cleanup for `text/event-stream` responses. A hand-built event stream works identically through the passthrough:
 
-```ts
+```ts title="the-sse-helper.ts"
 c.get('/export.csv', () => {
   const encoder = new TextEncoder()
 
@@ -62,7 +62,7 @@ A stream body is a normal handler return. The pipeline runs the middleware and g
 
 For ongoing event delivery, an event-stream endpoint frames `data:` lines on an interval:
 
-```ts
+```ts title="sse-event-endpoints.ts"
 c.get('/events', () => {
   const events = new ReadableStream({
     start(controller) {
@@ -95,7 +95,7 @@ The framework's SSE helper handles the same framing, heartbeat, and cleanup so y
 
 Streams are pull-based: when the client disconnects, the pipeline stops pulling. Long-running producers should observe cancellation to release timers, close cursors, and stop work:
 
-```ts
+```ts title="cancellation-and-cleanup.ts"
 const stream = new ReadableStream({
   async pull(controller) {
     // yield the next item, or close when exhausted
@@ -122,7 +122,7 @@ Chunked transfer flows through the pipeline untouched. A handler that returns a 
 
 On the client, consume streams with the standard reader interface:
 
-```ts
+```ts title="client-consumption.ts"
 const res = await fetch('/api/export')
 const reader = res.body.getReader()
 const decoder = new TextDecoder()

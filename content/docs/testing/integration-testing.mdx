@@ -9,7 +9,7 @@ Integration tests are where an application proves it works as a whole — not ju
 
 Every integration test is a call to `withApp`:
 
-```ts
+```ts title="the-harness.ts"
 import { withApp, createTestClient } from '@kwiva/testing'
 
 test('posts CRUD', withApp(async (app) => {
@@ -53,7 +53,7 @@ Data handling is a trait of the harness, selected by how `withApp` is configured
 | Transaction-per-test | each test runs in a transaction rolled back afterward | the default for most tests — fast, isolated |
 | Fresh migrations | drop and migrate for the test | migration-heavy or schema-switching tests |
 
-```ts
+```ts title="database-traits.ts"
 test('seeders produce the reference catalog', withApp({ db: 'fresh' }, async (app) => {
   // migrations applied from scratch; seeders run
 }))
@@ -71,7 +71,7 @@ This matters for two kinds of test: correctness of the observability contract, a
 
 Fakes replace infrastructure while keeping the test in-process. Swap the real implementation for a recording double, run the flow, then assert on what was pushed, stored, or emitted.
 
-```ts
+```ts title="fakes.ts"
 test('welcome email on signup', withApp(async (app) => {
   queue.fake()
   storage.fake()
@@ -103,7 +103,7 @@ The general rule: **fake whatever has side effects beyond the app process; keep 
 
 Tenant behavior integrates cleanly because resolution runs in the harness:
 
-```ts
+```ts title="tenancy-in-integration-tests.ts"
 withApp(async (app) => {
   const acme = app.asTenant('acme')
   const client = createTestClient(app, { tenant: acme })

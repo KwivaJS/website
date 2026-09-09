@@ -11,7 +11,7 @@ Because rendering is framework-owned end to end (ADR-0006), the hydration contra
 
 The pipeline carries state in three moves:
 
-```
+```plaintext title="the-hydration-contract.txt"
 server: loaders run → results dehydrated into a state script at the stream tail
 client: the state script rehydrates into the data-hook cache (no refetch)
 router: resumes at the same route with the same search state
@@ -23,7 +23,7 @@ Because the cache is keyed identically on both sides, hydration is a cache trans
 
 The dehydrated payload in the document is the cache, in the same shape the hooks read:
 
-```
+```plaintext title="what-the-state-script-carries.txt"
 server state script
   ├─ loader results (keyed by route + params + search)
   ├─ deferred promises (keyed identically, resolved when the chunk arrives)
@@ -49,7 +49,7 @@ The trade-off of full hydration — a larger client-tree cost than island approa
 
 The practical consequence is that data hooks start warm. A page whose loader fetched a post hydrates into a state where `useResource(Post, id)` resolves the same record instantly; a list whose loader used `stream()` hydrates its deferred chunk when that chunk arrives. Client-side navigation later reuses the same entries, and mutations invalidate exactly what they touch. See [Data Hooks](/docs/frontend/data-hooks).
 
-```
+```plaintext title="loader-data-already-warm.txt"
 hydration → useResource(Post, id) resolves immediately
          → no isPending flash
          → invalidation refreshes from the server on change
@@ -79,7 +79,7 @@ See [Pages](/docs/frontend/pages) for the loader return contract and [Security: 
 
 Hydration stays safe when the server and client render the same tree from the same data. Streaming preserves that discipline: deferred chunks arrive as complete regions and hydrate into their boundaries, rather than patching text fragments.
 
-```
+```plaintext title="hydration-safe-rendering.txt"
 server tree == client tree
    └─ suspense boundaries hydrate with their streamed chunk
    └─ deferred values that reject → boundary error state with retry
@@ -92,7 +92,7 @@ Because the tree shape is generated from the same `definePage` files on both sid
 
 The hydration split is also the personalization boundary. Public shells can be cached with incremental regeneration, while session-specific fragments load after hydration through data hooks — `useResource` reading session-scoped endpoints that are never cached. The page skeleton is stale-safe and public; the private content is fresh per user and fetched client-side.
 
-```
+```plaintext title="personalization-after-hydration.txt"
 isr cached shell          → hydrates for every visitor from the same HTML
 session-scoped fragments  → load after hydration, keyed per user, never cached
 ```
@@ -103,7 +103,7 @@ The framework refuses to cache responses that set `Set-Cookie`, so the shell sta
 
 A compact compatibility runtime ships the same pipeline with a smaller bundle, selected in the UI configuration. Hydration semantics — cache transfer, island-free boot, the typed reviver — are unchanged; app code does not differ between runtimes.
 
-```ts
+```ts title="src/config/ui.ts"
 // src/config/ui.ts
 export default defineConfig('ui', {
   defaults: { runtime: 'react', theme: 'kwiva' },   // 'compact' for the compact runtime

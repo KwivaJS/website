@@ -20,7 +20,7 @@ Realtime is not a separate subsystem bolted onto the framework. Channels and eve
 
 A typical realtime feature flows like this: something happens in your application — a post is created, a message is posted — and that something is captured as a domain event. The event fans out to listeners (queued or synchronous) and, when a channel mapping is declared, broadcasts to a realtime channel. Subscribed clients receive the update the moment it is produced:
 
-```ts
+```ts title="how-the-pieces-fit.ts"
 // a model hook broadcasts straight to a channel
 Post.onCreated(() => broadcast('posts'))
 
@@ -36,7 +36,7 @@ Channels are the transport. Events are the meaning. If a feature is "something c
 
 Combining the pieces gives a complete, production-shaped feature. A chat channel with a membership policy:
 
-```ts
+```ts title="a-real-time-feature-end-to-end.ts"
 import { channel } from '@kwiva/http'
 
 export const chat = channel('chat.{roomId}')
@@ -46,7 +46,7 @@ export const chat = channel('chat.{roomId}')
 
 A typed event that both queues work and broadcasts the new message to the room:
 
-```ts
+```ts title="a-real-time-feature-end-to-end-2.ts"
 import { defineEvent } from '@kwiva/events'
 
 export const MessagePosted = defineEvent('message.posted', (f) => ({
@@ -62,7 +62,7 @@ export const MessagePosted = defineEvent('message.posted', (f) => ({
 
 A client component that subscribes with the same semantics:
 
-```tsx
+```tsx title="a-real-time-feature-end-to-end-3.tsx"
 const { messages, send } = useChannel(`chat.${roomId}`, {
   onMessage: (m) => setMessages((prev) => [...prev, m]),
 })

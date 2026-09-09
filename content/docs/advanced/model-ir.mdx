@@ -17,7 +17,7 @@ When Kwiva runs `kwiva dev` or `kwiva build`, it scans `src/app/models/*.ts`, ev
 
 The IR is written to the generated directory and rebuilt on every dev and build run:
 
-```
+```plaintext title="what-the-model-ir-is.txt"
 src/.kwiva/
   model-ir.json         the typed model IR
   route-manifest.json   the route IR, also derived from models and controllers
@@ -30,7 +30,7 @@ That directory is a build product. Never edit it by hand — it is regenerated d
 
 One definition fans out into the entire data plane:
 
-```
+```plaintext title="the-derivation-pipeline.txt"
 src/app/models/*.ts ──► IR (typed intermediate representation)
  ├─► database schema + migrations + seeders      (@kwiva/data)
  ├─► typed REST API (route registration)         (@kwiva/http + @kwiva/data)
@@ -42,7 +42,7 @@ src/app/models/*.ts ──► IR (typed intermediate representation)
 
 A model like this:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -80,7 +80,7 @@ Relations are written as lazy function references (`() => User`), which is what 
 
 `@kwiva/client` is generated from the same IR, so every model method and controller action appears on the client with end-to-end types. No separate schema is maintained on the client side that can drift from the server.
 
-```ts
+```ts title="typed-rpc-client.ts"
 import { createClient } from '@kwiva/client'
 export const client = createClient()
 
@@ -119,7 +119,7 @@ A single derivation pass is the whole mechanism. Where other stacks maintain a d
 
 The IR is also the hub of the type graph. Types flow from the definitions through the entire stack:
 
-```
+```plaintext title="types-flow-end-to-end.txt"
 defineModel → defineController → @kwiva/client → definePage loader → data hooks
 ```
 

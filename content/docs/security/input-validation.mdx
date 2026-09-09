@@ -19,7 +19,7 @@ The symmetry is deliberate: inputs are dense inside work items and sparse across
 
 Kwiva's validation functions are **Standard Schema compliant**, which means the ecosystem of Standard Schema adapters is interchangeable — Valibot, Zod, and any other compliant library can be dropped into any boundary without friction. The framework does not transport bespoke validation; it transports the shared contract.
 
-```ts
+```ts title="standard-schema.ts"
 // which adapter doesn't matter — every boundary accepts a Standard Schema
 import { x } from 'valibot'
 
@@ -37,7 +37,7 @@ The practical benefit: your team's schema library, wherever it lives, plugs into
 
 Models define their types with a typed field DSL, and the field definitions generate the schema that validates every operation. This is the tightest loop in the framework: the schema and the model cannot disagree, because one is derived from the other.
 
-```ts
+```ts title="field-dsl-derived-schemas.ts"
 export default defineModel('post', {
   fields: {
     title: f.string().validation((s) => s.min(1).max(200)),
@@ -52,7 +52,7 @@ Dynamic validation functions like `validation((s) => s.min(1).max(200))` operate
 
 Model operations validate before they write. `.create()` and `.update()` validate typed field definitions against the data, and dynamic path and lookup parameters are validated up front:
 
-```ts
+```ts title="validation-at-the-model-boundary.ts"
 await Post.create({ title: '' })  // throws: title must satisfy min(1)
 ```
 
@@ -62,7 +62,7 @@ Type-level and runtime checks compose — the typed layer catches the shape at c
 
 Controllers validate the route schema before the handler runs. The request body is checked against the schema, and search params and headers are validated when declared:
 
-```ts
+```ts title="validation-at-the-controller-boundary.ts"
 import { defineController } from '@kwiva/http'
 
 export default defineController('posts', (c) => ({

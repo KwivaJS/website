@@ -9,7 +9,7 @@ The factory lives in `src/app/http/auth.ts` and is discovered by convention — 
 
 ## The Full Surface
 
-```ts
+```ts title="src/app/http/auth.ts"
 // src/app/http/auth.ts
 import { defineAuth } from '@kwiva/auth'
 
@@ -84,7 +84,7 @@ The concrete storage backend is configured separately in `src/config/session.ts`
 
 `user.model` names the model backing accounts, and `user.fields` maps the model's columns onto the auth identity. The model must declare the auth fields you map (`email`, `name`, `role`) — the rest is managed for you:
 
-```ts
+```ts title="the-user-model-contract.ts"
 defineModel('users', (f) => ({
   id: f.id(),
   email: f.string().unique(),

@@ -9,7 +9,7 @@ Controllers are the authored half of the API surface. The generated half — the
 
 ## Anatomy of a Controller
 
-```ts
+```ts title="anatomy-of-a-controller.ts"
 defineController(name, (c) => ({...}), options)
 ```
 
@@ -44,7 +44,7 @@ Each handler receives the typed context. Schemas are passed as the third argumen
 
 This controller follows the five-route pattern per resource and adds a custom action:
 
-```ts
+```ts title="src/app/http/controllers/posts.ts"
 // src/app/http/controllers/posts.ts
 import { defineController } from '@kwiva/http'
 
@@ -94,7 +94,7 @@ Routes are declared declaratively: the handler runs only after validation and au
 
 Context types flow entirely from the route. `params.id` is typed as the string declared in the schema, `body` matches the body schema exactly, and `store` carries the shapes declared in `defineApp`:
 
-```ts
+```ts title="typed-handlers.ts"
 handler: async ({ params, query, body, headers, cookies, session, tenant, store, set, error }) => {
   set.status = 201
   set.headers['x-cache'] = 'miss'
@@ -111,7 +111,7 @@ Setting the status, headers, or cookies on `set` after returning a value produce
 
 Each route accepts an option object that is typechecked against the route's method:
 
-```ts
+```ts title="per-route-options.ts"
 c.post('/', handler, {
   body: { title: 'string' },
   query: { draft: 'string?' },
@@ -143,7 +143,7 @@ Any of `body`, `query`, `params`, `headers`, and `cookies` can be validated per 
 
 A guard scopes a shared requirement — a route schema, middleware, or a `beforeHandle` check — to everything declared inside it:
 
-```ts
+```ts title="guards-inside-controllers.ts"
 defineController('admin', (c) => c.guard({
   middleware: ['auth'],
   beforeHandle: ({ session, error }) => {
@@ -161,7 +161,7 @@ Guards nest and compose, and each applies its schema, middleware, and check to a
 
 Any route can be a custom action. Custom actions follow REST conventions — no verbs in paths — and appear in the typed client under the controller name:
 
-```ts
+```ts title="custom-actions.ts"
 client.posts.publish('pst_123')
 ```
 
@@ -171,7 +171,7 @@ The custom action maps to `POST /api/posts/pst_123/publish` — the fifth and si
 
 Controllers mount under their `prefix`, which concatenates with the API prefix from `src/config/api.ts`:
 
-```
+```plaintext title="mounting-and-groups.txt"
 /api/{model}                 ← generated model routes
 /api/{controller}/{...}      ← controller routes under prefix
 /api/{controller}/:id        ← resource routes
@@ -186,7 +186,7 @@ Groups are formed by composition: shared prefixes, repeated guards, and route-le
 
 A `c.ws` route is a route like any other: it lives under the controller prefix, inherits controller middleware and guards, and appears in the route manifest. Its three callbacks cover the connection lifecycle:
 
-```ts
+```ts title="websocket-routes.ts"
 chat: c.ws('/chat', {
   open: (ws) => channels.subscribe(ws),
   message: (ws, { data }) => channels.publish(data),
@@ -200,7 +200,7 @@ A mounted guard runs its checks during the handshake, so unauthenticated clients
 
 Macros turn reusable route-level keys into typechecked options. They are declared once on `defineApp` and consumed per route:
 
-```ts
+```ts title="macros.ts"
 defineApp({
   macros: {
     auth: (required: boolean, { beforeHandle }) => {

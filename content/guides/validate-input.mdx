@@ -15,7 +15,7 @@ This guide shows the two layers of validation in Kwiva: field-level rules derive
 
 Attach validation directly to fields with the `.validation()` modifier. These rules drive generated API routes, `Post.create`, and `post.update`:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -35,7 +35,7 @@ The `.validation()` modifier accepts a function that receives a schema builder a
 
 For route-specific shapes that go beyond the model, declare a Standard Schema on the handler. The schema is validated before the handler runs:
 
-```ts
+```ts title="validate-the-request-body.ts"
 import { defineController } from '@kwiva/http'
 
 export default defineController('posts', (c) => ({
@@ -52,7 +52,7 @@ export default defineController('posts', (c) => ({
 
 The same option object accepts `query`, `params`, `headers`, and `cookies` schemas:
 
-```ts
+```ts title="validate-query-and-params.ts"
 c.post('/:id', async ({ body }) => {
   return Post.update(body)
 }, {
@@ -68,7 +68,7 @@ Generated list routes also validate query parameters against the model — `wher
 
 When a schema fails, Kwiva returns HTTP 422 with the `VALIDATION` code and field-mapped issues:
 
-```json
+```json title="validation-error-responses.json"
 {
   "code": "VALIDATION",
   "issues": [{ "path": "title", "message": "Invalid value" }]
@@ -79,7 +79,7 @@ When a schema fails, Kwiva returns HTTP 422 with the `VALIDATION` code and field
 
 Send an invalid payload to the route, then a valid one:
 
-```bash
+```bash title="terminal"
 curl -X POST http://localhost:3000/posts \
   -H "Content-Type: application/json" \
   -d '{"body": "too short"}'
@@ -87,7 +87,7 @@ curl -X POST http://localhost:3000/posts \
 
 This returns 422 with the `VALIDATION` code. A payload matching the schema passes through to the handler:
 
-```bash
+```bash title="terminal"
 curl -X POST http://localhost:3000/posts \
   -H "Content-Type: application/json" \
   -d '{"title": "Hello World", "body": "A sufficiently long body"}'

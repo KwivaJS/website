@@ -11,7 +11,7 @@ Roles are deliberately unmagical. They are enum values on a model column, stored
 
 A role is a value on the user record, nothing more magical:
 
-```ts
+```ts title="roles-as-data.ts"
 defineModel('users', (f) => ({
   id: f.id(),
   email: f.string().unique(),
@@ -52,7 +52,7 @@ Upgrading a user to admin is a single field update, and it is immediately visibl
 
 Seeding roles follows the same conventions as seeding any data. Because role data is just enum values on user records, factories and seeders compose naturally:
 
-```ts
+```ts title="seeding-strategies.ts"
 // src/database/seeders/
 Admin.factory().create({ role: 'admin', email: 'admin@example.com' })
 Standard.factory().count(10).create({ role: 'user' })
@@ -72,7 +72,7 @@ The division of labor is strict:
 
 Policies read role values and translate them into decisions:
 
-```ts
+```ts title="the-role-permission-field-and-policies.ts"
 export default definePolicy('posts', (user, ability, resource) => {
   if (user.role === 'admin') return true
   switch (ability) {

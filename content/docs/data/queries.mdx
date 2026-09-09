@@ -7,7 +7,7 @@ Models expose a comprehensive, fully typed query builder. You start from the mod
 
 ## Basic Querying
 
-```ts
+```ts title="basic-querying.ts"
 const allPosts = await Post.query().get()
 const post = await Post.findOrFail(id)          // throws NotFoundError → 404 mapping
 const post = await Post.first({ where: { slug: 'hello' } })
@@ -30,7 +30,7 @@ await post.delete()
 
 The three-argument form — `.where(field, operator, value)` — and the shorthand `.where(field, value)` treat any scalar value as equality:
 
-```ts
+```ts title="where-clauses.ts"
 Post.query()
   .where('status', 'published')                  // shorthand equality
   .where('views', '>', 100)                      // operator form
@@ -61,7 +61,7 @@ Operators accepted by the three-argument form: `=`, `!=`, `>`, `>=`, `<`, `<=`, 
 
 Compose complex predicates with a nested function form so AND/OR precedence is explicit:
 
-```ts
+```ts title="logical-grouping.ts"
 Post.query()
   .where((q) => q.where('status', 'draft').orWhere('status', 'archived'))
   .where('authorId', authorId)
@@ -69,7 +69,7 @@ Post.query()
 
 ## Selects and Joins
 
-```ts
+```ts title="selects-and-joins.ts"
 Post.query()
   .join('users', 'users.id', '=', 'posts.authorId')
   .select('posts.*', 'users.name as authorName')
@@ -82,7 +82,7 @@ Post.query()
 
 ## Aggregation and Grouping
 
-```ts
+```ts title="aggregation-and-grouping.ts"
 const count = await Post.query().count()
 const sum = await Post.query().sum('views')
 const avg = await Post.query().avg('views')
@@ -107,7 +107,7 @@ const stats = await Post.query()
 
 ## Ordering and Pagination
 
-```ts
+```ts title="ordering-and-pagination.ts"
 Post.query()
   .orderBy('createdAt', 'desc')
   .orderBy({ createdAt: 'desc', views: 'desc' })
@@ -123,7 +123,7 @@ Ordering accepts a field/operator pair or an object map. `.page()` and `.cursorP
 
 Clauses are chainable all the way down, and a scoped builder can be factored into a helper so the same constraint set is reused across call sites:
 
-```ts
+```ts title="ordering-and-pagination-2.ts"
 function published(q: ReturnType<typeof Post.query>) {
   return q.where('status', 'published')
 }
@@ -138,7 +138,7 @@ The builder accumulates constraints and executes once on `get()` — build lazil
 
 The escape hatch keeps you inside typed tooling while breaking free of the builder:
 
-```ts
+```ts title="raw-sql.ts"
 const rows = await db.raw<{ n: number }>('select count(*) n from posts')
 
 await db.insert({ title: 'Test' }).into('posts')
@@ -155,7 +155,7 @@ await db.delete().from('posts').where('id', id)
 
 For correctness under contention, `SELECT` can take row locks:
 
-```ts
+```ts title="locks.ts"
 await Post.query().where('id', id).forUpdate().get()
 await Post.query().where('id', id).sharedLock().get()
 ```

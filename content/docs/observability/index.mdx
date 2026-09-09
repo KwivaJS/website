@@ -11,7 +11,7 @@ When a request arrives, a single correlation story unfolds across the stack: the
 
 A production request rarely stays in one place. Kwiva makes every hop visible and slotable into a single narrative:
 
-```text
+```text title="the-correlation-story.txt"
 request arrives
   ├─ request-id middleware assigns a correlation ID
   ├─ session and tenant middleware attach context
@@ -47,7 +47,7 @@ When no exporters are configured, all of it runs as a **no-op with negligible ov
 
 Telemetry exports through the OpenTelemetry contract — traces and metrics over OTLP to a collector-compatible endpoint by default:
 
-```ts
+```ts title="src/config/telemetry.ts"
 // src/config/telemetry.ts
 export default defineConfig('telemetry', {
   defaults: {
@@ -94,7 +94,7 @@ Three principles keep observability safe to ship everywhere:
 
 The same telemetry that feeds a collector renders in the development overlay while you work — request timeline, span waterfall, errors with their correlation IDs, and the query list. You can also read it programmatically in the `kwiva console` REPL:
 
-```text
+```text title="the-development-surface.txt"
 app.trace.last()      // the most recent span tree
 app.logs.tail(20)     // the last 20 log lines
 ```

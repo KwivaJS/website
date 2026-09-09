@@ -7,7 +7,7 @@ Seeders populate your database with initial or fixture data. They are the bridge
 
 ## Defining a Seeder
 
-```ts
+```ts title="src/database/seeders/01-users.ts"
 // src/database/seeders/01-users.ts
 import { defineSeeder } from '@kwiva/data'
 
@@ -25,7 +25,7 @@ export default defineSeeder('users', async ({ factory, db }) => {
 
 ## Running Seeders
 
-```bash
+```bash title="terminal"
 kwiva db:seed                # run all seeders in order
 kwiva db:seed --seeder=users # run only the named seeder
 kwiva db:seed --fresh        # drop + migrate + seed
@@ -45,7 +45,7 @@ kwiva db:reset               # drop + migrate + seed (equivalent fresh path)
 
 Seeders run in **lexicographic filename order**, so `01-users.ts` runs before `02-posts.ts`. Prefix numerically when a seeder depends on records created by an earlier one:
 
-```
+```plaintext title="ordering-by-filename.txt"
 src/database/seeders/
   01-users.ts        # tenants, users, roles
   02-posts.ts        # authored content
@@ -60,7 +60,7 @@ Seeders are **safe to re-run**. The contract is anchored in upsert-based default
 
 Concretely, prefer stable identifiers when seeding:
 
-```ts
+```ts title="the-idempotency-contract.ts"
 export default defineSeeder('users', async ({ factory }) => {
   await factory(User).create({ email: 'admin@acme.dev', role: 'admin' })
   await factory(User).create({ email: 'editor@acme.dev', role: 'editor' })
@@ -73,7 +73,7 @@ Re-running inserts these once, not twice. For ephemeral volume use factories wit
 
 Because factories understand relations, seeders compose naturally:
 
-```ts
+```ts title="seeding-relations.ts"
 export default defineSeeder('posts', async ({ factory }) => {
   const admin = await User.first({ where: { email: 'admin@acme.dev' } })
   await factory(Post).count(5).create({ author: admin })
@@ -86,7 +86,7 @@ Relation arguments on a factory create resolve to real related rows, and many-to
 
 The idempotency contract rewards **lookups** over blind creation. When a seeder needs a record that may already exist from an earlier run or an upstream seeder, resolve it first:
 
-```ts
+```ts title="lookups-over-creation.ts"
 export default defineSeeder('settings', async ({ db }) => {
   const tenant = await Tenant.first({ where: { slug: 'acme' } })
   const settings = await Settings.first({ where: { tenantId: tenant.id } })

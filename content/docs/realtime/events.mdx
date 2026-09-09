@@ -11,7 +11,7 @@ Events are also the seam between your domain code and its side effects. Webhooks
 
 Events are defined per file with `defineEvent`:
 
-```ts
+```ts title="src/app/events/user-signed-up.ts"
 // src/app/events/user-signed-up.ts
 import { defineEvent } from '@kwiva/events'
 
@@ -32,7 +32,7 @@ export const UserSignedUp = defineEvent('user.signed-up', (f) => ({
 
 The payload fields are not documentation — they are the contract. Emitting the event requires the declared fields, listeners receive them typed, and any broadcast derived from the event uses the same shape:
 
-```ts
+```ts title="typed-payloads-from-the-field-dsl.ts"
 import { defineEvent } from '@kwiva/events'
 
 export const MessagePosted = defineEvent('message.posted', (f) => ({
@@ -48,7 +48,7 @@ Because validation flows from field types, an emit with a missing `roomId` fails
 
 An event is emitted with a plain `await`:
 
-```ts
+```ts title="emitting-an-event.ts"
 await MessagePosted.emit({ roomId, messageId })
 ```
 
@@ -67,7 +67,7 @@ The options object controls where an event goes and how its work executes:
 | `listeners` | `string[]` | Named listeners to attach to this event |
 | `queued` | `boolean` | Runs listeners through the queue transport; set `false` for synchronous execution |
 
-```ts
+```ts title="event-options.ts"
 export const MessagePosted = defineEvent('message.posted', (f) => ({
   roomId: f.uuid(),
   messageId: f.uuid(),
@@ -85,7 +85,7 @@ With `queued: true`, the listeners named in the array execute on the queue, keep
 
 Every event declares how its work is handled. Listeners attach by name and receive the typed event:
 
-```ts
+```ts title="listeners-queued-or-sync.ts"
 MessagePosted.on('send-webhook', async (event) => {
   await sendWebhook(event)
 })
@@ -104,7 +104,7 @@ Listener files auto-discover from `src/app/events/listeners/` — a file named a
 
 An event can declare a channel mapping, turning every emit into a realtime broadcast:
 
-```ts
+```ts title="broadcasting-to-channels.ts"
 {
   broadcast: (e) => `chat.${e.roomId}`,
 }
@@ -114,13 +114,13 @@ The mapping function receives the typed payload and returns a channel name. Beca
 
 A separate broadcast surface exists for ad-hoc use. An event like `user.signed-up` can be broadcast per user without a declared mapping:
 
-```ts
+```ts title="broadcasting-to-channels-2.ts"
 UserSignedUp.broadcast('user.{id}')
 ```
 
 Broadcasts are policy-checked on the channel, so client-side subscribers are still subject to the same authorization as any other channel join. The `broadcast` helper also stands alone for server-side fan-out from anywhere in the application:
 
-```ts
+```ts title="broadcasting-to-channels-3.ts"
 import { broadcast } from '@kwiva/http'
 
 broadcast('chat.42', { type: 'message', body: 'Hello' })
@@ -130,13 +130,13 @@ broadcast('chat.42', { type: 'message', body: 'Hello' })
 
 The tightest integration is the model hook sugar: a model lifecycle hook can broadcast straight to a channel:
 
-```ts
+```ts title="model-events-to-broadcast.ts"
 Post.onCreated(() => broadcast('posts'))
 ```
 
 This is the pattern for "a record changed, refresh the list": the create happens, the hook fires, and every subscribed client is notified. It composes with the other lifecycle hooks and keeps broadcasting declarative rather than scattered across controllers. Handlers can pass additional context:
 
-```ts
+```ts title="model-events-to-broadcast-2.ts"
 Post.onUpdated(async (post) => broadcast('posts', { id: post.id, status: post.status }))
 ```
 
@@ -144,7 +144,7 @@ Post.onUpdated(async (post) => broadcast('posts', { id: post.id, status: post.st
 
 Events emitted inside a database transaction are stored and delivered only after the transaction commits — an emit that rolls back never fires:
 
-```ts
+```ts title="transactional-outbox-v1.ts"
 await db.transaction(async (tx) => {
   const message = await Message.create({ roomId, body })
 
@@ -158,7 +158,7 @@ This outbox behavior closes the hardest race in event-driven code: the gap betwe
 
 Event subscriptions support wildcard matching, letting a single handler observe an entire event family:
 
-```ts
+```ts title="wildcards-v1.ts"
 import { events } from '@kwiva/events'
 
 events.on('user.*', async (event) => {

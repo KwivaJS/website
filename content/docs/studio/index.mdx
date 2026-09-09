@@ -34,7 +34,7 @@ Studio is also a client of the same generated REST routes and typed client your 
 
 ## The Mental Model
 
-```
+```plaintext title="the-mental-model.txt"
 Controller stays slim                     Studio stays generated
        │                                        │
 defineModel ──► model IR ──► REST routes ──► @kwiva/client ──► Studio screens
@@ -73,13 +73,13 @@ There is no mode in which Studio is a bypass. It is a client of the same generat
 
 Enable Studio in your app configuration, then open it from the CLI. The fastest path:
 
-```bash
+```bash title="terminal"
 kwiva db:studio
 ```
 
 Before that works, turn it on in `src/config/app.ts`:
 
-```ts
+```ts title="src/config/app.ts"
 // src/config/app.ts
 export default defineConfig('app', {
   defaults: {

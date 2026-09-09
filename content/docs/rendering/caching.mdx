@@ -19,7 +19,7 @@ Each layer answers a different question, and they compose: a route rule can cach
 
 Route rules are declared on server routes and apply to every page under the path:
 
-```ts
+```ts title="src/routes/rules.ts"
 // src/routes/rules.ts
 import { defineServerRoute } from '@kwiva/http'
 
@@ -51,7 +51,7 @@ Rules apply **before** context assembly — a cache hit serves the response and 
 
 Rules are path-scoped, so the same application mixes strategies: a marketing site renders statically, product pages regenerate incrementally, and an account section is always dynamic.
 
-```
+```plaintext title="per-path-configuration.txt"
 /products/**   → isr: 300            (regenerate every 5 minutes)
 /pricing/**    → static: true        (built once)
 /account/**    → (no rule)           (dynamic SSR per request)
@@ -63,7 +63,7 @@ Glob patterns cover families of pages with a single declaration, and more specif
 
 This layer decides what the response cache stores, and for how long. On-demand invalidation reaches into it from anywhere with server authority — jobs, tasks, event handlers:
 
-```ts
+```ts title="layer-1-route-rules-http.ts"
 invalidateTags(['catalog'])
 ```
 
@@ -73,7 +73,7 @@ purging the cached responses tagged `catalog`. Head and meta serialize per route
 
 Below HTTP responses, the model cache stores computed values with TTL and tags. Models can declare caching directly — list and get responses cached per query signature:
 
-```ts
+```ts title="layer-2-model-cache-server-values.ts"
 defineModel('products', (f) => ({ ... }), {
   cache: { ttl: 120, tags: ['catalog'], swr: true },
 })
@@ -83,7 +83,7 @@ The cache key combines the model, the query signature, and the tenant. Model wri
 
 The explicit cache API covers keyed values no other layer owns:
 
-```ts
+```ts title="layer-2-model-cache-server-values-2.ts"
 import { cache } from '@kwiva/core'
 
 const summary = await cache.wrap('dashboard.summary', () => computeSummary(), { ttl: 60 })
@@ -105,7 +105,7 @@ Backends are mounted in `src/config/cache.ts`: memory in development, a shared s
 
 On the browser, data hooks manage freshness with `staleTime` (how long a value is considered current) and `gcTime` (how long unused entries are retained):
 
-```tsx
+```tsx title="layer-3-client-cache-data-hooks.tsx"
 const { data } = useList(Post, { where: { status: 'published' }, staleTime: 30_000 })
 ```
 
@@ -128,7 +128,7 @@ Same-named tags connect the layers: a model update tags its route responses and 
 
 Caching does not have to exclude logged-in users. The split pattern keeps the public shell cacheable and the private content fresh:
 
-```
+```plaintext title="personalization-with-cached-shells.txt"
 /products/** isr cached shell        → same for every visitor
 session-scoped fragments            → loaded client-side via useResource
                                      → keyed per user, never cached

@@ -9,7 +9,7 @@ description: "@kwiva/mcp — expose your application to AI agents as MCP tools, 
 
 Configured through `src/config/mcp.ts`:
 
-```ts
+```ts title="src/config/mcp.ts"
 // src/config/mcp.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -59,7 +59,7 @@ Controller actions become tools with their exact input and output types — for 
 
 From the agent side, point the client at the MCP endpoint:
 
-```json
+```json title="client-configuration.json"
 {
   "mcpServers": {
     "acme": {
@@ -74,7 +74,7 @@ From the agent side, point the client at the MCP endpoint:
 
 Define your own tools with `defineMcpTool`:
 
-```ts
+```ts title="src/app/mcp/tools.ts"
 // src/app/mcp/tools.ts
 import { defineMcpTool } from '@kwiva/mcp'
 

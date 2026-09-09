@@ -40,7 +40,7 @@ Every other tool is withheld, even though the underlying routes exist. `readOnly
 
 `invoices_list` is the richest tool of the family because it inherits the query surface of the list route. The agent can filter, page, and order the same way an HTTP client can:
 
-```ts
+```ts title="the-list-tool-s-shape.ts"
 // invoices_list — the tool input the agent sees
 {
   where: {
@@ -58,7 +58,7 @@ The `where` shape is the same filter grammar the list route accepts, so agents c
 
 Custom controller actions become tools with their exact input and output types. If a controller exposes a summary action, the agent gets a `reports_summary` tool that accepts the action's typed inputs and returns its typed output:
 
-```ts
+```ts title="src/app/http/controllers/reports.ts"
 // src/app/http/controllers/reports.ts
 export default defineController('reports', (c) => ({
   summary: c.get('/summary', async ({ query }) => {
@@ -72,7 +72,7 @@ export default defineController('reports', (c) => ({
 
 The `controllers` option in the MCP config opts this controller in:
 
-```ts
+```ts title="controller-actions-as-tools.ts"
 defaults: {
   models: ['invoices', 'customers'],
   controllers: ['reports'],   // → reports_summary tool
@@ -87,7 +87,7 @@ Controller action tools are how a generated surface stays small while still expr
 
 For behavior that does not map to a route — composing data, calling out to a provider, generating content — define a tool directly:
 
-```ts
+```ts title="src/app/mcp/tools.ts"
 // src/app/mcp/tools.ts
 import { defineMcpTool } from '@kwiva/mcp'
 

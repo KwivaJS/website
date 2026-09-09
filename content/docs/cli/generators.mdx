@@ -30,7 +30,7 @@ Generators share one pipeline. The `kwiva` CLI resolves the requested name, vali
 
 The placement rules mirror the [defineX convention](/docs/core-concepts/definex):
 
-```text
+```text title="how-generators-work.txt"
 src/app/models/posts.ts            ← defineModel, singular filename
 src/app/http/controllers/posts.ts  ← defineController, plural filename
 src/app/jobs/send-welcome.ts       ← defineJob, kebab-case filename
@@ -54,13 +54,13 @@ Names that violate the conventions are rejected by the generator rather than pro
 
 ### Model — `make:model`
 
-```bash
+```bash title="terminal"
 kwiva make:model post
 ```
 
 Generates the model file plus a model-diff migration and a factory:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -76,7 +76,7 @@ The migration is derived from the model definition — add fields to the model a
 
 ### Controller — `make:controller`
 
-```bash
+```bash title="terminal"
 kwiva make:controller post
 ```
 
@@ -88,7 +88,7 @@ Generates `src/app/http/controllers/posts.ts` with a `defineController` scaffold
 
 ### Service — `make:service`
 
-```bash
+```bash title="terminal"
 kwiva make:service billing
 ```
 
@@ -96,7 +96,7 @@ Generates `src/app/services/billing.ts` with a `defineService` scaffold for busi
 
 ### Job and Event — `make:job` / `make:event`
 
-```bash
+```bash title="terminal"
 kwiva make:job send-welcome
 kwiva make:event user-signed-up
 ```
@@ -105,7 +105,7 @@ Job stubs include the handler context, payload schema, and options block — `qu
 
 ### Policy — `make:policy`
 
-```bash
+```bash title="terminal"
 kwiva make:policy post
 ```
 
@@ -113,7 +113,7 @@ Generates `src/app/policies/posts.ts` with a `definePolicy` scaffold. The policy
 
 ### Task — `make:task`
 
-```bash
+```bash title="terminal"
 kwiva make:task cleanup-sessions
 ```
 
@@ -121,7 +121,7 @@ Generates `src/app/tasks/cleanup.ts` with a `defineTask` scaffold — handler, `
 
 ### Command — `make:command`
 
-```bash
+```bash title="terminal"
 kwiva make:command import-legacy
 ```
 
@@ -129,7 +129,7 @@ Generates `src/app/console/import-legacy.ts` with a `defineCommand` scaffold inc
 
 ### Page — `make:page`
 
-```bash
+```bash title="terminal"
 kwiva make:page posts.$id
 ```
 
@@ -137,7 +137,7 @@ Generates `src/ui/pages/posts.$id.tsx` — a `definePage` with `loader`, `compon
 
 ### Seeder — `make:seeder`
 
-```bash
+```bash title="terminal"
 kwiva make:seeder posts
 ```
 
@@ -145,7 +145,7 @@ Generates `src/database/seeders/posts.ts` with a `defineSeeder` scaffold for ide
 
 ### Module — `make:module`
 
-```bash
+```bash title="terminal"
 kwiva make:module analytics
 ```
 
@@ -153,7 +153,7 @@ Scaffolds `modules/analytics/` — an installable, composable unit with slots fo
 
 ### Test — `make:test`
 
-```bash
+```bash title="terminal"
 kwiva make:test post
 ```
 

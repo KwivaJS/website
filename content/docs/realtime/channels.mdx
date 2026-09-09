@@ -11,7 +11,7 @@ Where raw sockets give you one connection, channels give you a named, policy-che
 
 A channel is defined once with the `channel()` factory from `@kwiva/http`:
 
-```ts
+```ts title="defining-a-channel.ts"
 import { channel } from '@kwiva/http'
 
 export const chat = channel('chat.{roomId}')
@@ -44,7 +44,7 @@ The framework handles the transport details — the WebSocket upgrade, lifecycle
 
 Channel authorization is policy-based and mirrors REST authorization. The policy receives the resolved `params` and the caller's `session`, and returns a boolean:
 
-```ts
+```ts title="authorization-at-the-handshake.ts"
 export const chat = channel('chat.{roomId}')
   .policy(({ params, session }) => session.user && isMember(session.user, params.roomId))
 ```
@@ -55,7 +55,7 @@ A member check like `isMember` keeps the rule readable: the room segment is reso
 
 After subscription, inbound messages route through the handlers defined on the channel. A message handler receives the typed payload and a reference to the originating socket:
 
-```ts
+```ts title="handling-messages.ts"
 .on('message', ({ payload }) => broadcast(payload))
 ```
 
@@ -65,7 +65,7 @@ The handler shown echoes every message back to the whole room — the canonical 
 
 Anywhere in your application, the `broadcast` function pushes a payload into a channel by name:
 
-```ts
+```ts title="broadcasting-from-the-server.ts"
 // server-side emit from anywhere in your app
 import { broadcast } from '@kwiva/http'
 
@@ -78,13 +78,13 @@ Broadcast calls are ordinary server-side operations — they can run in a contro
 
 The most common broadcast is "this record changed", and Kwiva provides hook sugar for it on models:
 
-```ts
+```ts title="model-driven-broadcasting.ts"
 Post.onCreated(() => broadcast('posts'))
 ```
 
 On create, everyone subscribed to `posts` is notified. The same pattern composes with the other lifecycle hooks, and because the broadcast is a plain call, handlers can pass additional context:
 
-```ts
+```ts title="model-driven-broadcasting-2.ts"
 Post.onUpdated(async (post) => broadcast('posts', { id: post.id, status: post.status }))
 ```
 
@@ -96,7 +96,7 @@ Channels inherit the application's tenancy rules. When tenancy is configured, su
 
 Presence tracks who is joined to a channel. On a channel with presence enabled, the framework records join and leave events, and clients can read the member set:
 
-```ts
+```ts title="presence-v1.ts"
 // server side
 .presence(true)
 
@@ -110,7 +110,7 @@ Presence powers "who is online in this room" UI without custom bookkeeping. The 
 
 Channels also compose with raw socket routes. A `c.ws` endpoint inside a controller subscribes a socket to a channel on open and publishes inbound frames on message:
 
-```ts
+```ts title="channel-publishing-from-a-route.ts"
 chat: c.ws('/chat', {
   open: (ws) => chat.subscribe(ws),
   message: (ws, { data }) => chat.publish(data),

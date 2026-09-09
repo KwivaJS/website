@@ -11,7 +11,7 @@ Route protection composes. The auth machinery mounts as middleware in the owned 
 
 The `auth` middleware implements `requireAuth` semantics: when no session user exists, the request is rejected in the pipeline before any handler runs.
 
-```ts
+```ts title="requireauth-middleware.ts"
 defineMiddleware('auth', async (ctx, next) => {
   if (!ctx.session.user) return error('UNAUTHORIZED')
   return next()
@@ -33,7 +33,7 @@ Beside the auth middleware there is the `requireAuth` guard you can attach direc
 
 Controllers reuse the same middleware:
 
-```ts
+```ts title="scoping-not-just-wiring.ts"
 export default defineController('posts', (c) => c.guard({
   middleware: ['auth', 'tenant'],
 }, (g) => ({
@@ -48,7 +48,7 @@ Here `guard` applies `auth` (a signed-in user) and `tenant` (a resolved tenant) 
 
 For route-level toggling, the `auth` macro gives a one-word switch:
 
-```ts
+```ts title="the-auth-macro.ts"
 defineApp({
   macros: {
     auth: (required: boolean, { beforeHandle }) => {
@@ -67,7 +67,7 @@ The macro installs the same `requireAuth` stage into the route's `beforeHandle` 
 
 Frontend pages are protected before they render. A `definePage` accepts a `beforeLoad` hook that runs in the load cycle; throwing a redirect there sends the visitor somewhere else without ever rendering the protected content:
 
-```tsx
+```tsx title="page-level-beforeload-guards.tsx"
 export default definePage({
   beforeLoad: ({ session }) => {
     if (!session.user) throw redirect({ to: '/login' })

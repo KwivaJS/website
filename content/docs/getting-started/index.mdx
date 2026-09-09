@@ -15,7 +15,7 @@ Getting a Kwiva application running is a two-step process: install the runtime, 
 
 Install or upgrade Bun:
 
-```bash
+```bash title="terminal"
 curl -fsSL https://bun.sh/install | bash
 bun --version
 ```
@@ -50,7 +50,7 @@ This is equivalent to `kwiva new my-app`. It creates a new project in `my-app/` 
 
 Choose a mode that matches how your application will run. The mode is set once at scaffold time and stays baked into the project's defaults.
 
-```bash
+```bash title="terminal"
 # Specify a mode
 bun create kwiva my-app --mode=api+spa
 ```
@@ -102,7 +102,7 @@ You'll use `kwiva make:model`, `kwiva db:migrate`, and `kwiva dev` heavily in th
 
 ## Start the Development Server
 
-```bash
+```bash title="terminal"
 cd my-app
 bun run dev
 ```
@@ -122,7 +122,7 @@ The development server starts at `http://localhost:3000` and gives you:
 
 A fast first loop that exercises the whole stack:
 
-```bash
+```bash title="terminal"
 bun create kwiva my-app && cd my-app
 bun run dev                     # home page at localhost:3000
 kwiva make:model post           # model + migration + factory stub

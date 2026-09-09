@@ -9,7 +9,7 @@ Guards are how you avoid repeating the same authentication and authorization wir
 
 ## Anatomy of a Guard
 
-```ts
+```ts title="anatomy-of-a-guard.ts"
 c.guard({ schema, middleware, beforeHandle }, (g) => ({...routes}))
 ```
 
@@ -27,7 +27,7 @@ The first object and the builder are the entire surface. Everything a guard can 
 
 The most common pattern is a controller that requires authentication and tenant resolution for every route:
 
-```ts
+```ts title="a-mount-level-guard.ts"
 import { defineController, error } from '@kwiva/http'
 
 defineController('admin', (c) => c.guard({
@@ -47,7 +47,7 @@ Every route inside the guard inherits the `auth` middleware, and the `beforeHand
 
 Guards compose: wrap one guard inside another, and the inner requirements layer on top of the outer ones.
 
-```ts
+```ts title="nesting-guards.ts"
 defineController('projects', (c) => c.guard({
   beforeHandle: ({ session, error }) => {
     if (!session.user) return error('UNAUTHORIZED')
@@ -74,7 +74,7 @@ The outer check runs first: if there is no session, the inner ownership check ne
 
 A guard can also declare a schema that applies to every route inside it:
 
-```ts
+```ts title="guard-schema.ts"
 c.guard({
   schema: { params: { id: 'string' } },
   middleware: ['tenant'],
@@ -95,7 +95,7 @@ Guards run during `onBeforeHandle`, after validation. The ordering guarantee mat
 
 Authentication guards check that a session exists before any route logic runs:
 
-```ts
+```ts title="auth-guards.ts"
 c.guard({
   beforeHandle: ({ session, error }) => {
     if (!session.user) return error('UNAUTHORIZED')
@@ -109,7 +109,7 @@ The `requireAuth` middleware serves the same purpose without a custom function, 
 
 At the route level, the `permission` option gates enforcement through policies, which is where the real authorization surface lives:
 
-```ts
+```ts title="permission-guards.ts"
 c.patch('/:id', handler, { permission: 'posts.update' })
 ```
 
@@ -119,7 +119,7 @@ Policies are `defineX` factories evaluated against the session user, ability, an
 
 A mount guard asserts group requirements; the `permission` option asserts per-operation abilities. The two compose routinely — the guard establishes who is allowed in, the permission decides what each route may do:
 
-```ts
+```ts title="route-permissions-inside-a-guard.ts"
 defineController('posts', (c) => c.guard({
   middleware: ['auth'],
   beforeHandle: ({ session, error }) => {
@@ -142,7 +142,7 @@ Guards apply to WebSocket routes declared inside them. The mounted guard's middl
 
 A guard's `beforeHandle` either returns `undefined` to continue, or returns a response to short-circuit. The `error` helper returns a typed error response, which is what produces `UNAUTHORIZED` and `FORBIDDEN`:
 
-```ts
+```ts title="what-a-guard-returns.ts"
 beforeHandle: ({ session, error }) => {
   if (!session.user) return error('UNAUTHORIZED')
 }

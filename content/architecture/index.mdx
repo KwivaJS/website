@@ -12,7 +12,7 @@ application touches is `@kwiva/*`; everything underneath is framework-owned.
 
 ## Layers
 
-```
+```plaintext title="layers.txt"
 ┌──────────────────────────────────────────────────────────┐
 │  APP — imports only @kwiva/* · writes defineX(...) only  │
 ├──────────────────────────────────────────────────────────┤
@@ -69,7 +69,7 @@ switch internal implementation without touching your application.
 
 One model definition drives the entire data plane:
 
-```
+```plaintext title="model-derived-architecture.txt"
 defineModel → IR (intermediate representation)
   ├─→ Database schema + migrations     (@kwiva/data)
   ├─→ REST API (5 routes per model)    (@kwiva/http + @kwiva/data)
@@ -81,7 +81,7 @@ defineModel → IR (intermediate representation)
 
 ## Request Flow
 
-```
+```plaintext title="request-flow.txt"
 client → runtime preset/adapter → @kwiva/http pipeline
   ├─ page route  → @kwiva/router → @kwiva/react SSR
   │                  (loaders → data hooks → React → stream HTML)

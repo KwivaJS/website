@@ -11,7 +11,7 @@ Because the client derives its surface from the same route manifest the API deri
 
 Applications scaffold a single client from `@kwiva/client`:
 
-```ts
+```ts title="src/client.ts"
 // src/client.ts — types derive from THIS app's controllers and models
 import { createClient } from '@kwiva/client'
 export const client = createClient()
@@ -23,7 +23,7 @@ export const client = createClient()
 
 Every model's five generated routes are available as typed methods:
 
-```ts
+```ts title="model-api.ts"
 const { data, total } = await client.users.list({ where: { role: 'admin' }, page: 1 })
 const ada = await client.users.get('usr_01...')
 const updated = await client.users.update('usr_01...', { name: 'Ada L.' })
@@ -44,7 +44,7 @@ Each method's arguments are typed from the model IR — `where` values are check
 
 Controller actions attach to the same client surface:
 
-```ts
+```ts title="custom-actions.ts"
 await client.posts.publish('pst_01...')
 ```
 
@@ -66,7 +66,7 @@ A namespace appears because the manifest produced it — there is no hand-regist
 
 Calls resolve into discriminated unions on failure — shape and status are part of the type system:
 
-```ts
+```ts title="typed-errors.ts"
 const { error, data } = await client.users.get(id)
 
 if (error) {
@@ -80,7 +80,7 @@ Errors carry `code` and `message`, with structured `issues` on validation failur
 
 On the server, client calls run **in process** — no network hop — and are deduplicated per request. Two loaders calling the same endpoint share one execution. Results dehydrate into the page stream and rehydrate into the data-hook cache; a navigation that renders the same data reads what the request already produced.
 
-```
+```plaintext title="ssr-safe-calls.txt"
 server: client.posts.list()      → in-process, deduped per request
 client: hydrated into hooks      → no refetch of loader data
 ```
@@ -93,7 +93,7 @@ The deduplication contract is per request: two loaders calling the same endpoint
 
 The client is ambiently typed from `src/.kwiva/types` — generated once from the route manifest and model IR. Nothing is emitted at build or runtime; the typed surface exists as TypeScript types only:
 
-```
+```plaintext title="type-flow-no-codegen.txt"
 defineModel / defineController → route manifest → @kwiva/client ambient types
                             └→ client.users.list(...) type-checks against the manifest
 ```
@@ -108,7 +108,7 @@ Session cookies flow automatically, and the CSRF token is handled by the provide
 
 The client subscribes to realtime channels as an async iterable of typed events:
 
-```ts
+```ts title="subscriptions.ts"
 const stream = client.chat.stream({ roomId })
 for await (const event of stream) { ... }
 ```
@@ -123,7 +123,7 @@ For long-running actions — large exports, generated reports — the typed clie
 
 The same client surface operates against an in-process app harness:
 
-```ts
+```ts title="testing.ts"
 import { createTestClient } from '@kwiva/client'
 import { app } from '../bootstrap/app'
 

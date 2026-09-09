@@ -7,7 +7,7 @@ The `@kwiva/events` package provides `defineEvent`, the factory for domain event
 
 ## The `defineEvent` Factory
 
-```ts
+```ts title="the-defineevent-factory.ts"
 import { defineEvent } from '@kwiva/events'
 
 export const MessagePosted = defineEvent('message.posted', (f) => ({
@@ -31,7 +31,7 @@ export const MessagePosted = defineEvent('message.posted', (f) => ({
 
 The payload factory uses the same field DSL as models — `f.uuid()`, `f.string()`, `f.optional()`, and friends — and produces a Standard Schema-validated payload. Listeners, broadcasting, and the client all receive the payload fully typed.
 
-```ts
+```ts title="payload-schema.ts"
 export const UserSignedUp = defineEvent('user.signed-up', (f) => ({
   userId: f.uuid(),
   email: f.string(),
@@ -48,7 +48,7 @@ export const UserSignedUp = defineEvent('user.signed-up', (f) => ({
 
 ## Emitting
 
-```ts
+```ts title="emitting.ts"
 await MessagePosted.emit({ roomId, messageId })
 ```
 
@@ -58,7 +58,7 @@ await MessagePosted.emit({ roomId, messageId })
 
 Events emitted inside a database transaction are stored and delivered only after the transaction commits. A committed event is never lost; a rolled-back emit is never delivered.
 
-```ts
+```ts title="transactional-outbox-v1.ts"
 await db.transaction(async (tx) => {
   const message = await Message.create({ roomId, body })
 
@@ -70,7 +70,7 @@ await db.transaction(async (tx) => {
 
 Listeners are attached by name and receive the typed event.
 
-```ts
+```ts title="listeners.ts"
 MessagePosted.on('send-webhook', async (event) => {
   await postToWebhook(event.roomId, event.messageId)
 })
@@ -78,7 +78,7 @@ MessagePosted.on('send-webhook', async (event) => {
 
 Listener files are auto-discovered from `src/app/events/listeners/` — a file named after the listener in that folder is picked up without registration:
 
-```ts
+```ts title="src/app/events/listeners/send-webhook.ts"
 // src/app/events/listeners/send-webhook.ts
 export default async (event) => {
   await postToWebhook(event.roomId, event.messageId)
@@ -93,7 +93,7 @@ Listeners run through the queue transport by default. Each listener invocation b
 
 A wildcard handler subscribes to every event under a name prefix:
 
-```ts
+```ts title="wildcards-v1.ts"
 import { events } from '@kwiva/events'
 
 events.on('user.*', async (event) => {
@@ -105,7 +105,7 @@ events.on('user.*', async (event) => {
 
 The `broadcast` option maps an event to a channel template. The resolved channel is policy-checked, so the same authorization rules that guard REST routes apply to subscribers.
 
-```ts
+```ts title="broadcasting-to-channels.ts"
 export const MessagePosted = defineEvent('message.posted', (f) => ({
   roomId: f.uuid(),
   messageId: f.uuid(),
@@ -118,7 +118,7 @@ export const MessagePosted = defineEvent('message.posted', (f) => ({
 
 Realtime channels are defined with `channel` from `@kwiva/http`. A channel names a pattern, checks policy on upgrade, and handles inbound messages:
 
-```ts
+```ts title="channels.ts"
 import { channel, broadcast } from '@kwiva/http'
 
 export const chat = channel('chat.{roomId}')
@@ -132,7 +132,7 @@ Subscribe authorization is evaluated during the WebSocket handshake using the sa
 
 Broadcast to a channel by name from anywhere on the server:
 
-```ts
+```ts title="manual-broadcast.ts"
 import { broadcast } from '@kwiva/http'
 
 broadcast('chat.42', { type: 'message', body: 'hello' })
@@ -142,7 +142,7 @@ broadcast('chat.42', { type: 'message', body: 'hello' })
 
 Model hooks provide sugar for broadcasting on model lifecycle events:
 
-```ts
+```ts title="model-events-to-broadcast.ts"
 Post.onCreated(() => broadcast('posts'))
 ```
 
@@ -160,7 +160,7 @@ For fan-out across multiple instances, set `broadcast.driver` to `'redis'` in th
 
 On the client, events surfaced through channels are consumed with hooks from `@kwiva/react`:
 
-```tsx
+```tsx title="client-subscriptions.tsx"
 import { useChannel, usePresence } from '@kwiva/react'
 
 const { messages, send } = useChannel(`chat.${roomId}`, {
@@ -183,7 +183,7 @@ Clients reconnect with backoff after a dropped connection and catch up on missed
 
 For one-directional feeds where WebSockets are overkill, an SSE route streams with the same channel policy semantics:
 
-```ts
+```ts title="server-sent-events.ts"
 c.get('/feed', ({ stream }) =>
   stream((controller) => {
     posts.on('message', (message) => controller.enqueue(message))

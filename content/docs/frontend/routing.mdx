@@ -9,7 +9,7 @@ Routing is owned by the framework. `@kwiva/router` provides the core — route t
 
 All routes live under `src/ui/pages/`:
 
-```
+```plaintext title="the-page-tree.txt"
 src/ui/pages/
 ├─ __root.tsx              # root layout + providers + outlet
 ├─ index.tsx               # /
@@ -39,7 +39,7 @@ Files and folders nest arbitrarily deep, and each level contributes either a rou
 
 A `$` prefix marks a file segment as dynamic. `posts.$id.tsx` matches `/posts/1a2b3c`, `/posts/anything` — and nothing else. The matched value is available as typed params:
 
-```tsx
+```tsx title="dynamic-segments.tsx"
 const { id } = Route.useParams()
 ```
 
@@ -53,11 +53,11 @@ The bare `$` matches the whole remainder of the path, including multiple segment
 
 Search state is validated per route with `validateSearch`, and the resulting shape flows to `Route.useSearch()`, to link `search` props, and into navigation calls:
 
-```tsx
+```tsx title="typed-search-params.tsx"
 validateSearch: (s) => s.object({ q: s.optional(s.string()), page: s.optional(s.number()) })
 ```
 
-```tsx
+```tsx title="typed-search-params-2.tsx"
 const search = Route.useSearch()   // typed by validateSearch
 const { q, page } = search
 ```
@@ -79,7 +79,7 @@ Because matching is deterministic, `/posts/readme` resolves to `posts.$id.tsx` (
 
 Folders nest both routes and layouts. Files inside `settings/` share the folder's layout file:
 
-```
+```plaintext title="nested-folders.txt"
 src/ui/pages/settings/
 ├─ _layout.tsx             # /settings shell
 ├─ profile.tsx             # /settings/profile
@@ -96,7 +96,7 @@ The router runs loaders for **every matched route** — the layouts and the page
 
 The router carries a typed context available to loaders, guards, and components. The root route provides it — session, typed client, config, and the data-hook cache are injected without manual wiring:
 
-```tsx
+```tsx title="route-context.tsx"
 createRootWithContext({ session, client, config })
 ```
 

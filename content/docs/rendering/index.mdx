@@ -21,7 +21,7 @@ Every page defaults to **full server-side rendering**: loaders run on the server
 
 Every page participates in the same pipeline, whether it renders dynamically, from a cache, or at build time:
 
-```
+```plaintext title="the-server-side-pipeline.txt"
 request (page route)
   → router match (owned router)
   → route rules apply (cache hit? serve + bypass pipeline)
@@ -54,7 +54,7 @@ The same application mixes strategies: a marketing site renders statically, prod
 
 Streaming SSR ships the shell of a page the moment blocking data resolves, and streams the rest in as its data resolves. Loaders split their work explicitly — awaited values block, `stream()`-wrapped promises defer:
 
-```tsx
+```tsx title="streaming-deferred-data.tsx"
 loader: async ({ params, client }) => ({
   post: await client.posts.get(params.id),                          // blocking
   comments: stream(client.comments.list({ postId: params.id })),    // streams in
@@ -71,7 +71,7 @@ Hydration is how the server-rendered page becomes a live application. Kwiva hydr
 
 Caching operates on three layers that compose:
 
-```
+```plaintext title="layered-caching.txt"
 route rules   → HTTP response cache (cache / swr / isr / static)
 model cache   → server-side value cache with TTL and tags
 client cache  → data-hook cache (staleTime / gcTime)
@@ -89,7 +89,7 @@ Invalidation flows down the stack — `invalidateTags` purges route rules and se
 
 Caching does not exclude logged-in users. The split pattern keeps a public shell cacheable (via `isr` or `static`) while user-specific fragments load client-side through data hooks from session-scoped endpoints — keyed per user, never cached:
 
-```
+```plaintext title="personalization-with-cached-shells.txt"
 /products/**  isr cached shell   → same for every visitor
                 └─ session-scoped fragments → loaded client-side, never cached
 ```

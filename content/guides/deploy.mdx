@@ -25,7 +25,7 @@ Then pick a runtime preset: `node_server`, `bun_server`, `vercel`, `netlify`, `c
 
 ## Build for your target
 
-```bash
+```bash title="terminal"
 kwiva build --preset node_server
 ```
 
@@ -35,12 +35,12 @@ kwiva build --preset node_server
 
 Build and start the output for the runtime you chose:
 
-```bash
+```bash title="terminal"
 kwiva build
 node .output/server/index.mjs
 ```
 
-```bash
+```bash title="terminal"
 kwiva build --preset bun_server
 bun .output/server/index.mjs
 ```
@@ -54,7 +54,7 @@ bun .output/server/index.mjs
 | Cloudflare Workers | `cloudflare` |
 | AWS Lambda | `aws-lambda` |
 
-```bash
+```bash title="terminal"
 kwiva build --preset vercel
 kwiva deploy vercel
 ```
@@ -65,7 +65,7 @@ kwiva deploy vercel
 
 Container deployments use the `node_server` or `bun_server` preset. Build an image with a Bun runtime:
 
-```dockerfile
+```dockerfile title="run-in-containers-or-ship-a-binary.Dockerfile"
 FROM oven/bun:1 AS build
 WORKDIR /app
 COPY . .
@@ -78,7 +78,7 @@ CMD ["bun", "/app/.output/server/index.mjs"]
 
 Run it with Docker or orchestrate it with Kubernetes; it honors the `PORT` environment variable used by Railway, Render, and DigitalOcean. For a single-file artifact, compile the output into one executable:
 
-```bash
+```bash title="terminal"
 kwiva build --binary
 ./server
 ```

@@ -9,7 +9,7 @@ Pages are the frontend half of a Kwiva application. A page is a `definePage` fac
 
 Create a new file in `src/ui/pages/`:
 
-```tsx
+```tsx title="src/ui/pages/posts.tsx"
 // src/ui/pages/posts.tsx
 import { definePage } from '@kwiva/react'
 
@@ -35,7 +35,7 @@ export default definePage({
 
 The generator scaffolds a typed stub for any path:
 
-```bash
+```bash title="terminal"
 kwiva make:page posts.$id
 ```
 
@@ -60,7 +60,7 @@ Conventions: `$param` segments are dynamic params, a trailing `.$` captures a sp
 
 Use `$param` for dynamic segments and read them from the loader and component:
 
-```tsx
+```tsx title="dynamic-parameters.tsx"
 // src/ui/pages/posts.$id.tsx
 import { definePage } from '@kwiva/react'
 
@@ -82,7 +82,7 @@ export default definePage({
 
 The `client` injected into loaders is fully typed against your controllers and models:
 
-```ts
+```ts title="the-typed-rpc-client.ts"
 const posts = await client.posts.list({ page: 1 })  // typed response
 const post = await client.posts.get(params.id)       // typed params and response
 ```
@@ -93,13 +93,13 @@ Loader results are themselves typed: `loaderData` in the component matches the s
 
 Loaders run before render (on the server for SSR, then hydrate on the client). `loaderDeps` narrows when a loader refetches — here it refetches only when the page changes, not on every render:
 
-```tsx
+```tsx title="loaders-and-loader-dependencies.tsx"
 loaderDeps: ({ search: { page } }) => ({ page }),
 ```
 
 Redirects and guards go in `beforeLoad`:
 
-```tsx
+```tsx title="loaders-and-loader-dependencies-2.tsx"
 beforeLoad: ({ session, location }) => {
   if (!session.user) throw redirect({ to: '/login', search: { back: location.href } })
 },
@@ -109,7 +109,7 @@ beforeLoad: ({ session, location }) => {
 
 Search parameters are typed and validated per page. Declare a schema and every read is checked:
 
-```tsx
+```tsx title="search-params.tsx"
 import { definePage } from '@kwiva/react'
 
 export default definePage({
@@ -125,7 +125,7 @@ export default definePage({
 
 Typed navigation carries the search shape:
 
-```tsx
+```tsx title="search-params-2.tsx"
 navigate({ to: '/posts', search: { page: 2 } })
 ```
 
@@ -133,7 +133,7 @@ navigate({ to: '/posts', search: { page: 2 } })
 
 Use `stream()` for deferred data that shouldn't block the initial HTML — the shell streams first, the deferred slice suspends, and the rest fills in:
 
-```tsx
+```tsx title="streaming-ssr.tsx"
 import { definePage, stream } from '@kwiva/react'
 
 export default definePage({
@@ -159,7 +159,7 @@ export default definePage({
 
 `__root.tsx` wraps every route with providers and an outlet:
 
-```tsx
+```tsx title="src/ui/pages/__root.tsx"
 // src/ui/pages/__root.tsx
 import { definePage, Providers, Outlet } from '@kwiva/react'
 
@@ -179,7 +179,7 @@ The framework injects the session, the typed client, config, and the data-hook c
 
 Typed links and programmatic navigation are compile-checked:
 
-```tsx
+```tsx title="navigation.tsx"
 import { Link, useNavigate } from '@kwiva/react'
 
 // typed to/params/search — invalid values fail at compile time
@@ -198,7 +198,7 @@ navigate({ to: '..', relative: true })
 
 Beyond loaders, pages can call the data hooks directly for client-side data — caching, invalidation, and optimistic updates included:
 
-```tsx
+```tsx title="data-hooks.tsx"
 import { definePage, useList, useMutation, invalidate } from '@kwiva/react'
 
 export default definePage({
@@ -214,7 +214,7 @@ export default definePage({
 
 Pages can provide bespoke loading, error, and not-found states:
 
-```tsx
+```tsx title="ui-states.tsx"
 pendingComponent: PostSkeleton,        // shown after pendingMs
 pendingMs: 200, pendingMinMs: 300,     // debounce for fast loads
 errorComponent: ({ error }) => <ErrorPanel error={error} />,
@@ -227,7 +227,7 @@ notFoundComponent: () => <p>No such post</p>,
 
 Each page declares its own document head from loader data:
 
-```tsx
+```tsx title="head-and-meta.tsx"
 head: ({ loaderData }) => ({
   title: loaderData.post.title,
   meta: [{ name: 'description', content: loaderData.post.excerpt }],

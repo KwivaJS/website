@@ -11,7 +11,7 @@ Deployment is a build-time decision, not a design constraint. You write models, 
 
 Deployment in Kwiva is **build-time only**. Your app never knows where it will run; the target is decided when you build, not when you write code.
 
-```bash
+```bash title="terminal"
 kwiva build              # produce .output/ for the selected adapter
 kwiva preview            # run the built artifact locally
 kwiva deploy [provider]  # push to a host — or run the artifact yourself
@@ -19,7 +19,7 @@ kwiva deploy [provider]  # push to a host — or run the artifact yourself
 
 The `kwiva build` command runs the client build and the server build, then emits `.output/` containing `server/` and `public/`. The generated `server/` entry is what every target actually runs:
 
-```text
+```text title="how-deployment-works.txt"
 .output/
   server/
     index.mjs            the composed web-standard handler entry
@@ -62,7 +62,7 @@ Explicit selections override auto-detection: if your continuous-integration runn
 
 For a raw smoke test of a specific adapter, build with an explicit `--preset` and run the generated entry directly instead of deploying:
 
-```bash
+```bash title="terminal"
 kwiva build --preset node_server
 node .output/server/index.mjs
 ```

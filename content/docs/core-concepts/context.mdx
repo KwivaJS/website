@@ -11,7 +11,7 @@ The context is assembled once during request processing, after routing and befor
 
 ## Using Context in Handlers
 
-```ts
+```ts title="using-context-in-handlers.ts"
 defineController('posts', (c) => ({
   create: c.post('/', async (ctx) => {
     // ctx.body     — typed request body
@@ -55,7 +55,7 @@ Because the route declares its own schemas, `params.id` is a `string`, `body` ma
 
 Concretely, the route definition is what produces the handler's types:
 
-```ts
+```ts title="typed-per-route-context.ts"
 c.post('/', handler, {
   body: { title: 'string', body: 'string?' },   // ctx.body: { title: string, body?: string }
   query: { draft: 'string?' },                  // ctx.query: { draft?: string }
@@ -80,7 +80,7 @@ Only after assembly does validation run against the schemas, followed by guards 
 
 Middleware and guards read and write the same context the handler sees. Middleware typically fills the store before the handler:
 
-```ts
+```ts title="context-in-middleware-and-guards.ts"
 defineMiddleware.on('onRequest', async (ctx, next) => {
   ctx.store.requestId = ctx.headers['x-request-id'] ?? crypto.randomUUID()
   return next()
@@ -89,7 +89,7 @@ defineMiddleware.on('onRequest', async (ctx, next) => {
 
 Guards read context to make authorization decisions, and can return an error through the same `error` member a handler would use:
 
-```ts
+```ts title="context-in-middleware-and-guards-2.ts"
 defineController('admin', (c) => c.guard({
   beforeHandle: ({ session, error }) => {
     if (session.user?.role !== 'admin') return error('FORBIDDEN')
@@ -105,7 +105,7 @@ What a guard writes is visible to the handler; what a handler writes is visible 
 
 Two context members control what happens to the value a handler returns:
 
-```ts
+```ts title="response-controls-set-and-error.ts"
 handler: async ({ params, query, body, headers, cookies, session, tenant, store, set, error }) => {
   set.status = 201
   set.headers['x-cache'] = 'miss'
@@ -126,7 +126,7 @@ Three mechanisms in `defineApp` shape what the context contains, and they differ
 - **`decorate`** — attaches singletons that appear on the context unchanged and are created once at boot.
 - **`resolve`** — derives per-request values asynchronously during context assembly; it runs on every request and can read request data.
 
-```ts
+```ts title="extending-context-state-decorate-resolve.ts"
 defineApp({
   state: {
     startTime: Date.now(),
@@ -150,7 +150,7 @@ Handlers then see the assembled result — `ctx.tenant`, `ctx.client`, `ctx.stor
 
 Because middleware runs before the handler, it can enrich the context for the handler and for everything downstream:
 
-```ts
+```ts title="reading-data-middleware-produces.ts"
 defineMiddleware('request-id', async (ctx, next) => {
   ctx.store.requestId = ctx.headers['x-request-id'] ?? crypto.randomUUID()
   return next()
@@ -163,7 +163,7 @@ Session, tenant, and request ID are exactly this pattern internally: produced by
 
 The context exposes `waitUntil` for post-response work. It keeps the connection alive only as long as the task needs and is safe on edge runtimes:
 
-```ts
+```ts title="work-after-the-response.ts"
 handler: async ({ waitUntil }) => {
   waitUntil(telemetry.flush())
   return { ok: true }

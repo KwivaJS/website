@@ -23,7 +23,7 @@ Resolution is timed against the rest of the pipeline: session and tenant resolut
 
 Once resolved, the tenant is available on the request context with full type inference:
 
-```ts
+```ts title="the-typed-tenant-context.ts"
 // ctx.tenant is typed as { id, name, ownerId }
 app.get('/account', async ({ tenant }) => {
   return tenant  // { id, name, ownerId }
@@ -36,7 +36,7 @@ The typed surface is deliberately small — `id` for scoping, `name` for display
 
 ### Domain mode
 
-```
+```plaintext title="domain-mode.txt"
 acme.app.dev  ──►  tenant with slug 'acme'
 ```
 
@@ -44,7 +44,7 @@ The subdomain is the tenant identity. The tenant model carries a unique `slug` f
 
 ### Path mode
 
-```
+```plaintext title="path-mode.txt"
 /t/acme/...  ──►  tenant with slug 'acme'
 ```
 
@@ -52,7 +52,7 @@ The first path segment is the tenant identity. Workspaces on a shared host use t
 
 ### Header mode
 
-```
+```plaintext title="header-mode.txt"
 x-tenant-id: acme  ──►  tenant identified by header value
 ```
 
@@ -60,7 +60,7 @@ API clients and internal tools pass the tenant identity explicitly. This mode su
 
 ### Fixed mode
 
-```
+```plaintext title="fixed-mode.txt"
 fixed: 'acme'  ──►  every request is tenant 'acme'
 ```
 
@@ -116,7 +116,7 @@ Tenant lookup failures follow the normal error semantics of the framework. Becau
 
 The test harness drives resolution deterministically:
 
-```ts
+```ts title="testing-resolution.ts"
 withApp(async (app) => {
   const acme = app.asTenant('acme')
   const client = createTestClient(app, { tenant: acme })

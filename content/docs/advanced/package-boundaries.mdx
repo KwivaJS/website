@@ -18,7 +18,7 @@ Rule two is the more subtle half. An engine that stays importable from outside i
 
 Kwiva is a monorepo of many equal packages, each versioned independently so a concern can change and release on its own schedule:
 
-```
+```plaintext title="monorepo-layout.txt"
 kwiva/
   packages/
     core/      @kwiva/core
@@ -46,7 +46,7 @@ Each package ships independent semantic versions with a documented compatibility
 
 The package graph is strict and acyclic:
 
-```
+```plaintext title="the-dependency-graph.txt"
 studio ──► react · data
 react  ──► router · client · client-cache engine (sealed)
 client ──► core (types only)

@@ -7,7 +7,7 @@ Transactions give you atomic, consistent, isolated, durable writes — the guara
 
 ## Basic Transactions
 
-```ts
+```ts title="basic-transactions.ts"
 await db.transaction(async (tx) => {
   const order = await Order.create(payload, { tx })
   await OrderItem.createMany(items, { tx })
@@ -28,7 +28,7 @@ Every write inside the callback receives `tx` — either as the second argument 
 
 Transactions nest. An inner `db.transaction` inside an outer one becomes a **savepoint** rather than a real nested transaction:
 
-```ts
+```ts title="nested-transactions-and-savepoints.ts"
 await db.transaction(async (tx) => {
   const order = await Order.create(payload, { tx })
 
@@ -54,7 +54,7 @@ This is what makes partial rollback practical: a genuinely optional sub-operatio
 
 `db.transaction` accepts options for correctness-sensitive workloads:
 
-```ts
+```ts title="isolation-and-retries.ts"
 const result = await db.transaction(async (tx) => {
   // read-modify-write critical section
 }, { retries: 3, isolation: 'serializable' })
@@ -71,7 +71,7 @@ const result = await db.transaction(async (tx) => {
 
 Transactions are the correct tool whenever you read a value, decide, and write based on that decision. Combine the builder's row locks with a transaction so the read and the write cannot interleave with other workers:
 
-```ts
+```ts title="the-read-modify-write-pattern.ts"
 await db.transaction(async (tx) => {
   const seat = await Seat.query().where('flightId', flightId).forUpdate().first()
   if (!seat || seat.isTaken) throw new Error('flight_full')
@@ -99,7 +99,7 @@ A transaction is pinned to one connection for its lifetime — the pooled connec
 
 Events emitted **inside** a transaction are the classic correctness trap: if you emit before commit, events fire for work that rolled back; if you emit after commit, a crash between write and emit loses the event. Kwiva solves this with a transactional outbox:
 
-```ts
+```ts title="the-outbox-pattern.ts"
 await db.transaction(async (tx) => {
   const order = await Order.create(payload, { tx })
   await OrderPlaced.emit({ orderId: order.id }, { tx })
@@ -118,7 +118,7 @@ Because the emit is staged on the same transaction, the "lost emit" failure mode
 
 The same staging applies to queued work. A job dispatched inside `db.transaction` is held until commit and released afterward, so a queue worker can never observe state that the transaction later rolled back:
 
-```ts
+```ts title="transactions-and-jobs.ts"
 await db.transaction(async (tx) => {
   await Account.create(payload, { tx })
   await SendWelcome.dispatch({ accountId: account.id }, { tx })
@@ -131,7 +131,7 @@ This mirrors the outbox mechanism end to end — see [Background Work: Jobs](/do
 
 The escape hatch participates in the same transaction. Raw and builder statements executed against `tx` join the unit of work:
 
-```ts
+```ts title="raw-statements-in-transactions.ts"
 await db.transaction(async (tx) => {
   const rows = await db.raw<{ total: number }>('select sum(amount) total from payments', { tx })
   await db.execute('update payments set settled = true', [], { tx })

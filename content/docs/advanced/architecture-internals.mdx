@@ -9,7 +9,7 @@ Kwiva is organized as a strict set of layers with one non-negotiable dependency 
 
 > The app depends only on the framework. The framework depends on internal engines and the Rust-speed toolchain. App code never imports an engine by name. Every app-facing construct is a `defineX` factory.
 
-```
+```plaintext title="the-core-architectural-rule.txt"
 ┌──────────────────────────────────────────────────────────────────────┐
 │ APP (src/) — models, http, routes, services, jobs, events, ui, config│
 │   writes defineX(...) only · imports only @kwiva/*                   │
@@ -35,7 +35,7 @@ Each arrow in the diagram is a hard boundary enforced by the built-in linter. Th
 
 Application code lives in a lowercase, convention-driven filesystem. Directories and files use kebab or dot case — `send-welcome.ts`, `posts.$id.tsx` — and one `defineX` factory maps to each file type.
 
-```
+```plaintext title="layer-1-the-application.txt"
 src/
   bootstrap/app.ts           defineApp — the application kernel
   app/models/                defineModel — one file per model
@@ -58,7 +58,7 @@ src/
 
 The whole application is booted from one kernel:
 
-```ts
+```ts title="src/bootstrap/app.ts"
 // src/bootstrap/app.ts
 import { defineApp } from '@kwiva/core'
 import auth from '../app/http/auth'
@@ -122,7 +122,7 @@ The framework never asks you to register constructs. Registration is file-scan b
 
 Auto-discovery feeds the typed artifacts in `src/.kwiva/`, which is generated on every dev and build run and rebuilt whenever the filesystem changes:
 
-```
+```plaintext title="auto-discovery-and-module-boundaries.txt"
 src/.kwiva/
   route-manifest.json   route IR → client, OpenAPI, MCP
   model-ir.json         model IR

@@ -9,7 +9,7 @@ The client side of Kwiva's realtime stack is built around typed hooks. Subscribi
 
 `useChannel` subscribes the component to a channel and provides the payload handling you wire to app state:
 
-```tsx
+```tsx title="subscribing-with-hooks.tsx"
 import { useChannel } from '@kwiva/react'
 
 const { messages, send } = useChannel(`chat.${roomId}`, {
@@ -41,7 +41,7 @@ A single prop change from `chat.41` to `chat.42` moves the subscription without 
 
 `send` is the typed writer side of a channel. It accepts the channel's payload shape and returns once the message is handed to the transport:
 
-```tsx
+```tsx title="sending-messages.tsx"
 const { messages, send } = useChannel(`chat.${roomId}`)
 
 const submit = async (text: string) => {
@@ -55,7 +55,7 @@ Sending is validated on the server before broadcast, matching the security bound
 
 Channels with presence enabled expose their member set through a dedicated hook:
 
-```tsx
+```tsx title="reading-presence-v1.tsx"
 import { usePresence } from '@kwiva/react'
 
 const { members } = usePresence(`chat.${roomId}`)
@@ -67,7 +67,7 @@ The member set updates as clients join and leave, which powers online indicators
 
 Putting the pieces together, a chat room is a small, fully typed component:
 
-```tsx
+```tsx title="a-complete-component.tsx"
 function Room({ roomId }: { roomId: string }) {
   const { messages, send } = useChannel(`chat.${roomId}`, {
     onMessage: (m) => enqueue(m),
@@ -102,7 +102,7 @@ There is no client-side schema file to keep in sync. Rename a field in an event 
 
 Channel subscriptions are also available imperatively through the typed client, which is useful outside components — in services, stores, or non-React frontends:
 
-```ts
+```ts title="streaming-subscriptions.ts"
 const feed = client.chat.stream(`chat.${roomId}`)
 ```
 
@@ -112,14 +112,14 @@ The stream surfaces incoming payloads as they arrive and stays typed against the
 
 WebSockets are the primary transport, but not every environment can carry them — some proxies and edge restrictions drop or buffer the upgrade request. When WebSockets are unavailable, clients fall back to server-sent events through the same subscription interface:
 
-```ts
+```ts title="sse-fallback.ts"
 // force SSE when WebSockets are blocked by proxies or edge restrictions
 const fallback = client.stream(`chat.${roomId}`)
 ```
 
 The fallback keeps the same channel semantics: the payloads arriving are the same, and subscription authorization still applies. One-directional feeds where WebSockets would be overkill can use SSE directly from a server route:
 
-```ts
+```ts title="sse-fallback-2.ts"
 c.get('/feed', ({ stream }) => stream((controller) => {
   posts.on('message', (m) => controller.enqueue(m))
   return () => controller.close()

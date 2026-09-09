@@ -7,7 +7,7 @@ Relations model how resources connect. Kwiva provides a complete relationship sy
 
 ## Declaring Relations
 
-```ts
+```ts title="src/app/models/comments.ts"
 // src/app/models/comments.ts
 export default defineModel('comments', (f) => ({
   postId: f.foreignId('posts').references('id'),
@@ -41,7 +41,7 @@ Relations take a **lazy reference** — `f.belongsTo(() => User)`, not `f.belong
 
 For `belongsTo`, the framework infers the foreign key column (for example `authorId`) and wires the constraint. When you want an explicit column, declare it directly:
 
-```ts
+```ts title="foreign-keys.ts"
 postId: f.foreignId('posts').references('id'),
 ```
 
@@ -49,7 +49,7 @@ postId: f.foreignId('posts').references('id'),
 
 Relations are lazy by default — accessing `post.comments()` runs a query. To avoid N+1 queries, load relations with `with()`. The argument list is variadic and accepts nested paths:
 
-```ts
+```ts title="eager-loading.ts"
 const posts = await Post.query().with('author', 'comments')
 const posts = await Post.query().with('comments.author')               // nested
 const posts = await Post.query().with('comments', (q) => q.where('approved', true))  // constrained
@@ -68,7 +68,7 @@ const posts = await Post.query().withCount('comments', 'likes')        // aggreg
 
 Filter the parent query based on the existence or shape of related rows:
 
-```ts
+```ts title="filtering-by-relations.ts"
 const comments = await Post.query().whereHas('comments', (q) => q.where('approved', true)).get()
 ```
 
@@ -78,7 +78,7 @@ const comments = await Post.query().whereHas('comments', (q) => q.where('approve
 
 Loaded instances expose their relations directly, still typed:
 
-```ts
+```ts title="relationship-access-on-instances.ts"
 const post = await Post.findOrFail(id)
 const comments = await post.comments().get()
 ```
@@ -89,7 +89,7 @@ Accessing the relation method returns a fresh query scoped to the instance; `.ge
 
 Many-to-many relations are backed by a pivot table. Kwiva can infer the pivot from the two model names, or you can pass an explicit pivot model as the second argument:
 
-```ts
+```ts title="src/app/models/roles.ts"
 // src/app/models/roles.ts
 export default defineModel('roles', (f) => ({
   name: f.string(),
@@ -108,7 +108,7 @@ The pivot participates in every derived surface just like a model: schema, migra
 
 A `morphTo` relation lets one table reference **any** model through a type-plus-id pair. This is the natural shape for comments, likes, flags, and notes that attach to posts, files, and teams alike:
 
-```ts
+```ts title="src/app/models/comments-2.ts"
 // src/app/models/comments.ts
 export default defineModel('comments', (f) => ({
   body: f.text(),
@@ -135,7 +135,7 @@ The same loading surface works: `with('commentable')` eager-loads whatever the p
 
 Eager loading is where relation design pays off or punishes you. The rules:
 
-```ts
+```ts title="eager-loading-in-depth.ts"
 // load author for every post, plus approved comments only
 const posts = await Post.query()
   .with('author')

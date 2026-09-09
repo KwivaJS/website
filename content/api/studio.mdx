@@ -9,7 +9,7 @@ Kwiva Studio is the generated operations UI. Given your models, it produces list
 
 Studio is configured through the app config:
 
-```ts
+```ts title="src/config/app.ts"
 // src/config/app.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -37,7 +37,7 @@ Everything derives from the model IR: columns (field types → cell renderers), 
 
 Override a model's screens with `defineStudioScreen`:
 
-```tsx
+```tsx title="src/app/studio/posts.tsx"
 // src/app/studio/posts.tsx
 import { defineStudioScreen } from '@kwiva/studio'
 import { PostsTable } from '../ui/components/posts-table'

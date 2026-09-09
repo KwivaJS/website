@@ -15,7 +15,7 @@ Adding a policy means naming a resource's permission namespace once and writing 
 
 A model's `permission` option ties its generated routes to that namespace. The framework checks `{permission}.{action}` before every generated handler runs:
 
-```ts
+```ts title="name-the-permission-namespace-on-the-model.ts"
 import { defineModel } from "@kwiva/data"
 
 export default defineModel("posts", (f) => ({
@@ -28,7 +28,7 @@ export default defineModel("posts", (f) => ({
 
 Policies live one file per resource. The callback receives `(user, ability, resource?)` and returns a boolean or a promise:
 
-```ts
+```ts title="define-the-policy.ts"
 import { definePolicy } from "@kwiva/core"
 
 export default definePolicy("posts", (user, ability, resource) => {
@@ -55,7 +55,7 @@ Policies are pure logic with no HTTP concerns, so the same file governs routes, 
 
 Controller actions declare their ability with a `permission` option. Custom actions extend the namespace, so a publish route creates the `posts.publish` ability the policy already handles:
 
-```ts
+```ts title="wire-permissions-onto-controller-routes.ts"
 import { defineController } from "@kwiva/http"
 
 export default defineController("posts", (c) => ({
@@ -68,7 +68,7 @@ export default defineController("posts", (c) => ({
 
 `ctx.can` reads the signed-in user's abilities on the server, and `useCan` does the same on the client so UI can react:
 
-```ts
+```ts title="check-abilities-in-handlers-and-on-the-client.ts"
 const canUpdate = ctx.can("posts.update", post)
 const canPublish = useCan("posts.publish")
 ```

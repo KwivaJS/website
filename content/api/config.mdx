@@ -22,7 +22,7 @@ The factory has two forms:
 
 ### Module Form
 
-```ts
+```ts title="src/config/database.ts"
 // src/config/database.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -40,7 +40,7 @@ export default defineConfig('database', {
 })
 ```
 
-```ts
+```ts title="module-form.ts"
 defineConfig(name: string, options: ConfigModuleOptions): ConfigModule
 ```
 
@@ -55,7 +55,7 @@ defineConfig(name: string, options: ConfigModuleOptions): ConfigModule
 
 ### Root Entry Form
 
-```ts
+```ts title="kwiva.config.ts"
 // kwiva.config.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -66,7 +66,7 @@ export default defineConfig({
 })
 ```
 
-```ts
+```ts title="root-entry-form.ts"
 defineConfig(options: RootConfigOptions): RootConfig
 ```
 
@@ -85,7 +85,7 @@ The root entry is **build-time only**. It does not hold runtime values; runtime 
 
 One module per domain, all lowercase:
 
-```
+```plaintext title="the-config-folder.txt"
 src/config/
 ├── app.ts           # identity, env, mode, middleware stack, timezone/locale
 ├── database.ts      # connections, pool, migrations
@@ -115,7 +115,7 @@ src/config/
 
 The `config()` accessor is the only way application code reads these values, and its types come straight from each module's `defaults` and schema:
 
-```ts
+```ts title="the-config-folder-2.ts"
 import { config } from '@kwiva/core'
 
 const url = config('database.url')
@@ -126,27 +126,27 @@ const pool = config('database.pool.max')
 
 Configuration follows a strict precedence model, low to high:
 
-```
+```plaintext title="layer-precedence.txt"
 defaults  →  src/config/*.ts module values  →  defineX inline options  →  env (runtime overrides)
 ```
 
 Later sources win. The rule of thumb: the folder centralizes and defaults; inline options tune per construct; inline always beats the folder. Nothing can be configured from a third place.
 
-```ts
+```ts title="layer-precedence-2.ts"
 export default defineModel('posts', (f) => ({ ... }), {
   cache: { ttl: 120, tags: ['posts'] },
   rateLimit: { max: 100, per: 60 },
 })
 ```
 
-```ts
+```ts title="layer-precedence-3.ts"
 export default defineController('reports', (c) => ({ ... }), {
   prefix: '/reports',
   cors: { origins: ['https://acme.dev'] },
 })
 ```
 
-```ts
+```ts title="layer-precedence-4.ts"
 export default defineJob('cleanup', handler, {
   queue: 'maintenance',
   attempts: 3,
@@ -159,14 +159,14 @@ Each inline example overrides the matching `src/config/*.ts` default for that si
 
 Environment variables are declared exactly once: in the `env` map of a `src/config/*.ts` module. That declaration is the source for ambient typing, boot validation, and `.env.example` generation. App code reads them through `env()` from `@kwiva/core`:
 
-```ts
+```ts title="src/config/database-2.ts"
 // src/config/database.ts
 export default defineConfig('database', {
   env: { url: 'DATABASE_URL', driver: 'DB_DRIVER' },
 })
 ```
 
-```ts
+```ts title="typed-env-access.ts"
 import { env } from '@kwiva/core'
 
 const dbUrl = env('DATABASE_URL')
@@ -175,13 +175,13 @@ const driver = env('DB_DRIVER')
 
 ### Signature
 
-```ts
+```ts title="signature.ts"
 env<K extends DeclaredEnvKey>(key: K): string
 ```
 
 `env('NOT_DECLARED')` is a compile-time error (ambient types) and a boot-time error (validation). `kwiva dev`, `kwiva build`, and server start validate every declared variable and fail fast with a table of missing ones:
 
-```
+```plaintext title="signature-2.txt"
 ✗ Missing required environment variables:
     DATABASE_URL   (declared in src/config/database.ts)
     REDIS_URL      (declared in src/config/queue.ts)
@@ -209,7 +209,7 @@ Optional variables declare defaults in their module; secrets have no defaults.
 
 Only `KWIVA_PUBLIC_*` variables flow to the client. Non-public variables referenced from `src/ui/**` are a lint error. Client code reads public values through `env.public` from `@kwiva/react`:
 
-```ts
+```ts title="naming-conventions.ts"
 import { env } from '@kwiva/react'
 
 const stripeKey = env.public('KWIVA_PUBLIC_STRIPE_KEY')

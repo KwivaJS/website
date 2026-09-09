@@ -7,7 +7,7 @@ Creating a Kwiva project is a single scaffold command. The CLI generates the com
 
 ## Quick Start
 
-```bash
+```bash title="terminal"
 bun create kwiva my-app
 ```
 
@@ -21,7 +21,7 @@ This is equivalent to `kwiva new my-app`. The scaffold command:
 
 When it finishes, you can verify the install immediately:
 
-```bash
+```bash title="terminal"
 cd my-app
 bun run dev
 ```
@@ -32,7 +32,7 @@ Open `http://localhost:3000` to see the home page.
 
 A default `fullstack` project includes this layout:
 
-```
+```plaintext title="what-gets-scaffolded.txt"
 my-app/
 ├─ kwiva.config.ts            # defineConfig — the app entry (loads src/config)
 ├─ package.json
@@ -77,7 +77,7 @@ The `src/.kwiva/` directory is also created at first boot: it holds generated ar
 
 Every project is scaffolded in one of five modes. The mode controls which framework surfaces are included and the default deployment preset.
 
-```bash
+```bash title="terminal"
 bun create kwiva my-app --mode=<mode>
 ```
 
@@ -85,7 +85,7 @@ bun create kwiva my-app --mode=<mode>
 
 The complete application: server-rendered pages, an HTTP API, background work, auth, and realtime in one codebase. The default target for most products and the mode the tutorials assume.
 
-```bash
+```bash title="terminal"
 bun create kwiva saas --mode=fullstack
 ```
 
@@ -93,7 +93,7 @@ bun create kwiva saas --mode=fullstack
 
 A backend with no SSR renderer; the frontend is a client-rendered SPA shell. Use it when your UI is a separate concern (for example a mobile app consuming the same API, or a team that owns the frontend independently). You can scaffold without any UI at all:
 
-```bash
+```bash title="terminal"
 bun create kwiva acme-api --mode=api+spa --no-ui
 ```
 
@@ -138,7 +138,7 @@ The config folder and the model layer — the parts that carry your application'
 
 Beyond starting the dev server, two quick commands confirm the scaffold is healthy:
 
-```bash
+```bash title="terminal"
 bun run check     # format + lint + typecheck in one pass
 bun run test      # the empty-but-wired test suite passes
 ```

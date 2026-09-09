@@ -27,7 +27,7 @@ A boot failure is intentionally loud: because config and env validate first, a m
 
 Every request flows through one ordered pipeline. The same pipeline serves API routes, rendered pages, WebSocket upgrades, and server routes — there is no separate processing path for each kind of work. The full request pipeline runs fourteen ordered steps between the client and the engine writing the response:
 
-```
+```plaintext title="the-request-pipeline.txt"
    1. client request
    2. preset adapter                     → Web Request normalization
    3. pipeline entry
@@ -78,7 +78,7 @@ The first six run in order for every request. `onError` runs only when a stage t
 
 Middleware is a named, reusable pipeline stage. The base form wraps the rest of the pipeline:
 
-```ts
+```ts title="middleware-lifecycle.ts"
 import { defineMiddleware } from '@kwiva/http'
 
 export default defineMiddleware('timing', async (ctx, next) => {
@@ -91,14 +91,14 @@ export default defineMiddleware('timing', async (ctx, next) => {
 
 Because middleware can attach to any event, scoping to a specific moment is explicit:
 
-```ts
+```ts title="middleware-lifecycle-2.ts"
 export default defineMiddleware.on('onRequest', async (ctx, next) => {
   // earliest touchpoint — before routing and parsing
   return next()
 })
 ```
 
-```ts
+```ts title="middleware-lifecycle-3.ts"
 export default defineMiddleware.on('onResponse', async (ctx, next) => {
   // final headers, after the handler and error stages
   return next()

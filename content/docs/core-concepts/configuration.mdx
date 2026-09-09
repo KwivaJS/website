@@ -17,7 +17,7 @@ The result: you can discover every knob in one folder, typos fail at compile tim
 
 `kwiva.config.ts` at the project root is the thin entry point. It points at the config folder and carries build, deploy, and module composition:
 
-```ts
+```ts title="kwiva.config.ts"
 // kwiva.config.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -38,7 +38,7 @@ Runtime configuration lives in the folder; build-time configuration (preset, mod
 
 Each domain owns one module under `src/config/`, authored with `defineConfig`:
 
-```ts
+```ts title="src/config/database.ts"
 // src/config/database.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -83,7 +83,7 @@ Each module is a `defineX` file, so it also accepts inline options and its value
 
 Configuration follows one strict precedence chain, low to high:
 
-```
+```plaintext title="precedence-rules.txt"
 defineConfig defaults  →  src/config/*.ts module values  →  defineX inline options  →  env (runtime overrides)
 ```
 
@@ -100,7 +100,7 @@ Nothing can be configured from a third place. Redis-dependent and other dynamic 
 
 The typed reader comes from `@kwiva/core`:
 
-```ts
+```ts title="reading-configuration-anywhere.ts"
 import { config } from '@kwiva/core'
 
 const url = config('database.url')          // typed: string
@@ -113,7 +113,7 @@ Types flow from each module's `defaults` plus its schema, so a misspelled path o
 
 Because every `defineX` factory accepts full inline options, per-construct tuning lives next to the construct:
 
-```ts
+```ts title="inline-overrides-in-definex.ts"
 export default defineModel('posts', (f) => ({ /* ... */ }), {
   cache: { ttl: 120, tags: ['posts'] },       // overrides src/config/cache.ts defaults for this model
   rateLimit: { max: 100, per: 60 },           // overrides api defaults for generated routes
@@ -136,7 +136,7 @@ Rule of thumb: the folder centralizes and defaults; inline tunes per construct. 
 
 Env vars are declared exactly once — in the module's `env` map — and everything flows from that declaration: types, boot validation, and the generated `.env.example`. Application code reads through the typed helper:
 
-```ts
+```ts title="typed-env-access.ts"
 import { env } from '@kwiva/core'
 
 const dbUrl = env('DATABASE_URL')              // string — declared in database.ts env map

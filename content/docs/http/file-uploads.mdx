@@ -11,7 +11,7 @@ Uploads participate in the normal lifecycle, which is the source of their safety
 
 Inside a handler, `file` is a function you call to resolve the uploaded file:
 
-```ts
+```ts title="reading-a-file.ts"
 c.post('/avatar', async ({ file, session }) => {
   const { filename, bytes, type } = await file()
 
@@ -48,7 +48,7 @@ Constraints are checked during parsing against the actual stream, so oversized u
 
 Uploaded files persist through the storage API, not the filesystem or a raw stream:
 
-```ts
+```ts title="storage-integration.ts"
 return storage.put(`avatars/${session.user.id}`, bytes, {
   contentType: type,
 })
@@ -69,7 +69,7 @@ Because parsing is incremental, a large upload does not exhaust memory before it
 
 Not every route should accept files. Only routes that declare a `file` schema accept multipart bodies; all other routes reject multipart input as a malformed request. Declaring `file` is the explicit opt-in:
 
-```ts
+```ts title="restricting-uploads.ts"
 c.post('/documents', async ({ file }) => {
   const { filename, bytes, type } = await file()
   return storage.put(`documents/${crypto.randomUUID()}-${filename}`, bytes, {
@@ -86,7 +86,7 @@ This server-side enforcement means an undeclared `multipart/form-data` body is r
 
 The `file` option is part of the route's schema object, so upload constraints are validated in the same stage and by the same runtime as body, query, and params schemas. A file that exceeds `maxSize` or falls outside `types` produces a `VALIDATION` error with a field-mapped issue, identical in shape to any other validation failure. The client sees the same discriminated union it sees for a bad body:
 
-```ts
+```ts title="uploads-where-they-meet-validation.ts"
 const res = await client.posts.create({ ... })
 
 if (res.error?.code === 'VALIDATION') {
@@ -100,7 +100,7 @@ Because constraints are checked during the parse stage, oversized or wrong-type 
 
 Not every upload is meant to be public. For private content, store the file and hand back a signed URL that expires:
 
-```ts
+```ts title="private-files-and-signed-urls.ts"
 c.post('/documents/:id/attach', async ({ file, params }) => {
   const { filename, bytes, type } = await file()
   const path = `documents/${params.id}/${filename}`
@@ -116,7 +116,7 @@ c.post('/documents/:id/attach', async ({ file, params }) => {
 
 A multipart route can carry structured fields together with the file. The parse stage resolves both, so a handler receives the file accessor and ordinary `body` fields from the same request:
 
-```ts
+```ts title="uploads-alongside-other-fields.ts"
 c.post('/reports/import', async ({ file, body }) => {
   const { bytes, type } = await file()
   return storage.put(`reports/${body.kind}/${crypto.randomUUID()}`, bytes, {

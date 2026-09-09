@@ -11,7 +11,7 @@ By default every page is **server-rendered**. Loaders run on the server, the fir
 
 The frontend sits at the end of a loop that starts in the data layer:
 
-```
+```plaintext title="the-full-stack-loop.txt"
 defineModel → defineController → @kwiva/client → definePage loader → data hooks
 ```
 
@@ -51,7 +51,7 @@ Each page walks one surface in full and cross-links the others, so the set reads
 
 Every page participates in the framework-owned rendering pipeline by default:
 
-```
+```plaintext title="server-rendered-by-default.txt"
 request (page route)
   → router match (owned router)
   → beforeLoad guards (session → login redirects)
@@ -69,7 +69,7 @@ Route rules let you choose — per path — whether the response is dynamically 
 
 React is the default runtime, selected once in UI configuration:
 
-```ts
+```ts title="src/config/ui.ts"
 // src/config/ui.ts
 export default defineConfig('ui', {
   defaults: { runtime: 'react', theme: 'kwiva' },
@@ -92,7 +92,7 @@ The route tree, its params, its search schemas, and its loader return types are 
 
 Page files are discovered by convention, so there is nothing to register: drop `index.tsx` into `src/ui/pages/` and the `/` route exists. Generate a typed scaffold with the CLI:
 
-```bash
+```bash title="terminal"
 kwiva make:page posts.$id
 ```
 

@@ -11,7 +11,7 @@ The pipeline is framework-owned end to end. Its surface — middleware, guards, 
 
 The pipeline runs fourteen ordered steps between the client and the engine writing the response:
 
-```
+```plaintext title="the-full-sequence.txt"
   1. client request
   2. preset adapter                     → Web Request normalization
   3. pipeline entry
@@ -60,7 +60,7 @@ The first six run in order for every request. `onError` runs only when a stage t
 
 Middleware can attach to any event, not just the overall request/response wrapper:
 
-```ts
+```ts title="lifecycle-scoped-middleware.ts"
 import { defineMiddleware } from '@kwiva/http'
 
 export default defineMiddleware.on('onRequest', async (ctx, next) => {
@@ -69,7 +69,7 @@ export default defineMiddleware.on('onRequest', async (ctx, next) => {
 })
 ```
 
-```ts
+```ts title="lifecycle-scoped-middleware-2.ts"
 import { defineMiddleware } from '@kwiva/http'
 
 export default defineMiddleware.on('onResponse', async (ctx, next) => {
@@ -96,7 +96,7 @@ A request through a guarded controller accumulates app middleware, controller mi
 
 The context is assembled from three app-level declarations in `defineApp`:
 
-```ts
+```ts title="state-decorate-resolve.ts"
 export default defineApp({
   state: { startTime: Date.now() },          // app-wide mutable store types
   decorate: { client: createClient() },      // singletons available on ctx

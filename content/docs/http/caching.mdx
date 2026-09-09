@@ -9,7 +9,7 @@ The decisions combine into a rule of thumb: the closer the cache sits to the cli
 
 ## The Layers
 
-```
+```plaintext title="the-layers.txt"
 route rules   whole responses: default / cache / swr / isr / static / prerender
 model cache   query results per model, TTL + tags
 data hooks    client cache, keyed by model and query
@@ -22,7 +22,7 @@ Each layer answers a different question. Route rules make a public page or endpo
 
 Route rules are declared on server routes in `src/routes/rules.ts`:
 
-```ts
+```ts title="src/routes/rules.ts"
 // src/routes/rules.ts
 defineServerRoute('/products/**', { isr: 300, cache: { tags: ['catalog'] } })
 defineServerRoute('/pricing/**',  { static: true })
@@ -49,7 +49,7 @@ Rules apply **before** context assembly — a cache hit serves the response and 
 
 Rules can attach tags to their cached output:
 
-```ts
+```ts title="cache-tags-on-rules.ts"
 defineServerRoute('/products/**', { cache: { tags: ['catalog'] } })
 ```
 
@@ -59,7 +59,7 @@ A later `invalidateTags(['catalog'])` purges these tagged caches along with any 
 
 Models declare caching per model — list and get responses are cached per query signature:
 
-```ts
+```ts title="model-cache.ts"
 defineModel('products', (f) => ({ ... }), {
   cache: { ttl: 120, tags: ['catalog'], swr: true },
 })
@@ -71,7 +71,7 @@ The cache key combines the model, the query signature, and the tenant. Model wri
 
 The explicit cache API handles keyed values that no other layer covers:
 
-```ts
+```ts title="the-cache-api.ts"
 import { cache } from '@kwiva/core'
 
 await cache.set('stats:overview', value, { ttl: 300, tags: ['stats'] })
@@ -105,7 +105,7 @@ Model writes purge without manual calls. Tags offer cross-layer coordination —
 
 `invalidateTags` is the on-demand lever. It calls the route-rule purge in the same breath as the model and cache-API purges, so publishing a catalog update can refresh a server-cached product grid, a cached catalog query, and derived analytics in one call:
 
-```ts
+```ts title="on-demand-invalidation.ts"
 // after a product publish or price change
 await cache.invalidateTags(['catalog'])
 ```

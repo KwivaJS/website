@@ -7,7 +7,7 @@ The database layer is configured from `src/config/database.ts`, one file that de
 
 ## The Config File
 
-```ts
+```ts title="src/config/database.ts"
 // src/config/database.ts
 export default defineConfig('database', {
   defaults: {
@@ -47,7 +47,7 @@ The driver is a single string per connection. `DB_DRIVER` lets each environment 
 | Production | `postgres` | `postgres://user:pass@host:5432/app` |
 | Existing MySQL | `mysql` | driver-native DSN |
 
-```ts
+```ts title="drivers.ts"
 url: 'sqlite://storage/database.db'        // sqlite file
 url: env('DATABASE_URL')                    // standard postgres/mysql DSN via env
 ```
@@ -67,7 +67,7 @@ This is the same pattern as every config folder — see [Getting Started: Config
 
 Connection strings follow the driver's native DSN style:
 
-```bash
+```bash title="terminal"
 DATABASE_URL=postgres://user:pass@host:5432/app
 DB_DRIVER=postgres
 ```
@@ -100,7 +100,7 @@ Pool exhaustion shows up as connection timeouts under load rather than SQL error
 | `logging` | `false` | Emit query logging for development |
 | `slowQueryThreshold` | `500` | Milliseconds above which a query is flagged as slow |
 
-```ts
+```ts title="logging-and-slow-queries.ts"
 defaults: {
   logging: true,
   slowQueryThreshold: 250,

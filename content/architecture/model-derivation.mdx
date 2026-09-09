@@ -7,7 +7,7 @@ Kwiva's data architecture rests on a single idea: **declare the model once, deri
 
 ## One Model, Many Artifacts
 
-```
+```plaintext title="one-model-many-artifacts.txt"
 defineModel files ──scan──► model IR (intermediate representation)
   ├─► database schema + migrations
   ├─► REST API (5 routes per model)
@@ -23,7 +23,7 @@ The IR is the contract between the declaration and every consumer. It's a typed 
 
 Models live one-per-file in `src/app/models/`:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 

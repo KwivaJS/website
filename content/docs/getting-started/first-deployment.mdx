@@ -7,7 +7,7 @@ Deployment in Kwiva is build-time only: one production build produces deployable
 
 ## Build for Production
 
-```bash
+```bash title="terminal"
 kwiva build
 ```
 
@@ -35,7 +35,7 @@ Optional build flags:
 
 Because presets emit a standard server entry, you can smoke-test any target locally:
 
-```bash
+```bash title="terminal"
 bun .output/server/index.mjs
 ```
 
@@ -55,14 +55,14 @@ The scaffold-time mode controls the default preset:
 
 Most providers are auto-detected in CI — nothing to configure:
 
-```bash
+```bash title="terminal"
 kwiva build
 kwiva deploy
 ```
 
 Auto-detected targets include AWS Amplify, Azure Static Web Apps, Cloudflare Pages and Workers, Firebase App Hosting, Netlify, Stormkit, Vercel, and Zeabur. When auto-detection isn't possible, pick a preset explicitly:
 
-```bash
+```bash title="terminal"
 # Explicit provider
 kwiva deploy cloudflare
 kwiva deploy vercel
@@ -75,7 +75,7 @@ kwiva build --preset=aws-lambda
 
 You can also pin the preset in `kwiva.config.ts`:
 
-```ts
+```ts title="zero-config-auto-detection.ts"
 export default defineConfig({
   load: './src/config',
   deploy: { preset: 'node_server' },
@@ -97,7 +97,7 @@ export default defineConfig({
 
 ## Single Binary
 
-```bash
+```bash title="terminal"
 kwiva build --binary
 # Produces a standalone executable — copy it onto any host
 ```
@@ -129,13 +129,13 @@ Provider-specific notes worth knowing:
 
 Preview the production build exactly as it will behave when deployed:
 
-```bash
+```bash title="terminal"
 kwiva preview
 ```
 
 For a raw smoke test of a specific preset:
 
-```bash
+```bash title="terminal"
 kwiva build --preset=node_server
 bun .output/server/index.mjs
 ```
@@ -144,7 +144,7 @@ bun .output/server/index.mjs
 
 The same typed env system used in development applies to production — declare variables once in `src/config/`, provide values per environment:
 
-```bash
+```bash title="terminal"
 # .env.production
 DATABASE_URL=postgresql://...
 APP_KEY=your-signing-key

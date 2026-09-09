@@ -15,7 +15,7 @@ Background jobs move slow, non-request work — emails, exports, webhook calls �
 
 Scaffold the job into `src/app/jobs/` with the CLI generator:
 
-```bash
+```bash title="terminal"
 kwiva make:job send-welcome
 ```
 
@@ -25,7 +25,7 @@ The generator creates `src/app/jobs/send-welcome.ts` and the job registry picks 
 
 `defineJob` takes a job name, a handler, and options. The handler receives a typed context with `payload`, `job`, and `logger`.
 
-```ts
+```ts title="define-the-job.ts"
 import { defineJob } from '@kwiva/queue'
 import User from '../models/user'
 import { WelcomeMail } from '../mail/welcome'
@@ -58,7 +58,7 @@ export default defineJob(
 
 Queues are declared in `src/config/queue.ts`. Use the `redis` driver in production, `database` when you want zero extra infrastructure, and `memory` for development and tests.
 
-```ts
+```ts title="declare-the-queue.ts"
 import { defineConfig } from '@kwiva/config'
 
 export default defineConfig('queue', {
@@ -81,7 +81,7 @@ export default defineConfig('queue', {
 
 Import the job definition and call `dispatch` from anywhere — a controller action, an event listener, or a command:
 
-```ts
+```ts title="dispatch-the-job.ts"
 import SendWelcome from '../app/jobs/send-welcome'
 
 await SendWelcome.dispatch({ userId: user.id })
@@ -95,7 +95,7 @@ The first call uses the job's default queue. The `delay` option defers the run, 
 
 Consume the queue with a worker process:
 
-```bash
+```bash title="terminal"
 kwiva queue:work --queue=emails,default --concurrency=5
 ```
 
@@ -105,7 +105,7 @@ kwiva queue:work --queue=emails,default --concurrency=5
 
 When attempts are exhausted the job lands in the DLQ (`failed_jobs` table). List, retry, and clear it from the CLI:
 
-```bash
+```bash title="terminal"
 kwiva queue:failed
 kwiva queue:retry <id>
 kwiva queue:clear <queue>

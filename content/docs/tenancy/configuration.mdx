@@ -9,7 +9,7 @@ The module exists because tenancy is a correctness boundary. A misconfigured res
 
 ## The Config Module
 
-```ts
+```ts title="src/config/tenancy.ts"
 // src/config/tenancy.ts
 export default defineConfig('tenancy', {
   defaults: {
@@ -61,7 +61,7 @@ There are two places the field can be set:
 1. **Globally** in `src/config/tenancy.ts`, which applies the field to every scoped model
 2. **Per model** on the `defineModel` options, which overrides the global default for that model
 
-```ts
+```ts title="configuring-the-tenant-field.ts"
 defineModel('projects', (f) => ({ ... }), { tenantField: 'tenantId' })
 ```
 
@@ -75,7 +75,7 @@ The default column name is `tenantId`, and it pays to keep it. The query engine 
 
 The `models` option narrows scoping to a specific set:
 
-```ts
+```ts title="choosing-which-models-are-scoped.ts"
 defaults: {
   models: ['projects', 'invoices'], // only these get tenant predicates
 }
@@ -90,7 +90,7 @@ The default is `models: '*'`, meaning every model participates. Scope this down 
 
 The `cache` and `storage` blocks control derived-state isolation:
 
-```ts
+```ts title="cache-and-storage-scoping.ts"
 defaults: {
   cache: { scoped: true },   // keys become {tenantId}:{key}
   storage: { scoped: true }, // paths become storage/{tenantId}/...
@@ -118,7 +118,7 @@ The mechanism follows the config precedence rule: global defaults first, tenant 
 
 Like every config module, `tenancy` can map environment variables through its `env` block:
 
-```ts
+```ts title="env-and-runtime-overrides.ts"
 export default defineConfig('tenancy', {
   defaults: { mode: 'domain' },
   env: { mode: 'TENANCY_MODE' },

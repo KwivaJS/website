@@ -32,7 +32,7 @@ The framework provides three execution models for this work: **jobs** (`defineJo
 
 The background layer lives in exactly two app-facing directories plus two config modules:
 
-```
+```plaintext title="one-mental-model.txt"
 src/app/jobs/           ← defineJob — one file per unit of work
 src/config/queue.ts     ← transport driver + named queues
 src/app/tasks/          ← defineTask — cron-driven unit of work
@@ -89,13 +89,13 @@ Because discovery is by convention and configuration is typed, the background la
 
 Scaffold a job with the CLI generator:
 
-```bash
+```bash title="terminal"
 kwiva make:job send-welcome
 ```
 
 This creates `src/app/jobs/send-welcome.ts` with a typed stub. Fill in the handler, then dispatch from anywhere in the app:
 
-```ts
+```ts title="quick-start.ts"
 import SendWelcome from '../app/jobs/send-welcome'
 
 await SendWelcome.dispatch({ userId: user.id })
@@ -103,7 +103,7 @@ await SendWelcome.dispatch({ userId: user.id })
 
 Start the built-in queue worker to process it:
 
-```bash
+```bash title="terminal"
 kwiva queue:work --queue=emails,default --concurrency=5
 ```
 

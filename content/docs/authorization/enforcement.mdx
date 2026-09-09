@@ -24,7 +24,7 @@ Each surface uses the same policy source, so there is exactly one definition of 
 
 The most important enforcement point is the one you never write. A model declared with the `permission` option generates five routes — `list/get/create/update/delete` — and every one of them checks `{permission}.{action}` against the policy namespace during the request lifecycle:
 
-```ts
+```ts title="generated-model-routes.ts"
 defineModel('posts', (f) => ({ ... }), {
   timestamps: true,
   permission: 'posts',
@@ -39,7 +39,7 @@ The route lifecycle stage matters for correctness: validation runs before the ch
 
 Hand-written endpoints opt into the same machinery with the `permission` route option. This is how custom actions — anything beyond the four CRUD verbs — get enforced:
 
-```ts
+```ts title="controller-routes.ts"
 export default defineController('posts', (c) => ({
   publish: c.post('/:id/publish', (), { permission: 'posts.publish' }),
 }))
@@ -69,7 +69,7 @@ This is deliberate: the tool resolver and the HTTP route resolve the same policy
 
 Background execution has a different nature: there is no request, no route lifecycle, and often no browser. Seeders and tasks therefore enforce explicitly with `await authorize(...)`, which throws a `ForbiddenError` when the current context lacks the ability. Explicit is correct here — silent `false` in a seed would half-provide data, and a task that quietly no-ops can be worse than one that fails loudly.
 
-```ts
+```ts title="seeders-and-tasks.ts"
 // inside a task or seeder
 await authorize('posts.update', post)   // throws ForbiddenError on denial
 ```

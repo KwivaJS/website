@@ -15,7 +15,7 @@ Scheduled tasks run recurring work — cleanup, digests, backups — on a cron s
 
 Scaffold the task into `src/app/tasks/` with the CLI generator:
 
-```bash
+```bash title="terminal"
 kwiva make:task cleanup-sessions
 ```
 
@@ -23,7 +23,7 @@ kwiva make:task cleanup-sessions
 
 `defineTask` takes a task name, a handler, and options. The handler receives `payload`, `logger`, and `config`.
 
-```ts
+```ts title="define-the-task.ts"
 import { defineTask } from '@kwiva/http'
 
 export default defineTask(
@@ -46,7 +46,7 @@ Tasks are engine-native and don't require a queue transport. If you later need q
 
 Schedule the task in `src/config/schedule.ts`. List it under `defaults.tasks`, keyed by task name:
 
-```ts
+```ts title="register-the-cron-entry.ts"
 import { defineConfig } from '@kwiva/config'
 
 export default defineConfig('schedule', {
@@ -66,7 +66,7 @@ export default defineConfig('schedule', {
 
 ## Run the scheduler
 
-```bash
+```bash title="terminal"
 kwiva schedule:list
 kwiva schedule:work
 kwiva schedule:run
@@ -78,11 +78,11 @@ kwiva schedule:run
 
 Run one task manually, from the CLI or from code:
 
-```bash
+```bash title="terminal"
 kwiva task:run cleanup-sessions --payload='{"dry":true}'
 ```
 
-```ts
+```ts title="run-a-task-on-demand.ts"
 import { tasks } from '@kwiva/http'
 
 await tasks.run('cleanup-sessions', { payload: { dry: true } })

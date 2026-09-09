@@ -23,7 +23,7 @@ description: "@kwiva/core — the application kernel: defineApp, the typed conte
 
 `defineApp` is the application kernel. It lives in `src/bootstrap/app.ts` and wires together your config, models, controllers, middleware, services, and modules into one runnable application.
 
-```ts
+```ts title="defineapp.ts"
 import { defineApp } from '@kwiva/core'
 import auth from '../app/http/auth'
 
@@ -49,7 +49,7 @@ export default defineApp({
 
 ### Signature
 
-```ts
+```ts title="signature.ts"
 defineApp(options: AppOptions): App
 ```
 
@@ -72,7 +72,7 @@ defineApp(options: AppOptions): App
 
 The app composes by adding `defineX` files to the standard tree. There is no manual registration step for framework construct types — discovery plus config does it:
 
-```
+```plaintext title="app-composition.txt"
 Adding src/app/models/posts.ts            → Model registered
 Adding src/app/http/controllers/posts.ts  → Controller registered
 Adding src/app/http/middleware/auth.ts    → Middleware available
@@ -124,7 +124,7 @@ Three mechanisms extend the context from the kernel:
 - **`decorate`** — immutable additions to the context (singletons)
 - **`resolve`** — per-request computed values, synchronous or async
 
-```ts
+```ts title="state-decorate-resolve.ts"
 export default defineApp({
   state: { startTime: 0 },
   decorate: { client: createClient() },
@@ -137,7 +137,7 @@ export default defineApp({
 
 Handlers then see fully typed fields:
 
-```ts
+```ts title="state-decorate-resolve-2.ts"
 defineController('posts', (c) => ({
   create: c.post('/', async (ctx) => {
     const post = await Post.create({
@@ -154,7 +154,7 @@ defineController('posts', (c) => ({
 
 Macros are reusable route-level keys declared once on the kernel and consumed per route with full typechecking against their signature:
 
-```ts
+```ts title="macros.ts"
 export default defineApp({
   macros: {
     auth: (required: boolean, { beforeHandle }) => {
@@ -167,7 +167,7 @@ export default defineApp({
 })
 ```
 
-```ts
+```ts title="macros-2.ts"
 defineController('posts', (c) => ({
   show: c.get('/:id', handler, { auth: true, rateLimit: { max: 100, per: 60 } }),
 }))
@@ -177,7 +177,7 @@ defineController('posts', (c) => ({
 
 All application configuration lives in the config folder and is read through a single typed accessor. The key is a dotted path into the merged configuration; the value type is inferred from the module's `defaults` and schema — there is no `any` config.
 
-```ts
+```ts title="config.ts"
 import { config } from '@kwiva/core'
 
 const url = config('database.url')
@@ -187,7 +187,7 @@ const environment = config('app.env')
 
 ### Signature
 
-```ts
+```ts title="signature-2.ts"
 config<T extends ConfigKey>(key: T): ConfigValue<T>
 ```
 
@@ -197,7 +197,7 @@ Every key you can pass is statically known from the config folder plus module co
 
 Environment variables are declared exactly once — in the `env` map of a `src/config/*.ts` module. That declaration is the source for typing, boot validation, and `.env.example` generation. Read them through `env()`:
 
-```ts
+```ts title="env.ts"
 import { env } from '@kwiva/core'
 
 const dbUrl = env('DATABASE_URL')
@@ -205,7 +205,7 @@ const dbUrl = env('DATABASE_URL')
 
 ### Signature
 
-```ts
+```ts title="signature-3.ts"
 env<K extends DeclaredEnvKey>(key: K): string
 ```
 
@@ -215,7 +215,7 @@ Reads of undeclared variables fail at compile time (ambient types) and at boot (
 
 The container is the process-wide home for typed services and singletons. Service objects are created with `defineService` from `@kwiva/services` and resolved anywhere in the application through `resolve()`:
 
-```ts
+```ts title="dependency-injection.ts"
 import { resolve } from '@kwiva/core'
 import EmailService from '../app/services/email'
 
@@ -246,7 +246,7 @@ Custom codes can be registered in `src/config/app.ts` with a status mapping — 
 
 `error()` constructs a typed error from the taxonomy. Throw it, or return it from lifecycle stages to short-circuit the pipeline.
 
-```ts
+```ts title="error.ts"
 import { error } from '@kwiva/core'
 
 defineController('posts', (c) => ({
@@ -271,13 +271,13 @@ defineController('posts', (c) => ({
 
 ### Signature
 
-```ts
+```ts title="signature-4.ts"
 error(code: ErrorCode, details?: { message?: string; issues?: Issue[] }): AppError
 ```
 
 Errors serialize to a JSON response the typed RPC client understands as a discriminated union on `code`:
 
-```json
+```json title="signature-2.json"
 {
   "code": "NOT_FOUND",
   "message": "Post not found",
@@ -287,7 +287,7 @@ Errors serialize to a JSON response the typed RPC client understands as a discri
 
 Validation failures include field-level detail:
 
-```json
+```json title="signature-3.json"
 {
   "code": "UNPROCESSABLE",
   "message": "Validation failed",
@@ -303,7 +303,7 @@ Every error response carries `requestId`, which matches the `x-request-id` heade
 
 Policies authorize a resource namespace. One file per namespace, registered by convention from `src/app/policies/*.ts`:
 
-```ts
+```ts title="definepolicy.ts"
 import { definePolicy } from '@kwiva/core'
 
 export default definePolicy('posts', (user, ability, resource) => {
@@ -321,7 +321,7 @@ export default definePolicy('posts', (user, ability, resource) => {
 
 ### Signature
 
-```ts
+```ts title="signature-5.ts"
 definePolicy(namespace: string, handler: PolicyHandler): Policy
 
 type PolicyHandler = (
@@ -335,7 +335,7 @@ type PolicyHandler = (
 
 Abilities are named `{namespace}.{action}` where `action` is one of `read | create | update | delete` plus any custom action (`publish`, `archive`) registered by controller definitions.
 
-```ts
+```ts title="checking-abilities.ts"
 ctx.can('posts.publish')
 ctx.can('posts.update', post)
 await authorize('posts.update', post)
@@ -347,7 +347,7 @@ await authorize('posts.update', post)
 
 Gates are single-purpose, reusable ability checks:
 
-```ts
+```ts title="definegate.ts"
 import { defineGate } from '@kwiva/core'
 
 export const onlyEditors = defineGate((user) => user.role === 'editor')
@@ -360,7 +360,7 @@ Gates compose onto routes and pages with a `gate:` key.
 
 Modules are package-level capability bundles — models, controllers, pages, jobs, events, policies, config, and migrations that drop into any Kwiva application. Every contribution point is optional:
 
-```ts
+```ts title="definemodule.ts"
 import { defineModule } from '@kwiva/core'
 
 export default defineModule({
@@ -386,7 +386,7 @@ export default defineModule({
 
 ### Signature
 
-```ts
+```ts title="signature-6.ts"
 defineModule(options: ModuleOptions): Module
 ```
 
@@ -410,7 +410,7 @@ defineModule(options: ModuleOptions): Module
 
 Modules register in `kwiva.config.ts` and their contributions merge into the app scan — models, controllers, and pages appear as if local, namespaced by module scope:
 
-```ts
+```ts title="options.ts"
 import { defineConfig } from '@kwiva/config'
 
 export default defineConfig({
@@ -422,7 +422,7 @@ export default defineConfig({
 
 Plugins extend the framework itself. They are consumed by modules and addons rather than imported directly by application code:
 
-```ts
+```ts title="defineplugin.ts"
 import { definePlugin } from '@kwiva/core'
 
 export const openapi = definePlugin('openapi', (app) => {
@@ -432,7 +432,7 @@ export const openapi = definePlugin('openapi', (app) => {
 
 ### Signature
 
-```ts
+```ts title="signature-7.ts"
 definePlugin(name: string, install: (app: App) => void | App): Plugin
 ```
 

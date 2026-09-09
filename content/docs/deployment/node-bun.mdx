@@ -19,7 +19,7 @@ Because the app surface is runtime-agnostic, you can develop on Bun and deploy t
 
 ## Build for a Node or Bun Runtime
 
-```bash
+```bash title="terminal"
 kwiva build                    # default preset for a Node runtime
 kwiva build --preset node_server
 kwiva build --preset bun-server
@@ -29,7 +29,7 @@ The build emits `.output/` containing `server/` and `public/`. The `server/` ent
 
 ## Run on Node
 
-```bash
+```bash title="terminal"
 node .output/server/index.mjs
 ```
 
@@ -40,7 +40,7 @@ node .output/server/index.mjs
 
 ## Run on Bun
 
-```bash
+```bash title="terminal"
 bun .output/server/index.mjs
 ```
 
@@ -51,7 +51,7 @@ The Bun preset uses the native Bun server with production features such as socke
 
 ## The Single Binary
 
-```bash
+```bash title="terminal"
 kwiva build --binary
 ./server
 ```

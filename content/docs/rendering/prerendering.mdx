@@ -11,7 +11,7 @@ Because the build runs the real pipeline — router match, guards, loaders, rend
 
 At `kwiva build`, routes marked for static output are rendered once and emitted as files:
 
-```
+```plaintext title="what-static-generation-produces.txt"
 dist/
 ├─ index.html
 ├─ about.html
@@ -34,7 +34,7 @@ Static output is decided per route, two ways:
 
 For a path with dynamic segments — `posts/$id` — the build needs the concrete set: declare them explicitly or let the crawler discover links from the pages it already renders:
 
-```
+```plaintext title="build-time-crawl-or-explicit-list.txt"
 static: true            → build writes these exact paths once
 prerender: true         → crawl from the route tree, prerender everything reachable
 ```
@@ -45,7 +45,7 @@ The crawler follows the same links users would: a list page that links to detail
 
 The crawl is driven by the route tree and the rendered pages themselves:
 
-```
+```plaintext title="crawl-mechanics.txt"
 build start
   → static: true routes render once (exact paths)
   → prerender: true routes crawl from the route tree
@@ -59,7 +59,7 @@ For data-driven paths such as `posts/$id`, the page set is whatever the crawler 
 
 Static output is produced by the same pipeline that serves SSR, run once at build:
 
-```
+```plaintext title="the-build-pass.txt"
 request (page route)                      kwiva build
   → router match                             → the same pipeline,
   → beforeLoad guards                         but once per static page,
@@ -88,7 +88,7 @@ In `static` mode the whole site is output to prerendered files and the API, if p
 
 `api+spa` mode renders differently: pages render **client-only** from the same `definePage` files, and the server serves the app shell plus the API. The page files do not change — the same named exports drive server rendering and single-page rendering alike. Route rules still apply to the API surface; the client build is what the host serves.
 
-```
+```plaintext title="client-only-fallback.txt"
 api+spa
   server → app shell + API
   client → same definePage files, rendered client-side
@@ -114,7 +114,7 @@ Choose static when content is fixed at build time (docs, marketing, a changelog)
 
 Static and ISR share one artifact model: a page that is `static` today can be promoted to `isr: n` when its content starts changing — the same route, now regenerated on an interval or on demand via `invalidateTags`. Either way the host keeps serving files; the difference is who does the rendering and when.
 
-```
+```plaintext title="static-incremental-regeneration.txt"
 static: true    → host serves files, never regenerated
 isr: 300        → host serves files, regenerated every 5 minutes (or on invalidateTags)
 ```
@@ -123,7 +123,7 @@ On-demand invalidation reaches ISR pages from any job, task, or event handler wi
 
 ## Getting Static Output
 
-```bash
+```bash title="terminal"
 kwiva build        # renders static + prerender routes, bundles the client
 kwiva preview      # verifies the built artifacts locally
 kwiva deploy       # ships to the configured host

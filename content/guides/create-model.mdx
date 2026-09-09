@@ -15,7 +15,7 @@ This guide walks through creating a model from scaffold to applied migration. In
 
 `kwiva make:model` scaffolds a model file plus a migration and factory stub:
 
-```bash
+```bash title="terminal"
 kwiva make:model posts
 ```
 
@@ -25,7 +25,7 @@ This creates `src/app/models/posts.ts` alongside a migration file in `src/databa
 
 Open the generated file and define your fields with the field DSL. Relation fields use lazy references (arrow functions) to avoid circular imports:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -50,7 +50,7 @@ export default defineModel('posts', (f) => ({
 
 Kwiva generates migrations by diffing the model definition against the live database. Preview the proposal first, then apply it:
 
-```bash
+```bash title="terminal"
 kwiva db:diff
 kwiva db:migrate
 ```
@@ -61,18 +61,18 @@ The migration creates the `posts` table and indexes derived from your field defi
 
 Confirm the migration was applied, then start the dev server and hit the generated route:
 
-```bash
+```bash title="terminal"
 kwiva db:status
 kwiva dev
 ```
 
-```bash
+```bash title="terminal"
 curl http://localhost:3000/posts
 ```
 
 The list route is derived from the model and returns an empty page:
 
-```json
+```json title="verify-it-works.json"
 { "data": [], "total": 0, "page": 1, "lastPage": 0 }
 ```
 

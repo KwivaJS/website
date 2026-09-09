@@ -14,7 +14,7 @@ A model in Kwiva is more than a database schema. It is the **single source of tr
 
 Models live one per file in `src/app/models/`. Create a new file there:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -41,7 +41,7 @@ export default defineModel('posts', (f) => ({
 
 The generator creates the model file plus a migration and factory stub:
 
-```bash
+```bash title="terminal"
 kwiva make:model post
 ```
 
@@ -50,7 +50,7 @@ kwiva make:model post
 
 ### The Factory Signature
 
-```ts
+```ts title="the-factory-signature.ts"
 defineModel(name, fields, options?)
 ```
 
@@ -62,7 +62,7 @@ defineModel(name, fields, options?)
 
 Register the model (no registration needed — it's discovered from `src/app/models/`), then run the migration:
 
-```bash
+```bash title="terminal"
 kwiva db:migrate
 ```
 
@@ -104,7 +104,7 @@ Kwiva provides a rich field DSL (the `f` in the field factory):
 
 Chain modifiers after the type to express constraints and behavior:
 
-```ts
+```ts title="field-modifiers.ts"
 f.string()
   .optional()             // nullable
   .default('draft')       // default value
@@ -115,7 +115,7 @@ f.string()
 
 Multi-field constraints live in the model options — composite uniques and composite indexes:
 
-```ts
+```ts title="field-modifiers-2.ts"
 }, {
   uniques: [['authorId', 'title']],
   indexes: [{ columns: ['status', 'publishedAt'] }],
@@ -152,7 +152,7 @@ Eager loads nest: `.with('comments.author')`.
 
 Each model exposes a typed query API, with find, create, update, delete, transactions, and raw escapes:
 
-```ts
+```ts title="querying-a-model.ts"
 import { Post, User, db } from '@kwiva/data'
 
 // query builder — typed, paginated
@@ -184,7 +184,7 @@ await db.transaction(async (tx) => {
 
 Models drive the database lifecycle through the CLI:
 
-```bash
+```bash title="terminal"
 kwiva db:diff               # model vs DB → migration proposal
 kwiva db:migrate            # apply pending migrations
 kwiva db:rollback --steps=1 # revert
@@ -193,7 +193,7 @@ kwiva db:seed               # run seeders
 
 Seeders use model factories:
 
-```ts
+```ts title="src/database/seeders/users.ts"
 // src/database/seeders/users.ts
 import { defineSeeder } from '@kwiva/data'
 

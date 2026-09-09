@@ -25,7 +25,7 @@ The overlay is part of the development server, not a separate dashboard process.
 
 Each row corresponds one-to-one with a request your dev server handled. Clicking a request expands it into its span waterfall, mirroring the shape telemetry would export in production:
 
-```text
+```text title="the-request-timeline.txt"
 http GET /api/posts (server)
  ├─ middleware.request-id
  ├─ middleware.session
@@ -42,7 +42,7 @@ Read the waterfall top to bottom to find where time went: a request that took 90
 
 Every dev response also carries a `server-timing` header, which frames the same timing information on the wire. This means you can inspect request timing directly from browser developer tools — the network tab shows the handler's staged timings without switching back to the terminal:
 
-```text
+```text title="server-timing.txt"
 server-timing: middleware;dur=0.4, validation;dur=0.2, controller;dur=8.1, model;dur=7.6, total;dur=9.0
 ```
 
@@ -75,7 +75,7 @@ The overlay is also where non-blocking findings from the verification gate show 
 
 The same data is available programmatically in the `kwiva console` REPL:
 
-```text
+```text title="the-console.txt"
 app.trace.last()      // the most recent span tree
 app.logs.tail(20)     // the last 20 log lines
 ```

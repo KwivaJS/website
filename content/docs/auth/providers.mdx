@@ -9,7 +9,7 @@ Every provider funnels into the same session machinery. That single fact shapes 
 
 ## The Provider Map
 
-```ts
+```ts title="the-provider-map.ts"
 export default defineAuth({
   providers: {
     password: { enabled: true, minLength: 10 },
@@ -44,7 +44,7 @@ The flow is three routes: sign-up creates the account and a session, sign-in exc
 
 For delegated identity, the OAuth providers are configured as a per-provider list that stays open — Google and GitHub are the built-in names, and the pattern extends to any provider. Google takes explicit credentials:
 
-```ts
+```ts title="oauth.ts"
 oauth: {
   google: { clientId: env('GOOGLE_CLIENT_ID'), secret: env('GOOGLE_SECRET') },
 }

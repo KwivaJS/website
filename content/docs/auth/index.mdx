@@ -11,7 +11,7 @@ The auth engine is deliberately opaque. The framework owns the protocol details 
 
 Everything auth-shaped flows from one declarative definition:
 
-```
+```plaintext title="overview.txt"
 src/app/http/auth.ts  →  defineAuth({ providers, session, user, hooks })
 ```
 
@@ -54,7 +54,7 @@ Secrets never live in the definition file. OAuth credentials are read through `e
 
 Authentication slots into the request lifecycle at a well-defined point. During context assembly, cookies are decoded and the session is loaded by the engine's store — the step responsible for turning a session cookie into a typed identity. Then, at the guard stage, middleware such as `auth` decides whether the request may continue:
 
-```
+```plaintext title="where-auth-runs-in-the-pipeline.txt"
 request
   → context assembly: session load from database/redis store
   → validation
@@ -100,7 +100,7 @@ Auth ships hardened without extra work:
 
 ## Quick Start
 
-```ts
+```ts title="src/app/http/auth.ts"
 // src/app/http/auth.ts
 import { defineAuth } from '@kwiva/auth'
 

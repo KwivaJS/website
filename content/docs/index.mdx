@@ -17,7 +17,7 @@ A serious TypeScript application today usually means gluing unrelated libraries 
 
 Kwiva collapses that stack into a single, coherent framework:
 
-```
+```plaintext title="the-solution.txt"
 One project. One configuration model. One CLI. One defineX language.
 ```
 
@@ -41,7 +41,7 @@ Kwiva is organized around four design pillars.
 
 Kwiva holds one core architectural rule:
 
-```
+```plaintext title="architecture-at-a-glance.txt"
 Application (src/) — models, http, pages, jobs, events, config
   ↓  writes defineX(...) only · imports only @kwiva/*
 Framework API surface (@kwiva/*)
@@ -57,7 +57,7 @@ The application depends only on the framework. The framework owns the sealed eng
 
 A single model definition feeds an intermediate representation (the model IR) from which the rest of the stack is derived — so there is no drift between your types, your API, and your database:
 
-```
+```plaintext title="one-definition-multiplies-the-stack.txt"
 src/app/models/*.ts ──► model IR
   ├─► database schema + migrations + seeders
   ├─► typed REST API routes (list / get / create / update / delete)
@@ -121,7 +121,7 @@ Every section has its own index page, and each page links to its neighbors, refe
 
 Scaffold a default **fullstack** application and start developing:
 
-```bash
+```bash title="terminal"
 bun create kwiva my-app
 cd my-app
 bun run dev

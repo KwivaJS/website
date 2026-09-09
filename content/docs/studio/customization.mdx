@@ -23,7 +23,7 @@ Start at the narrowest scope that solves the problem. A readonly field is two li
 
 The primary customization hook is `defineStudioScreen`, one file per model, composed on top of the generated screen:
 
-```tsx
+```tsx title="src/app/studio/posts.tsx"
 // src/app/studio/posts.tsx — override a model's Studio screens
 import { defineStudioScreen } from '@kwiva/studio'
 import { PostsTable } from '../ui/components/posts-table'
@@ -64,7 +64,7 @@ Since the underlying field type, validation, and relation wiring still come from
 
 Custom actions let you attach operations that go beyond the five standard CRUD actions, and each one is policy-gated:
 
-```tsx
+```tsx title="custom-actions.tsx"
 actions: [
   { label: 'Archive', ability: 'posts.archive', run: (p) => client.posts.archive(p.id) },
   { label: 'Restore', ability: 'posts.restore', run: (p) => client.posts.restore(p.id) },
@@ -81,7 +81,7 @@ Custom abilities come from controller actions; the route manifest registers them
 
 Bulk workflows build on the list screen's selection model (v1.x):
 
-```tsx
+```tsx title="bulk-actions.tsx"
 bulkActions: [
   { label: 'Mark published', ability: 'posts.publish',
     run: (rows) => client.posts.publishMany(rows.map((r) => r.id)) },
@@ -102,7 +102,7 @@ Custom pages live in your app code, import the typed client directly, and mount 
 
 A custom screen useful for genuinely divergent workflows:
 
-```tsx
+```tsx title="src/app/studio/moderation.tsx"
 // src/app/studio/moderation.tsx
 import { CrudPage, DataTable } from '@kwiva/studio'
 import { defineStudioScreen } from '@kwiva/studio'
@@ -139,7 +139,7 @@ Custom screens do not bypass any of these. A custom page is reached through the 
 
 The Studio shell and the generated screens are themeable through the same theming system as the public UI. From config:
 
-```ts
+```ts title="theming-and-dark-mode.ts"
 studio: {
   enabled: true,
   branding: { logo: '/logo.svg', title: 'Acme Admin', theme: 'dark' },

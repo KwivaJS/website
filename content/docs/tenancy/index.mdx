@@ -15,7 +15,7 @@ Kwiva's tenancy answers three questions for every request:
 
 The design principle is deliberately strict: **data access is scoped at the query boundary, not passed around by convention.** An unscoped query is not a style violation — it is close to impossible, because the query engine injects the tenant predicate automatically whenever a model opts in.
 
-```ts
+```ts title="src/config/tenancy.ts"
 // src/config/tenancy.ts
 export default defineConfig('tenancy', {
   defaults: {
@@ -52,7 +52,7 @@ export default defineConfig('tenancy', {
 
 Tenancy expects a tenant record to resolve against. The scaffolded shape includes a slug for domain lookup, an owner, and a plan:
 
-```ts
+```ts title="the-tenant-model.ts"
 defineModel('tenants', (f) => ({
   id: f.id(),
   name: f.string(),
@@ -82,7 +82,7 @@ Whatever the physical layout, the application-facing contract is the same: scale
 
 Migrations treat tenancy as a first-class concern. Models declaring `tenantField` generate the column and its index alongside every other field, so the predicate the query engine injects is always backed by an indexed column — scoping stays fast as a tenant's row count grows. Tenant data seeding follows the normal seeder path and composes with the test harness:
 
-```ts
+```ts title="migrations-and-seeding.ts"
 withApp(async (app) => {
   const acme = app.asTenant('acme')
   const globex = app.asTenant('globex')

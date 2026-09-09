@@ -11,7 +11,7 @@ The kernel does the composition work that other frameworks scatter across servic
 
 ## The Bootstrap File
 
-```ts
+```ts title="src/bootstrap/app.ts"
 // src/bootstrap/app.ts
 import { defineApp } from '@kwiva/core'
 import auth from '../app/http/auth'
@@ -99,7 +99,7 @@ Three options in `defineApp` shape what handlers receive, all fully typed:
 
 `macros` define reusable route-level option keys. Each macro is a function that inspects its option value and pushes into lifecycle arrays:
 
-```ts
+```ts title="context-and-macros.ts"
 defineApp({
   macros: {
     auth: (options: boolean, { beforeHandle }) => {
@@ -116,7 +116,7 @@ With the macros declared, a route can author `{ auth: true, cache: 60 }` and bot
 
 The kernel is not a production-only concern — tests boot the real thing. `withApp` boots the kernel with in-memory adapters where possible, so tests compose exactly like production. `createTestClient(app)` speaks to the running kernel in-process, giving you typed API tests without a network hop.
 
-```ts
+```ts title="testing-composition.ts"
 import { withApp, createTestClient } from '@kwiva/testing'
 
 const { client } = await withApp(async (app) => {

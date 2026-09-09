@@ -9,7 +9,7 @@ A module is a reusable capability package: a folder of contributions — models,
 
 A module is defined with the same declarative convention as everything else in Kwiva — one factory, plain serializable options, zero classes and zero decorators. The signature follows the `defineX` grammar you already know.
 
-```ts
+```ts title="modules/chat/index.ts"
 // modules/chat/index.ts
 import { defineModule } from '@kwiva/core'
 
@@ -76,7 +76,7 @@ Because discovery is glob-based, adding a file to a module folder is adding a ca
 
 A module model is a normal `defineModel` file. It derives everything an application model derives — table, generated REST routes, types, and Studio screens — but namespaced to the module:
 
-```ts
+```ts title="modules/chat/models/messages.ts"
 // modules/chat/models/messages.ts
 import { defineModel } from '@kwiva/data'
 
@@ -113,7 +113,7 @@ This port discipline is enforced mechanically: module boundary rules are part of
 
 A module is a folder. Everything it contributes is referenced through lazy globs relative to the module entry, so the module's models, controllers, pages, and jobs stay co-located:
 
-```text
+```text title="co-located-assets.txt"
 modules/chat/
 ├─ index.ts                  # defineModule entry
 ├─ models/
@@ -140,7 +140,7 @@ Because contributions are discovered by glob, adding a file to a module folder i
 - `shutdown` runs during app teardown, inverting boot order with the rest of the kernel. Providers stop, the queue drains, the engine stops — a module's teardown slots into that sequence.
 - `requires` declares compatible versions of `@kwiva/*` packages; addon tooling respects these ranges when resolving upgrades. Resolution rejects incompatible combinations rather than running them, and `kwiva addons update` will not jump outside a declared range.
 
-```ts
+```ts title="lifecycle-and-peer-requirements.ts"
 export default defineModule({
   name: '@acme/billing',
   version: '0.4.1',
@@ -164,7 +164,7 @@ export default defineModule({
 
 ## Publishing a Module
 
-```bash
+```bash title="terminal"
 kwiva module:build
 ```
 

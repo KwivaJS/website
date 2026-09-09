@@ -11,7 +11,7 @@ SSR orchestration is a locked framework decision (ADR-0006). The framework's ser
 
 A page request moves through a fixed pipeline:
 
-```
+```plaintext title="the-render-pipeline.txt"
 request (page route)
   → router match (owned router)
   → beforeLoad guards (session → login redirects)
@@ -44,7 +44,7 @@ Because loaders run in process, server rendering pays no HTTP round-trip for dat
 
 The first paint does not wait on the network from the browser:
 
-```
+```plaintext title="no-client-round-trip-for-first-paint.txt"
 server: loader data → HTML stream → <head> from loader data
 client: render from streamed HTML → hydrates → cache already warm
 ```
@@ -72,14 +72,14 @@ SSR is the dynamic default; route rules override it per path. The full stream, o
 
 Route rules are declared on server routes:
 
-```ts
+```ts title="src/routes/rules.ts"
 // src/routes/rules.ts
 defineServerRoute('/products/**', { isr: 300, cache: { tags: ['catalog'] } })
 ```
 
 On-demand invalidation reaches cached responses from anywhere with server authority — jobs, tasks, event handlers:
 
-```ts
+```ts title="ssr-and-route-rules.ts"
 invalidateTags(['catalog'])
 ```
 
@@ -89,7 +89,7 @@ The framework calls the engine's purge; the next request re-renders. Because rou
 
 SSR and caching compose with personalization. A public shell can be cached (`isr`), while user-specific fragments load client-side via data hooks (`useResource`) from session-scoped endpoints — keyed per user, never cached:
 
-```
+```plaintext title="personalization-with-cached-shells.txt"
 /products/**  isr cached shell   → same for every visitor
                 └─ useResource on session-scoped endpoint → fresh per user
 ```

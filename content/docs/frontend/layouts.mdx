@@ -11,7 +11,7 @@ This is the same model as the framework-owned router everywhere else: a matched 
 
 Every application has a root layout at `src/ui/pages/__root.tsx`. It establishes the provider tree and the single outlet that the whole application renders through:
 
-```tsx
+```tsx title="the-root-layout.tsx"
 import { definePage, Providers, Outlet } from '@kwiva/react'
 
 export default definePage({
@@ -31,7 +31,7 @@ export default definePage({
 
 Nested layouts live in folders using a `_layout.tsx` file. Routes inside the folder render into that layout's outlet:
 
-```
+```plaintext title="folder-layouts.txt"
 src/ui/pages/
 ├─ settings/
 │  ├─ _layout.tsx          # /settings shell — sidebar, heading, outlet
@@ -39,7 +39,7 @@ src/ui/pages/
 │  └─ security.tsx         # /settings/security
 ```
 
-```tsx
+```tsx title="src/ui/pages/settings/_layout.tsx"
 // src/ui/pages/settings/_layout.tsx
 import { definePage, Outlet } from '@kwiva/react'
 
@@ -58,7 +58,7 @@ export default definePage({
 
 Layouts and pages collapse in a predictable way: a matched URL is rendered through the layout chain that owns it, root first, leaf last:
 
-```
+```plaintext title="composition.txt"
 request: /settings/profile
   └─ __root.tsx           → renders <Providers><Layout><Outlet/>
        └─ settings/_layout.tsx  → renders <SettingsShell><Outlet/>
@@ -71,7 +71,7 @@ Anything a parent layout renders around its outlet is inherited by every descend
 
 Layout files contribute the URL prefix their folder owns. `settings/_layout.tsx` makes `/settings` the anchor of every route inside `settings/` — the same way `posts.$id.tsx` owns `/posts/:id`, a folder layout owns its directory:
 
-```
+```plaintext title="layouts-and-the-url.txt"
 src/ui/pages/account/        → URL prefix /account
 ├─ _layout.tsx               # /account shell
 ├─ billing.tsx               # /account/billing
@@ -84,7 +84,7 @@ The file tree is the URL tree: routes and layouts read the same naming rules, an
 
 Folders nest freely, and each level composes its own chrome. A two-level section needs two layout files, each owning its prefix:
 
-```
+```plaintext title="nested-layout-chains.txt"
 src/ui/pages/account/
 ├─ _layout.tsx              # /account shell
 ├─ settings/
@@ -113,7 +113,7 @@ The opposite also holds: a route that shares nothing does not need a layout file
 
 Layouts participate in data loading like any page. A layout loader runs in parallel with the loaders of every other matched route, and its results are typed into the layout's children through the same loader-data mechanism:
 
-```tsx
+```tsx title="src/ui/pages/settings/_layout-2.tsx"
 // src/ui/pages/settings/_layout.tsx
 export default definePage({
   loader: async ({ client }) => ({
@@ -133,13 +133,13 @@ Loaders across all matched routes execute in parallel and are deduplicated per r
 
 Because layouts are pages, `beforeLoad` belongs here too. Protecting an entire section becomes one declaration in the folder's `_layout.tsx` instead of a repeated check in every child page:
 
-```tsx
+```tsx title="guards-at-the-layout-level.tsx"
 beforeLoad: ({ session }) => {
   if (!session.user) throw redirect({ to: '/login' })
 }
 ```
 
-```
+```plaintext title="guards-at-the-layout-level-2.txt"
 Settings section
   └─ beforeLoad guard on settings/_layout.tsx
        └─ children never run their loaders when the guard throws

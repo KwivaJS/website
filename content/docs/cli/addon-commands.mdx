@@ -7,7 +7,7 @@ Addons are installable capability packages — the umbrella covering modules, pl
 
 ## How an Addon Lands
 
-```bash
+```bash title="terminal"
 kwiva add @kwiva/blog
 ```
 
@@ -33,7 +33,7 @@ That parity is the point of the registry entry. There is no separate "addon mode
 
 ## Managing Addons
 
-```bash
+```bash title="terminal"
 kwiva addons list
 kwiva addons search [query]
 kwiva addons info <addon>
@@ -57,7 +57,7 @@ kwiva addons outdated
 
 Updates are resolved against declared compatibility, never blindly:
 
-```bash
+```bash title="terminal"
 kwiva addons outdated       # 1. what is behind?
 kwiva addons info <addon>   # 2. what would change? requirements, changelog
 kwiva addons update <addon> # 3. move within the `requires` range
@@ -81,7 +81,7 @@ The contract in both directions:
 - **Consumers** get a surface with no guessing — search, info, install, update, remove, and audit are all first-class commands.
 - **Authors** get one publishing path — package with the keyword, and the addon becomes discoverable through the CLI rather than word of mouth.
 
-```bash
+```bash title="terminal"
 kwiva module:build         # package a module: manifest + compiled distribution
 # publish to the registry tagged with the kwiva-addon keyword
 kwiva addons search chat   # now discoverable by anyone
@@ -93,7 +93,7 @@ See [Addons](/docs/modules-plugins/addons) for the full authoring and distributi
 
 Addons register through the module registry in `kwiva.config.ts`:
 
-```ts
+```ts title="kwiva.config.ts"
 // kwiva.config.ts
 import { defineConfig } from '@kwiva/config'
 

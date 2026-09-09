@@ -9,7 +9,7 @@ Everything in this section is derived. You never write route files twice, hand-m
 
 ## One Model, One Manifest
 
-```
+```plaintext title="one-model-one-manifest.txt"
 src/app/models/posts.ts       defineModel('posts', ...)
 src/app/http/controllers/     defineController('posts', ...)
                  │
@@ -41,7 +41,7 @@ The pages above read in two directions: conventions first for authors who shape 
 
 Define a model once — the framework generates the five standard routes:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -54,7 +54,7 @@ export default defineModel('posts', (f) => ({
 
 Add custom behavior with a controller:
 
-```ts
+```ts title="src/app/http/controllers/posts.ts"
 // src/app/http/controllers/posts.ts
 import { defineController } from '@kwiva/http'
 
@@ -68,7 +68,7 @@ export default defineController('posts', (c) => ({
 
 Call the API with the typed client — every method, argument, and response type is inferred from the same definitions, with no codegen step:
 
-```ts
+```ts title="quick-start.ts"
 import { createClient } from '@kwiva/client'
 
 export const client = createClient({ baseUrl: 'https://api.acme.dev' })

@@ -23,7 +23,7 @@ The database commands own the lifecycle between your models and your database. K
 
 The reason the command set looks the way it does is the data model's source of truth: your `defineModel` files. Migrations, factories, seeders, typed queries, and Studio screens all derive from the field DSL — so the schema you migrate is the schema you wrote as types.
 
-```text
+```text title="the-model-first-model.txt"
 defineModel('posts', ...) ──▶ migration (from model diff)
                           ──▶ typed client  (list/get/create/update/delete)
                           ──▶ Studio screens
@@ -34,7 +34,7 @@ That is why `db:diff` exists: the database is always compared against the models
 
 ## Migrate and Rollback
 
-```bash
+```bash title="terminal"
 kwiva db:migrate
 kwiva db:rollback          # revert the most recent batch
 kwiva db:rollback --steps=3
@@ -46,7 +46,7 @@ Migrations from installed modules participate in the same sequence: module migra
 
 ## Status and Diff
 
-```bash
+```bash title="terminal"
 kwiva db:status      # applied / pending table
 kwiva db:diff        # model vs database — proposed changes
 ```
@@ -61,7 +61,7 @@ This diff-first discipline is what keeps the model the single source of truth. A
 
 ## Seed and Reset
 
-```bash
+```bash title="terminal"
 kwiva db:seed
 kwiva db:seed --seeder=posts   # run one seeder
 kwiva db:reset                 # drop → migrate → seed
@@ -73,7 +73,7 @@ kwiva db:reset                 # drop → migrate → seed
 
 ## Push: Model Straight to Database
 
-```bash
+```bash title="terminal"
 kwiva db:push      # v1.x
 ```
 
@@ -81,7 +81,7 @@ kwiva db:push      # v1.x
 
 ## Studio
 
-```bash
+```bash title="terminal"
 kwiva db:studio
 ```
 
@@ -91,7 +91,7 @@ kwiva db:studio
 
 Connections come from `src/config/database.ts` — driver, URL, pool, and migration table — with environment overrides validated at boot. The CLI reads the same config, so what `db:migrate` touches is exactly what the app connects to:
 
-```ts
+```ts title="src/config/database.ts"
 // src/config/database.ts
 export default defineConfig('database', {
   defaults: {
@@ -107,7 +107,7 @@ The environment mapping is declared here once; `DATABASE_URL` must exist before 
 
 A minimal pre-deploy sequence:
 
-```bash
+```bash title="terminal"
 kwiva db:status        # confirm no unexpected pending migrations
 kwiva db:diff          # confirm the schema matches your models
 kwiva check            # confirm the exec/lint/format gate passes

@@ -9,7 +9,7 @@ Every request handled by Kwiva produces a tree of trace spans automatically. The
 
 A typical request produces a shape like this:
 
-```text
+```text title="one-tree-per-request.txt"
 http GET /api/posts (server)
  ├─ middleware.request-id
  ├─ middleware.session
@@ -55,7 +55,7 @@ This is a deliberate PII and secret-safety decision. Trace data stays useful for
 
 When you need a span for work that lives outside the framework boundaries, the same tracing runtime is exported for app code:
 
-```ts
+```ts title="custom-spans.ts"
 import { trace } from '@kwiva/core'
 
 await trace('billing.recalc', async (span) => {
@@ -102,7 +102,7 @@ Readiness checks are the correct target for orchestrators and load balancers; li
 
 Telemetry configuration lives in `src/config/telemetry.ts`:
 
-```ts
+```ts title="configuration.ts"
 export default defineConfig('telemetry', {
   defaults: {
     sampleRate: 1.0,          // dev 1.0; production guidance 0.1

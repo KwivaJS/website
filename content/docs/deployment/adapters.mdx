@@ -9,7 +9,7 @@ A **runtime adapter** — also called a **deploy preset** — is a build-time tr
 
 Everything resolves through one pipeline:
 
-```text
+```text title="what-is-a-runtime-adapter.txt"
 defineApp kernel
    ├─ composed web-standard handler
    ├─ server build (framework-owned engine)
@@ -63,7 +63,7 @@ The mode chosen at scaffold time picks a sensible default:
 
 The adapter decision flow:
 
-```text
+```text title="choosing-an-adapter.txt"
 Is SSR/edge required?
  ├─ no → static mode
  ├─ yes → is the platform auto-detected in CI?
@@ -87,7 +87,7 @@ Special cases bend the adapter choice but never the application code:
 
 Because the application is written against Web Standards and imports only `@kwiva/*`, swapping adapters is a rebuild, not a refactor:
 
-```bash
+```bash title="terminal"
 kwiva build --preset node_server
 kwiva preview               # run it locally
 
@@ -97,7 +97,7 @@ kwiva preview
 
 Validate locally with `kwiva preview`, or smoke-test a specific preset by building and running the generated entry directly:
 
-```bash
+```bash title="terminal"
 kwiva build --preset node_server
 node .output/server/index.mjs
 ```

@@ -7,7 +7,7 @@ Kwiva is testable by construction. Every surface has an in-process entry point �
 
 ## The Test Pyramid for Kwiva Apps
 
-```
+```plaintext title="the-test-pyramid-for-kwiva-apps.txt"
 e2e                            — real browser against the built app
 integration                    — withApp: real kernel + adapters, in-memory engines where possible
 api                            — typed in-process client against the real request path
@@ -29,7 +29,7 @@ Framework philosophy sandboxes it clearly: applications should reach high covera
 
 `@kwiva/testing` provides the harness primitives used across the middle of the pyramid:
 
-```ts
+```ts title="the-harness.ts"
 import { withApp, createTestClient, queue, storage } from '@kwiva/testing'
 
 test('posts CRUD', withApp(async (app) => {
@@ -66,7 +66,7 @@ Fakes replace infrastructure without changing application code:
 | `http.fake()` | outbound client calls | stubbed responses |
 | `broadcast.fake()` | the realtime layer | emitted channels and events |
 
-```ts
+```ts title="fakes.ts"
 test('welcome email on signup', withApp(async (app) => {
   queue.fake()
   storage.fake()
@@ -87,7 +87,7 @@ The test runner is built into the framework — no separate tool to install, con
 
 Test layout mirrors the layers, so a reader knows where a test belongs by path:
 
-```text
+```text title="the-test-runner.txt"
 tests/
 ├─ unit/          # services, policies, jobs, helpers — no boot
 ├─ integration/   # withApp: real kernel, in-memory engines
@@ -102,7 +102,7 @@ Layering by directory keeps the layers obvious and lets the commands stay simple
 
 All levels run through one CLI:
 
-```bash
+```bash title="terminal"
 kwiva test                # unit + integration
 kwiva test --e2e          # add the browser-level projects
 kwiva test --watch posts  # watch a filter
@@ -123,7 +123,7 @@ Coverage runs through the same command surface (`kwiva test --coverage`), report
 
 The full verification gate runs on the Rust-speed toolchain the CLI is built on:
 
-```text
+```text title="testing-in-ci.txt"
 lint + format → typecheck → type tests → unit + integration (in-memory) →
 build (multiple presets) → smoke tests → e2e (browser projects)
 ```

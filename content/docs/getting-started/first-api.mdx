@@ -17,7 +17,7 @@ With the `posts` model from [Your First Model](/docs/getting-started/first-model
 | `PATCH` | `/api/posts/:id` | Update a post (policy-checked) |
 | `DELETE` | `/api/posts/:id` | Delete a post (respects soft delete) |
 
-```
+```plaintext title="the-free-api-from-your-model.txt"
 /api/{model}              ← generated model routes
 /api/{controller}/{...}   ← controller routes under their prefix
 /api/{controller}/:id     ← resource routes
@@ -26,7 +26,7 @@ With the `posts` model from [Your First Model](/docs/getting-started/first-model
 
 Try it against the dev server:
 
-```bash
+```bash title="terminal"
 # List posts
 curl http://localhost:3000/api/posts
 
@@ -38,7 +38,7 @@ curl -X POST http://localhost:3000/api/posts \
 
 ## The Anatomy of a Controller
 
-```ts
+```ts title="the-anatomy-of-a-controller.ts"
 defineController(name, (c) => ({ ... }), options)
 ```
 
@@ -46,7 +46,7 @@ The name (`'posts'`) drives discovery, route identity, and the namespace the rou
 
 ## A Complete Controller
 
-```ts
+```ts title="src/app/http/controllers/posts.ts"
 // src/app/http/controllers/posts.ts
 import { defineController } from '@kwiva/http'
 import { Post } from '../models/posts'
@@ -123,7 +123,7 @@ Every handler receives a fully typed context. Types are inferred from the route'
 | `set` | Response controls — status, headers, cookies |
 | `error` | Return a structured error response |
 
-```ts
+```ts title="typed-context.ts"
 handler: async ({ params, query, body, session, set, error }) => {
   set.status = 201
   set.headers['x-cache'] = 'miss'
@@ -137,7 +137,7 @@ Returning a plain object or array serializes to JSON; returning a web `Response`
 
 Any route accepts an option object validated against the route's method. Schemas can target each part of the request:
 
-```ts
+```ts title="per-route-validation.ts"
 c.post('/', handler, {
   body: { title: 'string', body: 'string?' },
   query: { draft: 'string?' },
@@ -157,7 +157,7 @@ c.post('/', handler, {
 
 A guard scopes a shared requirement — middleware, a schema, or a `beforeHandle` check — to a group of routes:
 
-```ts
+```ts title="guards.ts"
 defineController('admin', (c) => c.guard({
   middleware: ['auth'],
   beforeHandle: ({ session, error }) => {
@@ -173,7 +173,7 @@ defineController('admin', (c) => c.guard({
 
 Kwiva maps errors to HTTP through a small taxonomy of error codes:
 
-```ts
+```ts title="errors.ts"
 import { error } from '@kwiva/http'
 
 return error('NOT_FOUND')                       // 404 { code: 'NOT_FOUND' }
@@ -186,7 +186,7 @@ return error('VALIDATION', { message, issues }) // 422
 
 The typed client mirrors your controllers and models exactly:
 
-```ts
+```ts title="calling-the-api-from-code.ts"
 const posts = await client.posts.list({ page: 1 })       // typed response
 const post = await client.posts.get('pst_123')           // typed params and response
 await client.posts.publish('pst_123')                    // custom action, typed

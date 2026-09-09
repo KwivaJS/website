@@ -9,7 +9,7 @@ description: "React bindings — definePage contract, SSR orchestration and stre
 
 Every page file under `src/ui/pages/` default-exports a `definePage` definition. The factory takes a single options object covering validation, data, guards, and UI states.
 
-```tsx
+```tsx title="definepage.tsx"
 import { definePage, redirect, stream } from '@kwiva/react'
 
 export default definePage({
@@ -62,7 +62,7 @@ export default definePage({
 
 The loader is the only data-fetching surface for a page. It executes server-side during SSR (in-process, via the typed client) and client-side on navigation, in parallel across all matched routes and deduplicated per request.
 
-```tsx
+```tsx title="loader.tsx"
 loader: async ({ params, search, client }) => ({
   post: await client.posts.get(params.id),
   comments: stream(client.comments.list({ postId: params.id, page: search.page })),
@@ -81,7 +81,7 @@ A promise wrapped in `stream()` is deferred: the awaited shell renders immediate
 
 `loaderDeps` returns the subset of route state that should trigger a refetch. Navigation that changes only non-dep fields reuses the cached loader result.
 
-```tsx
+```tsx title="loaderdeps.tsx"
 loaderDeps: ({ search: { page } }) => ({ page })
 ```
 
@@ -89,7 +89,7 @@ loaderDeps: ({ search: { page } }) => ({ page })
 
 Guards run before loaders, on both SSR and the client. The context carries `session` and `location`; throwing `redirect` or `notFound` short-circuits the request.
 
-```tsx
+```tsx title="beforeload.tsx"
 beforeLoad: ({ session }) => {
   if (!session.user) throw redirect({ to: '/login' })
 }
@@ -99,7 +99,7 @@ beforeLoad: ({ session }) => {
 
 The search schema is built with a Standard Schema validator builder. It types `search`, `Link` and `useNavigate` targets, and drives `loaderDeps` refetching — invalid values fail at compile time.
 
-```tsx
+```tsx title="validatesearch.tsx"
 validateSearch: (s) => s.object({ q: s.optional(s.string()), page: s.optional(s.number()) })
 ```
 
@@ -107,7 +107,7 @@ validateSearch: (s) => s.object({ q: s.optional(s.string()), page: s.optional(s.
 
 `head` returns the document head for the route and is serialized per route during SSR, so SEO tags can derive from loader data.
 
-```tsx
+```tsx title="head.tsx"
 head: ({ loaderData }) => ({
   title: loaderData.post.title,
   meta: [{ name: 'description', content: loaderData.post.excerpt }],
@@ -118,7 +118,7 @@ head: ({ loaderData }) => ({
 
 `@kwiva/react` owns SSR orchestration. The framework renders; the serving engine responds. The pipeline is:
 
-```
+```plaintext title="ssr-renderer-streaming.txt"
 request (page route)
   → router match (owned router)
   → beforeLoad guards (session → login redirects)
@@ -149,7 +149,7 @@ Page routes honor the same rules as the API surface, declared per path in `src/r
 | `static` | Built once at `kwiva build` |
 | `prerender: true` | Crawled/prerendered at build time |
 
-```ts
+```ts title="route-rules.ts"
 defineServerRoute('/products/**', { isr: 300, cache: { tags: ['catalog'] } })
 ```
 
@@ -184,7 +184,7 @@ See [Hydration](/docs/rendering/hydration) and [SSR](/docs/rendering/ssr).
 
 `Providers` mounts the framework context at the root layout (`src/ui/pages/__root.tsx`). It injects session, the typed client, the data-hook cache, i18n, and theme, and handles client-side session and CSRF wiring.
 
-```tsx
+```tsx title="providers.tsx"
 import { definePage, Providers, Outlet } from '@kwiva/react'
 
 export default definePage({
@@ -207,7 +207,7 @@ export default definePage({
 
 Data hooks give components typed access to models over a client-side cache. Their keys derive from **model identity plus parameters**, so invalidation is model-scoped instead of hand-built.
 
-```tsx
+```tsx title="data-hooks.tsx"
 import { useResource, useList, useMutation, useInfiniteList, invalidate, useApi } from '@kwiva/react'
 import { Post } from '@kwiva/data'
 ```
@@ -223,14 +223,14 @@ import { Post } from '@kwiva/data'
 
 ### useResource
 
-```tsx
+```tsx title="useresource.tsx"
 const { data, isPending, error } = useResource(Post, id)
 const { data: post } = useResource(Post, id, { suspense: true })
 ```
 
 ### useList
 
-```tsx
+```tsx title="uselist.tsx"
 const { data, isFetching } = useList(Post, {
   where: { status: 'published' },
   orderBy: { createdAt: 'desc' },
@@ -242,7 +242,7 @@ const { data, isFetching } = useList(Post, {
 
 Mutations wrap a model action, support optimistic updates, and auto-invalidate on success.
 
-```tsx
+```tsx title="usemutation.tsx"
 const save = useMutation(Post.update, {
   optimistic: (input, current) => ({ ...current, ...input }),
   onSuccess: () => invalidate(Post),
@@ -256,7 +256,7 @@ The `optimistic` helper receives the mutation input and the currently cached row
 
 ### useInfiniteList
 
-```tsx
+```tsx title="useinfinitelist.tsx"
 const feed = useInfiniteList(Post, { cursor: 'createdAt', limit: 20 })
 ```
 
@@ -264,7 +264,7 @@ const feed = useInfiniteList(Post, { cursor: 'createdAt', limit: 20 })
 
 The escape hatch for custom queries backed by the typed client:
 
-```tsx
+```tsx title="useapi.tsx"
 const report = useApi(['report', id], () => client.reports.get(id))
 ```
 
@@ -298,7 +298,7 @@ The full data-hook option surface is passed through on read hooks:
 
 The provider exposes typed client hooks:
 
-```tsx
+```tsx title="client-hooks.tsx"
 const { user, signOut, isPending } = useSession()
 const theme = useConfig('ui.theme')
 const canPublish = useCan('posts.publish')
@@ -318,7 +318,7 @@ See [Client-Side Auth](/docs/auth/client-usage) and [Policies](/docs/authorizati
 
 Realtime hooks wrap typed channel subscriptions from the client:
 
-```tsx
+```tsx title="realtime-hooks.tsx"
 const { messages, send } = useChannel(`chat.${roomId}`, {
   onMessage: (m) => enqueue(m),
 })
@@ -337,7 +337,7 @@ See [Client-Side Realtime](/docs/realtime/client-usage) and [Channels](/docs/rea
 
 `useForm` builds schema-driven forms from a model action. Fields derive from model validation, server errors map back to fields, and submit runs through the mutation pipeline on the same cache — no separate form library is required (v1.x).
 
-```tsx
+```tsx title="forms.tsx"
 const form = useForm(Post.create)
 ```
 
@@ -345,7 +345,7 @@ const form = useForm(Post.create)
 
 `@kwiva/react` supports a Preact runtime through `preact/compat`, selected in the UI config (`src/config/ui.ts`):
 
-```ts
+```ts title="preact-compatibility.ts"
 import { defineConfig } from '@kwiva/config'
 
 export default defineConfig('ui', {

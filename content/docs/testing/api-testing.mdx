@@ -9,7 +9,7 @@ API tests sit between integration and E2E: they exercise the real request path �
 
 API tests are built on `createTestClient(app)`:
 
-```ts
+```ts title="the-in-process-client.ts"
 import { withApp, createTestClient } from '@kwiva/testing'
 
 test('creates and lists a post', withApp(async (app) => {
@@ -33,7 +33,7 @@ Three properties make the test client the right tool for API assertions:
 
 The generated surface and the authored surface are both under test. A generated model route — `client.posts.list` or `client.posts.create` — is a route the IR derived from the model definition; a custom controller action — `client.posts.archive` — is a route you wrote. API tests pin both, because both are consumed identically by the frontend and by third parties.
 
-```ts
+```ts title="endpoint-contracts.ts"
 test('custom action matches its contract', withApp(async (app) => {
   const client = createTestClient(app)
   const post = await client.posts.create({ title: 'Draft' })
@@ -49,7 +49,7 @@ Because the client is built from the same IR as the shipped client, an API test 
 
 The client mirrors the production RPC surface. List responses carry both `data` and `total`:
 
-```ts
+```ts title="asserting-responses.ts"
 const { data, total } = await client.posts.list({ page: 1 })
 expect(total).toBe(3)
 expect(data).toHaveLength(3)
@@ -57,7 +57,7 @@ expect(data).toHaveLength(3)
 
 Typed reads and writes follow the same shape, and the full builder surface is available through the client — where clauses, pagination, relation loading, and custom controller actions:
 
-```ts
+```ts title="asserting-responses-2.ts"
 const archived = await client.posts.archive(postId)
 expect(archived.data.status).toBe('archived')
 ```
@@ -66,7 +66,7 @@ expect(archived.data.status).toBe('archived')
 
 Errors flow back typed — `{ code, message }` — and assertions target the contract:
 
-```ts
+```ts title="asserting-errors.ts"
 test('returns a typed not-found error', withApp(async (app) => {
   const client = createTestClient(app)
 
@@ -77,7 +77,7 @@ test('returns a typed not-found error', withApp(async (app) => {
 
 Status mapping follows the framework error helpers, so `error('NOT_FOUND', { message })` surfaces through the client as a typed error with the expected status. Validation failures return field-mapped errors, and the test can assert which field failed and why:
 
-```ts
+```ts title="asserting-errors-2.ts"
 const bad = await client.posts.create({ title: '' })
 expect(bad.error.code).toBe('VALIDATION_ERROR')
 ```
@@ -97,7 +97,7 @@ The discipline to keep: assert on the error contract, not just that something th
 
 Because policies and tenant scoping run on every request, API tests are the definitive place to pin them down:
 
-```ts
+```ts title="permissions-and-tenant-behavior.ts"
 test('a writer cannot publish a post', withApp(async (app) => {
   const writer = await client.auth.signUp({ email: 'writer@dev.test', password: 'swordfish123' })
   const post = await client.posts.create({ title: 'Draft' })
@@ -110,7 +110,7 @@ test('a writer cannot publish a post', withApp(async (app) => {
 
 Tenant behavior asserts the scoping invariant directly:
 
-```ts
+```ts title="permissions-and-tenant-behavior-2.ts"
 withApp(async (app) => {
   const acme = app.asTenant('acme')
   const globex = app.asTenant('globex')
@@ -130,7 +130,7 @@ The cross-tenant read returns the same code as a genuinely missing row — testi
 
 Authentication runs through the real auth surface. Tests establish state the way a user would — through `client.auth.signUp` — or carry a prepared identity where the flow under test assumes a signed-in actor.
 
-```ts
+```ts title="auth-state.ts"
 test('session flows through the typed client', withApp(async (app) => {
   const client = createTestClient(app)
   const user = await client.auth.signUp({ email: 'a@b.dev', password: 'swordfish123' })

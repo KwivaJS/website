@@ -11,7 +11,7 @@ Because one runtime validates every boundary, the behavior is consistent: the sa
 
 Each route accepts a schema option object. Values missing from the schema are not silently accepted; the schema is the contract for that route:
 
-```ts
+```ts title="per-route-schemas.ts"
 c.post('/', async ({ body, session }) =>
   Post.create({ ...body, authorId: session.user.id })
 , {
@@ -37,7 +37,7 @@ Five request regions can be schema'd independently:
 
 Schemas compose across regions in one route:
 
-```ts
+```ts title="the-validation-surface.ts"
 c.patch('/posts/:id', async ({ params, body }) => {
   const post = await Post.findOrFail(params.id)
   return post.update(body)
@@ -53,7 +53,7 @@ A route can validate any subset of these regions. The schemas also define the ha
 
 Validation is a pipeline stage, sandwiched between `onTransform` and `onBeforeHandle`:
 
-```
+```plaintext title="when-validation-runs.txt"
 onParse → onTransform → validation → onBeforeHandle (guards) → handler
 ```
 
@@ -63,7 +63,7 @@ The ordering is a guarantee: guards see validated values. A guard's policy check
 
 For models, the field DSL is the validation source — no duplicate schemas exist. Field types and their validation chaining generate the schema that guards generated endpoints and Studio screens:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -85,7 +85,7 @@ The model's fields drive the schemas of its five generated routes, the typed cli
 
 Controllers declare the same Standard Schema-compatible shape the rest of the runtime understands. Object-field notation is available for the common cases, and full Standard Schema objects compose with it on one route:
 
-```ts
+```ts title="controller-schemas.ts"
 c.post('/', handler, {
   body: v.object({ title: v.string().min(1), body: v.optional(v.string()) }),
   query: v.object({ draft: v.optional(v.string()) }),
@@ -111,7 +111,7 @@ An invalid `where` field fails before the query builder ever sees it. Callers ca
 
 A validation failure returns a 422 with the error taxonomy code and a machine-readable issues list:
 
-```json
+```json title="friendly-field-mapped-errors.json"
 {
   "error": {
     "code": "VALIDATION",

@@ -13,7 +13,7 @@ Frameworks that spread their operations across several tools force you to learn 
 
 Command resolution is deterministic — built-ins first, then your app's console commands, then module commands. If your application defines `import:legacy` and a module defines the same name, the app's command wins; the resolver never has to guess.
 
-```bash
+```bash title="terminal"
 kwiva new helpdesk          # scaffold
 kwiva dev                   # develop
 kwiva check                 # gate
@@ -72,7 +72,7 @@ Interactive prompts fill in omitted arguments — run `kwiva new` with no name a
 
 The CLI is extensible from the application itself. Commands in `src/app/console/` are auto-discovered and join the built-in surface under their own names:
 
-```ts
+```ts title="src/app/console/import-legacy.ts"
 // src/app/console/import-legacy.ts
 import { defineCommand } from '@kwiva/cli'
 
@@ -91,7 +91,7 @@ export default defineCommand('import:legacy', {
 
 Signature-based parsing, progress bars, tables, and styled output come built in. The `handle` receives typed access to application state — `models`, `config`, and anything else the app resolves — so an app-defined command is just code with the framework's context. Run it exactly like a built-in:
 
-```bash
+```bash title="terminal"
 kwiva import:legacy export.csv --dry-run
 ```
 

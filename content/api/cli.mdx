@@ -82,7 +82,7 @@ All generators follow the naming conventions (lowercase, kebab-case) and emit ty
 
 Applications define their own commands with `defineCommand`, auto-discovered from `src/app/console/`:
 
-```ts
+```ts title="src/app/console/import-legacy.ts"
 // src/app/console/import-legacy.ts
 import { defineCommand } from '@kwiva/cli'
 
@@ -104,7 +104,7 @@ export default defineCommand('import:legacy', {
 
 Command signatures use the standard `{arg}` / `{--flag}` form. Helpers include progress bars, tables, and styled output. Run it as:
 
-```bash
+```bash title="terminal"
 kwiva import:legacy export.csv --dry-run
 ```
 

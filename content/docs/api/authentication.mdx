@@ -11,7 +11,7 @@ Authentication is resolved by the pipeline, not by your handlers. The session mi
 
 By default the API authenticates with session cookies. The request lifecycle loads the session from the cookie before handlers run and exposes it as typed context:
 
-```ts
+```ts title="session-cookies-default.ts"
 handler: async ({ session }) => {
   session.user          // { id, email, role } | null
   session.user?.id      // typed when signed in
@@ -22,7 +22,7 @@ Sessions live behind a pluggable store — database by default — and support s
 
 ### Cookie configuration
 
-```ts
+```ts title="cookie-configuration.ts"
 import { defineAuth } from '@kwiva/auth'
 
 export default defineAuth({
@@ -40,7 +40,7 @@ The cookie flags are the browser-facing contract: `httpOnly` keeps the session o
 
 For API clients that cannot manage cookies — mobile apps, server-to-server integrations — switch the session strategy to `jwt`. The client receives a signed token and presents it as a bearer credential on each request:
 
-```ts
+```ts title="token-sessions.ts"
 defineAuth({
   session: {
     strategy: 'jwt',
@@ -67,7 +67,7 @@ Auth routes mount from `defineAuth` in `src/app/http/auth.ts`. See [Authenticati
 
 Attach the `auth` middleware to require a session:
 
-```ts
+```ts title="src/app/http/middleware/auth.ts"
 // src/app/http/middleware/auth.ts
 import { defineMiddleware, error } from '@kwiva/http'
 
@@ -79,7 +79,7 @@ export default defineMiddleware('auth', async (ctx, next) => {
 
 Scope it to a controller:
 
-```ts
+```ts title="protecting-endpoints.ts"
 defineController('posts', (c) => ({ ... }), {
   prefix: '/posts',
   middleware: ['auth'],
@@ -92,7 +92,7 @@ A missing or invalid session returns `401` with the `UNAUTHORIZED` code.
 
 Guards apply auth plus policy checks to a group of nested routes with a single declaration:
 
-```ts
+```ts title="guarded-groups.ts"
 export default defineController('posts', (c) => c.guard({
   middleware: ['auth', 'tenant'],
   beforeHandle: ({ session }) => {
@@ -113,7 +113,7 @@ The guard's middleware runs first, its check runs after validation, and the per-
 
 Authentication gets a caller in the door; permissions decide what they may touch. Routes carry a `permission` key checked against `definePolicy`:
 
-```ts
+```ts title="per-route-permissions.ts"
 create: c.post('/', async ({ body, session }) => {
   return Post.create({ ...body, authorId: session.user.id })
 }, {
@@ -143,7 +143,7 @@ Routes opt in to protection — there is no global everything-private flag to fo
 
 The session middleware resolves identity during context assembly; the `auth` middleware asserts it; guards assert specifics; permissions assert ability. Each runs at its fixed stage, which is what makes the ordering dependable:
 
-```ts
+```ts title="where-auth-runs-in-the-pipeline.ts"
 session load → tenant resolve → validation → auth guard → permission → handler
 ```
 
@@ -165,7 +165,7 @@ The middleware loads the session on every request. Session data is available at 
 
 Authenticated does not mean authorized. The session tells you who made the request; an owner-scoped query confirms they may read the resource:
 
-```ts
+```ts title="ownership-checks-at-the-edge.ts"
 handler: async ({ session, params }) => {
   const post = await Post.findFirst({
     where: { id: params.id, authorId: session.user.id },

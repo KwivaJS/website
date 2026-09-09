@@ -11,7 +11,7 @@ The server is a thin, derived artifact: it mounts at a route you choose, speaks 
 
 Enablement lives in one config module. Add it to `src/config/` and the server mounts automatically:
 
-```ts
+```ts title="src/config/mcp.ts"
 // src/config/mcp.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -84,7 +84,7 @@ Mint tokens narrowly. A token for a sales-reporting agent needs `invoices` read 
 
 From the agent side, the server is just another MCP server to register. For a remote deployment over streamable HTTP:
 
-```json
+```json title="connecting-a-client-or-agent.json"
 {
   "mcpServers": {
     "acme": {
@@ -97,7 +97,7 @@ From the agent side, the server is just another MCP server to register. For a re
 
 For local development, register the server as a `stdio` command and the agent connects to your generated surface directly:
 
-```json
+```json title="connecting-a-client-or-agent-2.json"
 {
   "mcpServers": {
     "acme-local": {

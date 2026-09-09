@@ -7,7 +7,7 @@ Soft deletes mark records as deleted without permanently removing them. A `delet
 
 ## Enabling
 
-```ts
+```ts title="enabling.ts"
 export default defineModel('posts', (f) => ({
   title: f.string(),
 }), {
@@ -24,7 +24,7 @@ The option adds the `deletedAt` timestamp column to the schema and turns the gen
 
 ## Query Behavior
 
-```ts
+```ts title="query-behavior.ts"
 const active = await Post.query().get()                  // excludes trashed rows (default)
 const withTrashed = await Post.query().withTrashed().get() // includes everything
 const trashed = await Post.query().onlyTrashed().get()   // only deleted rows
@@ -46,7 +46,7 @@ Scoping is injected into the query the same way tenant scoping is — invisible 
 | `Post.restore(id)` | Clears `deletedAt`, row becomes active again |
 | `Post.forceDelete(id)` | Physically removes the row |
 
-```ts
+```ts title="deleting-and-restoring.ts"
 const post = await Post.findOrFail(id)
 await post.delete()                    // soft delete
 
@@ -81,7 +81,7 @@ When restoring, consider the object graph: restoring a parent does **not** autom
 
 A unique constraint on a soft-deleted table eventually collides with a recreated row:
 
-```ts
+```ts title="uniques-and-soft-deletes.ts"
 email: f.string().unique(),
 ```
 

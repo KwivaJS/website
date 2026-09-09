@@ -11,7 +11,7 @@ Calling the API is indistinguishable from calling code. Args are validated again
 
 The client infers everything at the type level. The framework derives ambient types from your definitions into `src/.kwiva/types`, and `createClient()` picks them up. No code generation step runs, nothing is committed to the repo, and there is nothing to regenerate when the API changes.
 
-```
+```plaintext title="zero-codegen-one-type-universe.txt"
 defineModel ──► defineController ──► route manifest ──► @kwiva/client types
 ```
 
@@ -21,7 +21,7 @@ Because the contract lives at the type level, the editor knows the full surface 
 
 ## Reading
 
-```ts
+```ts title="reading.ts"
 import { createClient } from '@kwiva/client'
 
 export const client = createClient()
@@ -35,7 +35,7 @@ const users = await client.users.list({ where: { role: 'admin' }, page: 1 })
 
 ## Mutating
 
-```ts
+```ts title="mutating.ts"
 const created = await client.posts.create({ title: 'Hello' })       // POST /api/posts
 const updated = await client.posts.update(id, { title: 'New title' }) // PATCH /api/posts/:id
 await client.posts.remove(id)                                       // DELETE /api/posts/:id
@@ -47,13 +47,13 @@ Write operations mirror the REST contract: `create` sends a validated body, `upd
 
 Controller actions appear on the same client object as first-class methods:
 
-```ts
+```ts title="custom-actions.ts"
 await client.posts.publish('pst_123')     // POST /api/posts/pst_123/publish
 ```
 
 Controller-managed resources mount under their prefix:
 
-```ts
+```ts title="custom-actions-2.ts"
 const report = await client.reports.get('prj_9')
 ```
 
@@ -63,7 +63,7 @@ A custom action's option schema becomes the method's argument types, so an optio
 
 Errors are discriminated on the result object — the client returns a union you can branch on without string matching. On success, `res.data` holds the fully typed payload of that route, so reads need no narrowing; on failure, `res.error` describes the problem with a typed `code` and `message`:
 
-```ts
+```ts title="typed-errors.ts"
 const res = await client.posts.get(id)
 
 if (res.error) {
@@ -84,7 +84,7 @@ if (res.error) {
 
 Realtime endpoints stream through the same client:
 
-```ts
+```ts title="subscriptions.ts"
 const stream = await client.chat.stream('general')
 ```
 

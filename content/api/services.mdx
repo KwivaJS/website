@@ -15,7 +15,7 @@ Service resolution uses `resolve()` from `@kwiva/core` — see the [core referen
 
 ## `defineService`
 
-```ts
+```ts title="src/app/services/email.ts"
 // src/app/services/email.ts
 import { defineService } from '@kwiva/services'
 
@@ -42,7 +42,7 @@ export default defineService('email', {
 
 ### Signature
 
-```ts
+```ts title="signature.ts"
 defineService<const Methods extends ServiceMethods>(name: string, methods: Methods): Service<Methods>
 ```
 
@@ -63,7 +63,7 @@ The factory takes an object literal rather than a class, so inference is structu
 
 Services are available anywhere in the process through the container:
 
-```ts
+```ts title="typed-injection.ts"
 import { resolve } from '@kwiva/core'
 import EmailService from '../app/services/email'
 
@@ -77,7 +77,7 @@ await email.sendWelcome(user)
 
 Services are the coordination layer: they own workflows that span multiple models and other services. Compose by resolving peer services at the call site, so each method states its dependencies explicitly:
 
-```ts
+```ts title="src/app/services/orders.ts"
 // src/app/services/orders.ts
 import { defineService } from '@kwiva/services'
 import { resolve, config } from '@kwiva/core'
@@ -114,7 +114,7 @@ Services compose with the same tools as the rest of the framework: models and tr
 
 Controllers call services directly, either by importing the service or by resolving it from the container:
 
-```ts
+```ts title="src/app/http/controllers/auth.ts"
 // src/app/http/controllers/auth.ts
 import { defineController } from '@kwiva/http'
 import EmailService from '../../app/services/email'
@@ -134,7 +134,7 @@ Keeping mail, billing, and sync flows inside a service keeps the controller a th
 
 Job handlers run outside the request lifecycle but inside the same process container, so they resolve services identically:
 
-```ts
+```ts title="src/app/jobs/send-welcome.ts"
 // src/app/jobs/send-welcome.ts
 import { defineJob } from '@kwiva/queue'
 import { resolve } from '@kwiva/core'
@@ -158,7 +158,7 @@ A worker that retries a job re-enters the same handler; because the service is r
 
 Page loaders run server-side and can resolve services to prepare data before render:
 
-```ts
+```ts title="src/ui/pages/account.tsx"
 // src/ui/pages/account.tsx
 import { definePage } from '@kwiva/react'
 import { resolve } from '@kwiva/core'

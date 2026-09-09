@@ -23,7 +23,7 @@ Handlers that only glue HTTP to a service are covered better by integration and 
 
 Policies are pure functions, which makes them the easiest high-value unit test in an app:
 
-```ts
+```ts title="a-policy-test.ts"
 import { test, expect } from 'bun:test'
 import postsPolicy from '../src/app/policies/posts'
 
@@ -51,7 +51,7 @@ Policy tests are also the cheapest documentation of the authorization contract: 
 
 Services sit between routes and data. Unit tests drive them with plain input and inspect plain output, replacing the data layer with the same fakes the integration layer uses:
 
-```ts
+```ts title="a-service-test.ts"
 import { test, expect } from 'bun:test'
 
 test('reports only active subscriptions to billing', async () => {
@@ -67,7 +67,7 @@ Because services are declared values — plain functions closed over their depen
 
 Jobs are pure units of background work. A job test constructs a payload and inspects the handler logic with it — without a worker, without a queue connection:
 
-```ts
+```ts title="job-tests.ts"
 import { test, expect } from 'bun:test'
 
 test('welcome payload builds the expected message', () => {
@@ -89,7 +89,7 @@ This is a deliberate middle ground: the test stays fast and deterministic, but i
 
 Factories are useful far beyond integration tests. Any test that needs a plausible row on hand — a post with an owner, a user with a role, a comment thread — can build it without a database:
 
-```ts
+```ts title="model-factories-in-unit-tests.ts"
 const post = await User.factory().create({ role: 'editor' })
 ```
 
@@ -103,7 +103,7 @@ The factory surface comes from the model:
 
 In a unit test, `make()` is enough — you need a value that looks like a user, not a row committed to a database. Overrides let each test describe exactly the case under test:
 
-```ts
+```ts title="model-factories-in-unit-tests-2.ts"
 test('only the author can delete the draft', () => {
   const author = User.factory().make({ id: 'u1', role: 'writer' })
   const draft = Post.factory().make({ authorId: author.id })
@@ -120,7 +120,7 @@ Unit tests run in milliseconds for a reason: they never boot the app, never open
 
 The same build discipline applies: unit tests run under the same single command as the rest of the suite, so there is no separate tool or ceremony to keep them healthy.
 
-```bash
+```bash title="terminal"
 kwiva test                 # unit + integration together
 kwiva test --watch posts   # watch the unit tests matching "posts"
 ```

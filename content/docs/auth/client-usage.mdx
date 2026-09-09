@@ -9,7 +9,7 @@ Authenticated frontends need three things: current identity, a way to change it,
 
 The frontend entry point is `useSession()`, which returns the current user, the sign-out action, and the pending state:
 
-```tsx
+```tsx title="the-usesession-hook.tsx"
 const { user, signOut, isPending } = useSession()
 ```
 
@@ -43,7 +43,7 @@ The ui-kit `AuthScreen` pattern covers the common flows — credential sign-in, 
 
 The generated auth endpoints are called either directly by your chosen screen or by the ready-made ui-kit `AuthScreen` pattern. A minimal custom flow calls the API and lets the hooks react:
 
-```tsx
+```tsx title="sign-in-and-sign-out-flows.tsx"
 const { user, isPending } = useSession()
 
 if (!user && !isPending) {
@@ -63,7 +63,7 @@ Sign-out is symmetric: call `signOut()` and the hook flips to the signed-out sta
 
 The data hooks are session-aware by design. `useResource`, `useList`, and `useMutation` inherit identity from the authenticated client, so queries that depend on the current user just work:
 
-```tsx
+```tsx title="session-aware-data-hooks.tsx"
 const { data: myPosts } = useList(Post, { where: { status: 'published' } })
 const { mutate } = useMutation(Post.update, {
   optimistic: (input, current) => ({ ...current, ...input }),
@@ -88,7 +88,7 @@ This is why page guards belong in `beforeLoad` and not in a client-only effect: 
 
 The session is part of the root context available to the whole tree. `createRootWithContext` injects session, config, and client into your layout, so nested components access identity without prop drilling:
 
-```tsx
+```tsx title="root-context-injection.tsx"
 export default createRootWithContext({
   session,
   client,

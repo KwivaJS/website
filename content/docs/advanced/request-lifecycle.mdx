@@ -7,7 +7,7 @@ Every request a Kwiva application serves travels the same ordered pipeline. Midd
 
 ## The Pipeline, Step by Step
 
-```
+```plaintext title="the-pipeline-step-by-step.txt"
   1. client request
   2. preset adapter                     → Web Request normalization
   3. pipeline entry
@@ -62,7 +62,7 @@ Every hook can be attached at three scopes, and the scopes compose:
 - **Controller scope** — runs for every route served by a controller, and is the right place for resource-wide guards or a shared input normalization step.
 - **Route scope** — runs only for one specific route.
 
-```ts
+```ts title="src/app/http/controllers/posts.ts"
 // src/app/http/controllers/posts.ts
 import { defineController } from '@kwiva/http'
 
@@ -100,7 +100,7 @@ By the time the handler runs, the request has already surrendered everything you
 
 Context assembly runs in a fixed order: parse query and body, decode cookies and load the session, resolve the tenant (subdomain, path, header, or fixed single-tenant strategy), then run `state`, `decorate`, and `resolve` for per-request derivation.
 
-```ts
+```ts title="src/bootstrap/app.ts"
 // src/bootstrap/app.ts
 import { defineApp } from '@kwiva/core'
 
@@ -133,7 +133,7 @@ On page routes, loaders may defer data so the shell streams while slower queries
 
 A typed RPC request from the client resolves to an API route and crosses the pipeline exactly like any other request:
 
-```
+```plaintext title="the-model-and-rpc-view-of-the-same-branch.txt"
 client.posts.get(id)
   → POST /api/posts/:id            (typed client → route)
   → route manifest match           (step 4)
@@ -155,7 +155,7 @@ Anything you attach to `onError` must tolerate a partially streamed SSR response
 
 Every stage above is a span in the distributed trace tree, so a single request produces a readable waterfall:
 
-```
+```plaintext title="correlating-with-distributed-tracing.txt"
 http GET /api/posts (server)
  ├─ middleware.request-id
  ├─ middleware.session

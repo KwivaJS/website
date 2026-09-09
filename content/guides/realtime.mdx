@@ -15,7 +15,7 @@ Realtime pushes updates to connected clients the moment they happen. Kwiva's rea
 
 Declare a channel with the `channel()` factory, using a namespaced pattern. Subscriptions are checked on upgrade by `.policy`, using the same policy shape as REST:
 
-```ts
+```ts title="define-the-channel.ts"
 import { channel, broadcast } from '@kwiva/http'
 
 export const chat = channel('chat.{roomId}')
@@ -29,7 +29,7 @@ A client can only subscribe to `chat.{roomId}` when the policy returns a value �
 
 Broadcast an event into a channel either by emitting a domain event or by calling `broadcast` directly from server code.
 
-```ts
+```ts title="broadcast-messages.ts"
 import { defineEvent } from '@kwiva/events'
 
 export const MessagePosted = defineEvent('message.posted', (f) => ({
@@ -40,7 +40,7 @@ export const MessagePosted = defineEvent('message.posted', (f) => ({
 })
 ```
 
-```ts
+```ts title="broadcast-messages-2.ts"
 import { MessagePosted } from '../app/events/message-posted'
 
 await MessagePosted.emit({ roomId: message.roomId, messageId: message.id })
@@ -52,7 +52,7 @@ The event's `broadcast` function maps the event to the channel name, and the bro
 
 Use `useChannel` in a React component. Payloads are typed from the event definitions, and the hook reconnects with backoff:
 
-```tsx
+```tsx title="subscribe-from-the-client.tsx"
 import { useChannel, usePresence } from '@kwiva/react'
 
 const { messages, send } = useChannel(`chat.${roomId}`, {
@@ -68,7 +68,7 @@ const { members } = usePresence(`chat.${roomId}`)
 
 Where WebSockets are unavailable — restrictive proxies or edge restrictions — streams use server-sent events with the same channel policy semantics. For one-directional feeds:
 
-```ts
+```ts title="fall-back-to-sse.ts"
 c.get('/feed', ({ stream }) =>
   stream((controller) => {
     posts.on('message', (m) => controller.enqueue(m))

@@ -18,7 +18,7 @@ Every page file is created with `definePage` from `@kwiva/react` and default-exp
 
 Routes map one-to-one to files under `src/ui/pages/`. The router supports flat plus dotted paths, `$param` segments, `$` splat segments, a `__root` layout file, and folders for nested layouts.
 
-```
+```plaintext title="route-conventions.txt"
 src/ui/pages/
 ├─ __root.tsx              # root layout + providers + outlet
 ├─ index.tsx               # /
@@ -55,7 +55,7 @@ The router scans `src/ui/pages/**` and derives a typed route tree for your app.
 - Invalid `to`, `params`, and `search` values fail at **compile time** — the types encode every legal path, its `$param` names, and its validated search schema.
 - No runtime codegen step: types flow from the generated tree, and the tree itself is what the matcher executes against.
 
-```tsx
+```tsx title="route-tree-generation.tsx"
 <Link to="/posts/$id" params={{ id: post.id }} />
 ```
 
@@ -72,7 +72,7 @@ Requests resolve against the generated route tree with a score-based matcher:
 
 `definePage({ loader })` is the single data-fetching surface for a page. Loaders run server-side during SSR and client-side during navigation, execute **in parallel across all matched routes**, and are deduplicated per request so a shared fetch is not repeated.
 
-```tsx
+```tsx title="loaders.tsx"
 import { definePage, stream } from '@kwiva/react'
 
 export default definePage({
@@ -99,7 +99,7 @@ A promise wrapped in `stream()` is deferred rather than awaited:
 - Deferred values stream into their `Suspense` boundary as they resolve, on both SSR and the client.
 - In the loader you return the promise as-is; downstream components read it through the loader data.
 
-```tsx
+```tsx title="deferred-data-with-stream.tsx"
 import { definePage, stream } from '@kwiva/react'
 
 export default definePage({
@@ -122,7 +122,7 @@ export default definePage({
 
 `loaderDeps` narrows when a loader refetches after navigation. It receives the current route state and returns a dependency object; only changes to the returned fields trigger a new load.
 
-```tsx
+```tsx title="refetch-scoping-with-loaderdeps.tsx"
 export default definePage({
   validateSearch: (s) => s.object({ page: s.optional(s.number()) }),
   loaderDeps: ({ search: { page } }) => ({ page }),
@@ -139,7 +139,7 @@ Here navigating from `/posts/123?page=2` to `/posts/123?page=3` refetches, while
 
 `beforeLoad` runs before loaders for every matched route and is the place to enforce auth and permission redirects. Throwing `redirect` or `notFound` aborts the load and short-circuits the pipeline.
 
-```tsx
+```tsx title="beforeload-guards.tsx"
 import { definePage, redirect } from '@kwiva/react'
 
 export default definePage({
@@ -168,7 +168,7 @@ Guard semantics:
 
 `validateSearch` declares the route's search schema with a Standard Schema validator builder. The schema drives three things: compile-time types for `search` and `Link`/`useNavigate` calls, runtime validation of incoming URLs, and refetch scoping via `loaderDeps`.
 
-```tsx
+```tsx title="search-params-validation.tsx"
 import { definePage } from '@kwiva/react'
 
 export default definePage({
@@ -189,7 +189,7 @@ Invalid `search` values passed to `Link` or `useNavigate` are compile-time error
 
 `<Link>` is the declarative navigation primitive. `to`, `params`, and `search` are checked against the generated route tree.
 
-```tsx
+```tsx title="link.tsx"
 import { Link } from '@kwiva/react'
 
 <Link to="/posts/$id" params={{ id: post.id }}>Read</Link>
@@ -208,7 +208,7 @@ import { Link } from '@kwiva/react'
 
 Programmatic navigation uses the same typed target as `Link`.
 
-```tsx
+```tsx title="usenavigate.tsx"
 import { useNavigate } from '@kwiva/react'
 
 const navigate = useNavigate()
@@ -229,7 +229,7 @@ navigate({ to: '..', relative: true })
 
 Within a page, typed state is available through hooks on the generated `Route`:
 
-```tsx
+```tsx title="route-scoped-hooks.tsx"
 const { id } = Route.useParams()
 const search = Route.useSearch()
 const loaderData = Route.useLoaderData()
@@ -241,7 +241,7 @@ const loaderData = Route.useLoaderData()
 
 Preloading runs a route's loader before navigation and stores the result in the same cache the data hooks read, so navigating never double-fetches.
 
-```tsx
+```tsx title="preloading.tsx"
 <Link to="/posts/$id" params={{ id: post.id }} preload="intent">{post.title}</Link>
 ```
 
@@ -267,7 +267,7 @@ Scroll restoration is opt-in per router and keyed per route:
 
 The router's context is created with `createRootWithContext`, which carries the objects every loader, guard, and hook consumes — session, client, and config — so nothing is threaded by hand.
 
-```ts
+```ts title="route-context.ts"
 createRootWithContext({
   session: initialSession,
   client: appClient,
@@ -277,7 +277,7 @@ createRootWithContext({
 
 On the root layout, the context is mounted through `Providers`, which injects session, the typed client, the data-hook cache, i18n, and theme for every route below it:
 
-```tsx
+```tsx title="route-context-2.tsx"
 import { definePage, Providers, Outlet } from '@kwiva/react'
 
 export default definePage({
@@ -307,7 +307,7 @@ Memory history is what the test harnesses use — the router runs headless with 
 
 404s are expressed as a typed `notFound()` throw, rendered by the nearest `notFoundComponent`:
 
-```tsx
+```tsx title="not-found-handling.tsx"
 import { definePage, notFound } from '@kwiva/react'
 
 export default definePage({

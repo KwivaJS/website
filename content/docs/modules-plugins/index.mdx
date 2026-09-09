@@ -18,7 +18,7 @@ This section covers the full story in four pages:
 
 A module is a **package-level capability**. One module can ship models, controllers, middleware, pages, jobs, events, tasks, policies, migrations, config defaults, and channel policies together, all namespaced so they never collide with your application code:
 
-```ts
+```ts title="modules/chat/index.ts"
 // modules/chat/index.ts
 import { defineModule } from '@kwiva/core'
 
@@ -54,7 +54,7 @@ The noun for "installable capability" is **addon**. An addon is any one of three
 
 All three flow through the same install path — `kwiva add` — and are managed by the same `kwiva addons` commands. The distinction matters at authoring time: a module is authored with `defineModule`, a plugin with `definePlugin`, and a theme as a ui-kit skin; at consumption time they are all just "addons."
 
-```bash
+```bash title="terminal"
 kwiva add @kwiva/blog               # a module: install + register + migrations check
 kwiva add ./addons/analytics --path # a local addon from a workspace path
 kwiva addons list                   # everything installed, with contributions and versions
@@ -113,7 +113,7 @@ Local and vendored modules are fully first-class — you get all the composition
 
 Modules exist to be composed. The application kernel (`defineApp` in `src/bootstrap/app.ts`) receives discovered files and explicit providers; modules contribute to both. The module registry lives in `kwiva.config.ts`:
 
-```ts
+```ts title="kwiva.config.ts"
 // kwiva.config.ts
 export default defineConfig({
   modules: [

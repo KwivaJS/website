@@ -7,7 +7,7 @@ Fields are how you describe every attribute, constraint, and behavior of a resou
 
 Every field flows through the same pipeline:
 
-```
+```plaintext title="fields-dsl.txt"
 Field definition → Type resolution → Modifier chain → Validation schema → Database column
 ```
 
@@ -15,7 +15,7 @@ Field definition → Type resolution → Modifier chain → Validation schema �
 
 Every model needs a primary key. The default is a UUID primary key, with an autoincrement option:
 
-```ts
+```ts title="identity.ts"
 id: f.id(),                        // uuid pk by default
 id: f.id('autoincrement'),          // integer autoincrement pk
 ```
@@ -69,7 +69,7 @@ Specialized types are thin: they map to a standard column and add domain validat
 
 `f.enum` and `f.enumSet` constrain a field to a fixed vocabulary:
 
-```ts
+```ts title="enums-and-choices.ts"
 status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
 labels: f.enumSet('red', 'green', 'blue').optional(),
 ```
@@ -101,7 +101,7 @@ Relations use **lazy references** (`() => Model`) so models compose without circ
 
 Modifiers are chained on any field and are typechecked against it — `f.integer().step(0.01)` compiles, `f.string().step(0.01)` does not:
 
-```ts
+```ts title="common-modifiers.ts"
 f.string().optional().default('draft').indexed().unique().nullable()
   .validation((s) => s.min(1).max(200)).searchable().orderable()
   .hidden().readonly().required().fillable().guarded()
@@ -131,7 +131,7 @@ Numeric and string types add constraint modifiers: `f.string().min(1).max(200)`,
 
 `validation()` compiles the field rule into the request schema for generated routes, and into the same schema used by the client and Studio:
 
-```ts
+```ts title="validation-integration.ts"
 f.string().validation((s) => s.min(1).max(200))
 f.email().validation((s) => s.email())
 f.integer().validation((s) => s.min(0).max(1000000))

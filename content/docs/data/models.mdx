@@ -9,7 +9,7 @@ Models live one-per-file in `src/app/models/` and are authored with `defineModel
 
 ## The defineModel Factory
 
-```ts
+```ts title="the-definemodel-factory.ts"
 import { defineModel } from '@kwiva/data'
 
 export default defineModel('posts', (f) => ({
@@ -59,7 +59,7 @@ The third argument is typed — every option is validated and flows into the mod
 
 Fields use a function-based DSL. Each field starts from a type constructor and accepts a chain of modifiers:
 
-```ts
+```ts title="the-field-dsl.ts"
 f.string().optional().default('draft').indexed().validation((s) => s.min(1).max(200))
 f.text().optional().nullable()
 f.enum('active', 'inactive').default('active')
@@ -101,7 +101,7 @@ f.morphToMany(() => Tag)
 
 Every field flows through the same chain:
 
-```
+```plaintext title="the-field-dsl-2.txt"
 Field definition → Type resolution → Modifier chain → Validation schema → Database column
 ```
 
@@ -125,7 +125,7 @@ The identity and scalar types are covered in depth on [Fields & DSL](/docs/data/
 
 ## Model API
 
-```ts
+```ts title="model-api.ts"
 import { Post, db } from '@kwiva/data'
 
 const posts = await Post.query()
@@ -179,7 +179,7 @@ The route shape is deterministic, so the typed client and OpenAPI document are a
 | `onCreating` | `(row, ctx) => void` | Defaults and derived values before insert (for example a slug) |
 | `onDeleting` | `(row, ctx) => Promise<void>` | Guards before delete — throw to abort the delete |
 
-```ts
+```ts title="hooks.ts"
 export default defineModel('posts', (f) => ({
   title: f.string(),
   isPinned: f.boolean().default(false),
@@ -197,7 +197,7 @@ The hook context carries the session, so audit-aware and tenant-aware logic can 
 
 Beyond `computed` options, fields can derive or transform values per field:
 
-```ts
+```ts title="custom-accessors.ts"
 export default defineModel('users', (f) => ({
   email: f.string().unique(),
   displayName: f.string().computed((row) => `${row.firstName} ${row.lastName}`),
@@ -215,7 +215,7 @@ Field-level `validation()` uses Standard Schema, with Valibot as the documented 
 
 ## Derivation Pipeline
 
-```
+```plaintext title="derivation-pipeline.txt"
 defineModel files → model IR → SQL tables + migrations → REST routes → typed client → Studio → OpenAPI → MCP tools → TypeScript types → Search indexes
 ```
 

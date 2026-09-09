@@ -40,7 +40,7 @@ The API is mounted at the `/api` prefix, configured in `src/config/api.ts`.
 
 Versioning is configured in `src/config/api.ts`:
 
-```ts
+```ts title="versioning.ts"
 export default defineConfig('api', {
   versioning: { strategy: 'url', default: 'v1' },
 })
@@ -65,7 +65,7 @@ With the `url` strategy every route mounts under a version: `/api/v1/posts`. Bre
 
 Single resources serialize to the model's shape directly. List endpoints use a paginated envelope:
 
-```json
+```json title="json-responses.json"
 {
   "data": [],
   "total": 142,
@@ -80,7 +80,7 @@ Single resources serialize to the model's shape directly. List endpoints use a p
 
 Offset pagination is the default contract:
 
-```
+```plaintext title="pagination.txt"
 GET /api/posts?page=3&limit=20
 ```
 
@@ -123,7 +123,7 @@ Each failure status maps to one taxonomy code from the shared error model. See t
 
 Every error response uses one envelope:
 
-```json
+```json title="error-envelope.json"
 {
   "error": {
     "code": "NOT_FOUND",
@@ -139,7 +139,7 @@ The `code` comes from a single error taxonomy mapped to HTTP statuses. A `VALIDA
 
 The derivation is mechanical. Take the model name, pluralize and lowercase it, mount under the API prefix, and append the version when versioning is on:
 
-```ts
+```ts title="deriving-a-url.ts"
 posts          →  /api/posts
 posts + id     →  /api/posts/:id
 posts + action →  /api/posts/:id/publish
@@ -152,7 +152,7 @@ You never configure these paths individually — they are properties of the mode
 
 A filtered, eager-loaded list call:
 
-```http
+```http title="a-full-list-round-trip.http"
 GET /api/posts?where={"status":"published"}&with=["comments"]&page=2&limit=10
 ```
 
@@ -184,7 +184,7 @@ Query parameters are camelCase: `page`, `limit`, `sort`, `with`, `where`. `where
 
 ## Mutually Exclusive Shapes
 
-```ts
+```ts title="mutually-exclusive-shapes.ts"
 // single record
 { "id": "...", "title": "hello", "authorId": "..." }
 

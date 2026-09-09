@@ -11,7 +11,7 @@ Streaming is the default mechanism of the framework-owned SSR pipeline (ADR-0006
 
 A page loader can split its work into blocking and deferred:
 
-```tsx
+```tsx title="the-shell-first-contract.tsx"
 loader: async ({ params, client }) => ({
   post: await client.posts.get(params.id),                        // blocking
   comments: stream(client.comments.list({ postId: params.id })),  // streams in
@@ -23,7 +23,7 @@ loader: async ({ params, client }) => ({
 
 The page marks where each deferred piece lands:
 
-```tsx
+```tsx title="the-shell-first-contract-2.tsx"
 component: ({ loaderData: { post, comments } }) => (
   <article>
     <h1>{post.title}</h1>
@@ -40,7 +40,7 @@ The shell flushes fully rendered — the correct `head` included — with the de
 
 Streaming is not merely progressive enhancement — it lets rendering and data run concurrently. While the server renders the blocking content and flushes it, the deferred queries continue in the background and flush as they complete. On a comment-heavy post, the headline and body reach first paint while the comment query is still running; comments then stream in without a second navigation.
 
-```
+```plaintext title="render-in-parallel-with-data.txt"
 t0   blocking data resolves → shell flushes
 t0.. deferred query runs in parallel with rendering
 tN   deferred chunk resolves → suspense boundary flushes
@@ -52,7 +52,7 @@ This mirrors the parallel loader contract: all matched loaders run concurrently,
 
 Streamed loader data and suspense-enabled data hooks share one boundary model. A hook with `suspense: true` throws to the nearest suspense boundary while pending — the same boundary that renders a streamed `loaderData` segment — so a page can mix a blocking loader value, a deferred value, and a client-only query under the same boundary tree:
 
-```tsx
+```tsx title="streaming-and-suspense-data-hooks.tsx"
 <Suspense fallback={<p>Loading…</p>}>
   <StreamedSegment stream={comments} />   // deferred loader value
   <UserPanel />                           // suspense-enabled hook, fetches on client
@@ -78,7 +78,7 @@ The loader split is what protects the shell budget: only direct `await`s in load
 
 The client treats streamed segments the same way it treats any suspense boundary. The shell hydrates immediately, the deferred region is hydrated when its chunk arrives, and the router stays on the same route and search state throughout. There is no page reload and no duplicated fetch — each chunk carries its own loader data keyed identically to the client cache.
 
-```
+```plaintext title="what-streaming-changes-on-the-client.txt"
 shell → hydrates immediately
 chunk → hydrates its boundary as it arrives
 router → stays on the same route and search state throughout
@@ -119,7 +119,7 @@ The rule of thumb: if a missing value would leave the shell useless, block it. O
 
 Streaming, hydration, and caching share one result model: the full streamed response. The shell and its deferred chunks dehydrate into the same state payload, rehydrate into the same cache keys, and cache as one composed response. Their interaction:
 
-```
+```plaintext title="streaming-hydration-and-caching-together.txt"
 shell + deferred chunks → one response
   → dehydrated into the state payload
   → cached whole under route rules

@@ -20,7 +20,7 @@ Anything that is not presentational — data access, validation, navigation typi
 
 The kit is organized into four layers:
 
-```
+```plaintext title="layering.txt"
 the built-in UI kit
  ├─ tokens      design tokens: colors, radii, spacing, dark mode
  ├─ primitives  accessible components: dialog, popover, select, tabs, toast
@@ -58,7 +58,7 @@ The kit ships layout primitives (Sidebar, Topbar, EmptyState) and the `Link` nav
 
 Forms are derived from `defineModel`. Field metadata — validation rules, enums, optionality — comes from the field DSL, so the form needs no second schema:
 
-```tsx
+```tsx title="form-primitives.tsx"
 import { Form } from '@kwiva/ui-kit'
 
 <Form model={Post} onSubmit={save.mutate}>
@@ -74,7 +74,7 @@ Server-side validation errors map per field through the typed client's error con
 
 `DataTable` is the workhorse of generated screens — server-driven pagination and filtering through the typed list endpoint of the model:
 
-```tsx
+```tsx title="datatable.tsx"
 import { DataTable } from '@kwiva/ui-kit'
 
 <DataTable
@@ -98,7 +98,7 @@ The same table powers Studio's generated list screens, which is why a model chan
 
 Tokens are declared in a stylesheet that ships with the preset and can be overridden per app:
 
-```css
+```css title="tokens-theming.css"
 /* src/styles/tokens.css — the default preset, overridable */
 @import 'tailwindcss';
 @theme {
@@ -122,7 +122,7 @@ Dark mode is token-swapped — the same components re-theme without layout chang
 
 Patterns combine components into screen-shaped surfaces used by Studio and generated scaffolds. `CrudPage` is the canonical example — a DataTable plus a create/edit form shell, wired to the model's list and mutation endpoints:
 
-```tsx
+```tsx title="patterns-whole-screens.tsx"
 <CrudPage
   model={Post}
   columns={['title', 'status', 'author', 'publishedAt']}

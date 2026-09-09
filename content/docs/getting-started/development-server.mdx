@@ -7,7 +7,7 @@ The development server is where you spend most of your time: it starts fast, hot
 
 ## Starting the Server
 
-```bash
+```bash title="terminal"
 bun run dev
 ```
 
@@ -20,7 +20,7 @@ bun run dev
 | `--port <n>` | Run on a specific port, e.g. `kwiva dev --port 4000` |
 | `--cluster` | Start a cluster across available cores |
 
-```bash
+```bash title="terminal"
 bun run dev --port 4000
 ```
 
@@ -43,7 +43,7 @@ bun run dev --port 4000
 
 Environment problems surface immediately instead of at request time. A missing required variable produces a clear error:
 
-```
+```plaintext title="boot-time-validation.txt"
 ✗ Missing required environment variables:
     DATABASE_URL   (declared in src/config/database.ts)
 ```
@@ -102,7 +102,7 @@ The `kwiva` CLI covers the rest of the inner loop:
 
 A typical loop looks like:
 
-```bash
+```bash title="terminal"
 kwiva make:model post
 kwiva db:migrate
 bun run dev

@@ -9,7 +9,7 @@ The top of the test pyramid is E2E: a real browser drives the real UI against th
 
 E2E tests use the browser test runner bound for Kwiva apps:
 
-```ts
+```ts title="tests/e2e/posts.spec.ts"
 // tests/e2e/posts.spec.ts
 import { test, expect } from '@kwiva/testing/playwright'
 
@@ -54,7 +54,7 @@ That makes E2E the place to assert the properties that lower layers cannot see:
 
 Test data is seeded the same way integration tests seed theirs — through the harness API and the same factories:
 
-```ts
+```ts title="tests/e2e/posts.spec-2.ts"
 // tests/e2e/posts.spec.ts
 test('a seeded dashboard renders', async ({ page }) => {
   await User.factory().count(5).create()
@@ -74,7 +74,7 @@ That second property is why E2E stays maintainable: the setup for a flow is a ty
 
 E2E runs against a real server, not mocked routes. The two supported targets match the development and production loops:
 
-```bash
+```bash title="terminal"
 kwiva test --e2e                # dev server
 kwiva test --e2e --server=preview   # the built artifact
 ```
@@ -110,7 +110,7 @@ Browser tests are the most environment-sensitive layer. The habits that keep the
 
 The E2E stage runs last, behind every faster signal, so a regression is caught at its cheapest. The pipeline a Kwiva project ships in CI:
 
-```text
+```text title="ci-ordering.txt"
 lint + format → typecheck → type tests → unit + integration (in-memory) →
 build (multiple presets) → smoke tests → e2e (browser projects)
 ```

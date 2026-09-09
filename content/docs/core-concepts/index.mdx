@@ -11,7 +11,7 @@ If you have not created a project yet, start with [Getting Started](/docs/gettin
 
 Kwiva is organized as a stack of four layers. Application code lives at the top, framework APIs in the middle, and everything below is owned by the framework, not by you:
 
-```
+```plaintext title="the-mental-model.txt"
 Application (src/)
     ↓  authoring via defineX files
 Framework APIs (@kwiva/* packages)
@@ -63,7 +63,7 @@ Because definitions are plain typed functions, the framework can derive everythi
 
 The conventions in this section map to a fixed directory layout. Knowing the tree is the fastest way to predict what a file does:
 
-```
+```plaintext title="the-standard-tree.txt"
 kwiva.config.ts            # entry: config folder + build/deploy/modules
 src/
 ├─ bootstrap/app.ts        # defineApp — the kernel

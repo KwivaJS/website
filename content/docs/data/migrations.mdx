@@ -7,7 +7,7 @@ Migrations evolve your database schema over time. Kwiva's approach is diff-drive
 
 ## The Workflow
 
-```bash
+```bash title="terminal"
 kwiva make:model invoice    # model + migration + factory stub
 kwiva db:diff               # model IR vs live DB → migration proposal
 kwiva db:migrate            # apply pending
@@ -30,7 +30,7 @@ kwiva db:reset              # drop + migrate + seed
 
 A migration is a pair of typed SQL steps:
 
-```ts
+```ts title="src/database/migrations/0001_create_posts.ts"
 // src/database/migrations/0001_create_posts.ts
 import { defineMigration } from '@kwiva/data'
 
@@ -80,7 +80,7 @@ A common edit is renaming a column: the diff proposes drop-and-add, but the data
 
 Schema changes are only half the job. Data migrations run arbitrary typed SQL against the live database:
 
-```ts
+```ts title="src/database/migrations/0007_backfill_post_slugs.ts"
 // src/database/migrations/0007_backfill_post_slugs.ts
 import { defineMigration } from '@kwiva/data'
 

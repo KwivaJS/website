@@ -9,13 +9,13 @@ A policy is a pure decision: given a user, an ability, and the resource being ac
 
 Policies live in `src/app/policies/`, one file per resource namespace, named `singular.ts` like the models they protect:
 
-```
+```plaintext title="the-factory.txt"
 src/app/policies/posts.ts      →  definePolicy('posts', ...)
 src/app/policies/users.ts      →  definePolicy('users', ...)
 src/app/policies/tenants.ts    →  definePolicy('tenants', ...)
 ```
 
-```ts
+```ts title="src/app/policies/posts.ts"
 // src/app/policies/posts.ts
 import { definePolicy } from '@kwiva/core'
 
@@ -38,7 +38,7 @@ The namespace string is the resource half of every permission: a policy named `p
 
 Every policy is a function with three parameters:
 
-```ts
+```ts title="the-signature.ts"
 (user, ability, resource?) => boolean | Promise<boolean>
 ```
 
@@ -71,7 +71,7 @@ Custom abilities fall through the same switch. When a controller action register
 
 The `resource` argument is where ownership rules live. The classic pattern — users can update or delete only their own records — binds the decision to the record's fields:
 
-```ts
+```ts title="resource-binding.ts"
 case 'update':
 case 'delete':    return resource ? resource.authorId === user.id : false
 ```
@@ -102,7 +102,7 @@ A job that fails a policy behaves identically to a route that fails it — same 
 
 Not every decision is a full resource policy. `defineGate` creates a single, composable check for repeated one-off rules:
 
-```ts
+```ts title="src/app/policies/gates.ts"
 // src/app/policies/gates.ts
 import { defineGate } from '@kwiva/core'
 

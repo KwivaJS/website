@@ -31,7 +31,7 @@ Kwiva ships as many equal, focused packages under the `@kwiva/*` scope. Each own
 
 The graph is strict and acyclic — `core` and `schema` are leaves (nothing depends on them depending outward), nothing imports the CLI, and app-facing packages never re-export engine APIs:
 
-```
+```plaintext title="dependency-graph.txt"
 cli ──► http · react · data · auth · studio · toolchain integration
 studio ──► react · ui-kit · data
 react ──► router · client · data-cache engine (sealed)

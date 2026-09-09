@@ -11,7 +11,7 @@ The hook engine is a framework-owned query engine (ADR-0016): the full query fea
 
 Every hook is keyed by its model (or controller) plus its arguments. `useList(Post, { where: ... })` builds a cache entry whose identity is derived from the `Post` model and that exact query — so `invalidate(Post)` knows precisely which entries to clear. Loader-dehydrated results use identical keys, which is why entering a page from SSR never refetches what the loader already delivered:
 
-```
+```plaintext title="the-hook-model.txt"
 loader (server)  → dehydrated into stream     → client cache key = Post + query
 useResource/useList (client) → same key       → reads the entry, never refetches
 ```
@@ -28,7 +28,7 @@ useResource/useList (client) → same key       → reads the entry, never refet
 
 ## useResource
 
-```tsx
+```tsx title="useresource.tsx"
 import { useResource } from '@kwiva/react'
 
 const { data: post, isPending, error } = useResource(Post, id)
@@ -38,7 +38,7 @@ Reads a single record by model identity and id. The same cache entry the detail 
 
 ## useList
 
-```tsx
+```tsx title="uselist.tsx"
 const { data, isFetching } = useList(Post, {
   where: { status: 'published' },
   orderBy: { createdAt: 'desc' },
@@ -52,7 +52,7 @@ List queries pass through the full option surface, including `staleTime`, `gcTim
 
 Mutations are model-scoped and automatically invalidate what they touch:
 
-```tsx
+```tsx title="usemutation.tsx"
 import { useMutation, invalidate } from '@kwiva/react'
 
 const save = useMutation(Post.update, {
@@ -65,7 +65,7 @@ await save.mutate({ title: 'New title' })
 
 The `optimistic` helper applies the input to the current cache entry immediately, giving an instant UI response; the call itself goes through the typed RPC client; on success, model-scoped invalidation refreshes every list and detail that depends on the model:
 
-```tsx
+```tsx title="usemutation-2.tsx"
 const { mutate, isMutating } = useMutation(Post.create, { input })
 ```
 
@@ -73,7 +73,7 @@ Mutations accept the model methods — `Post.create`, `Post.update`, `Post.delet
 
 ## useInfiniteList
 
-```tsx
+```tsx title="useinfinitelist.tsx"
 const feed = useInfiniteList(Post, { cursor: 'createdAt', limit: 20 })
 ```
 
@@ -83,13 +83,13 @@ Infinite lists page by cursor. Keep loading the next page as the user scrolls; e
 
 Warm the cache ahead of a render from a loader or from code:
 
-```tsx
+```tsx title="prefetching.tsx"
 // inside a loader, via the typed client
 loader: async ({ client }) =>
   client.prefetch(['reports', 'summary'], () => client.reports.summary())
 ```
 
-```tsx
+```tsx title="prefetching-2.tsx"
 // prefetchQuery from application code
 const { prefetchQuery } = usePrefetch()
 await prefetchQuery(useList(Post, { page: 1 }))
@@ -119,7 +119,7 @@ These are the query engine options passed through unchanged — the cache behavi
 
 Invalidation is **model-scoped** by default. Keys derive from model identity plus arguments, so a single call clears every derived key:
 
-```tsx
+```tsx title="invalidation.tsx"
 invalidate(Post)
 ```
 
@@ -127,7 +127,7 @@ clears every list, detail, and custom entry touching the `Post` model. On the se
 
 ## Suspense
 
-```tsx
+```tsx title="suspense.tsx"
 const { data } = useResource(Post, id, { suspense: true })
 ```
 
@@ -141,7 +141,7 @@ Live data flows through the same hook surface. Channel subscriptions consume the
 
 When you need a custom, non-model query — a report, an aggregation, a controller-only endpoint — key it explicitly:
 
-```tsx
+```tsx title="the-escape-hatch.tsx"
 const report = useApi(['report', id], () => client.reports.get(id))
 ```
 

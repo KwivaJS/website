@@ -7,7 +7,7 @@ Factories generate realistic test data without tripping over the model's guarant
 
 ## Defining a Factory
 
-```ts
+```ts title="src/database/factories/posts.ts"
 // src/database/factories/posts.ts
 import { defineFactory } from '@kwiva/data'
 
@@ -33,7 +33,7 @@ Fields you omit from the definition are still generated for you from the model's
 
 When a row is generated, three sources merge in a fixed order:
 
-```
+```plaintext title="override-precedence.txt"
 model defaults → factory definition → named state → call-site overrides
 ```
 
@@ -60,7 +60,7 @@ The contract is pragmatic: deterministic by default, variable when you want volu
 
 ## The Runtime API
 
-```ts
+```ts title="the-runtime-api.ts"
 const post = await Post.factory().create()                  // persisted, valid row
 const post = await Post.factory().create({ title: 'Custom' }) // persisted with overrides
 const posts = await Post.factory().count(10).create()       // 10 persisted rows
@@ -84,7 +84,7 @@ Overrides win over the definition, and the definition wins over model defaults. 
 
 States are named attribute bundles that override the base definition:
 
-```ts
+```ts title="states.ts"
 export const PostFactory = defineFactory(Post, (f) => ({
   title: f.fake((fake) => fake.lorem.sentence()),
   status: f.pick('draft', 'published', 'archived'),
@@ -96,7 +96,7 @@ export const PostFactory = defineFactory(Post, (f) => ({
 })
 ```
 
-```ts
+```ts title="states-2.ts"
 const published = await Post.factory().published().create()
 ```
 
@@ -112,7 +112,7 @@ The `publishedAt: 'now'` form is resolved by the framework at create time, so st
 
 Relation helpers keep graphs consistent:
 
-```ts
+```ts title="factories-and-relations.ts"
 export const PostFactory = defineFactory(Post, (f) => ({
   title: f.fake((fake) => fake.lorem.sentence()),
   author: f.relation(User),
@@ -131,7 +131,7 @@ Factories for graphs — a post with comments, an order with items — pair `f.r
 
 ## Using Factories in Tests
 
-```ts
+```ts title="using-factories-in-tests.ts"
 import { describe, expect, it } from 'bun:test'
 import { Post } from '@kwiva/data'
 import { PostFactory } from '../database/factories/posts'

@@ -9,7 +9,7 @@ One client instance covers both runtimes. On the server it runs in-process with 
 
 ## createClient
 
-```ts
+```ts title="createclient.ts"
 import { createClient } from '@kwiva/client'
 
 export const client = createClient({ baseUrl: 'https://api.acme.dev' })
@@ -19,7 +19,7 @@ export const client = createClient({ baseUrl: 'https://api.acme.dev' })
 
 You typically create one instance and share it, injecting it into app context so handlers and loaders can use it:
 
-```ts
+```ts title="src/bootstrap/app.ts"
 // src/bootstrap/app.ts
 import { defineApp } from '@kwiva/core'
 import { createClient } from '@kwiva/client'
@@ -37,7 +37,7 @@ Handlers, guards, and loaders then read `ctx.client` with the exact types the se
 
 The type pipeline runs from model through controller to pages:
 
-```
+```plaintext title="typed-end-to-end.txt"
 defineModel → defineController → @kwiva/client → definePage loader → data hooks
 ```
 
@@ -47,7 +47,7 @@ Add a field to a model and the client's types update immediately. Rename a contr
 
 On the server the client executes in-process — no network call, no serialization, no port management. Page loaders use it directly:
 
-```ts
+```ts title="server-side-usage.ts"
 definePage({
   loader: async ({ params, client }) => {
     const post = await client.posts.get(params.id)
@@ -72,7 +72,7 @@ The client exposes prefetch helpers for loaders to warm the cache ahead of an in
 
 Results fetched on the server dehydrate into data hooks on the client, so `useResource` and `useList` render with data instead of a loading spinner:
 
-```tsx
+```tsx title="hydration-into-data-hooks.tsx"
 const { data: post, isPending } = useResource(Post, id)
 
 const { mutate, isMutating } = useMutation(Post.update, {
@@ -89,7 +89,7 @@ Query keys derive automatically from model and controller identity, and invalida
 
 For tests, `createTestClient(app)` boots the real application and calls it in-process — the same typed RPC without a network layer:
 
-```ts
+```ts title="testing-with-createtestclient.ts"
 import { createTestClient, withApp } from '@kwiva/testing'
 
 await withApp(async (app) => {
@@ -109,7 +109,7 @@ The client picks up the API prefix, versioning, and auth mode from application c
 
 Every call resolves to a result object, and every call site can branch without try/catch gymnastics:
 
-```ts
+```ts title="call-site-errors.ts"
 const res = await client.posts.create({ title: 'Draft' })
 
 if (res.ok) {

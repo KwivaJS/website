@@ -45,7 +45,7 @@ On server presets, sockets bind to the accepting instance, and cross-instance de
 
 Cross-instance broadcasting runs on a shared pub/sub adapter. Configuration lives with the rest of the API surface:
 
-```ts
+```ts title="src/config/api.ts"
 // src/config/api.ts
 // set the broadcast driver to a shared pub/sub backend
 // instances subscribe and forward to their local sockets

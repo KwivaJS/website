@@ -14,7 +14,7 @@ Kwiva derives your OpenAPI 3 specification automatically from the route manifest
 
 At boot, Kwiva renders the whole spec from the route manifest — the single source of truth for your API surface:
 
-```bash
+```bash title="terminal"
 curl http://localhost:3000/openapi.json
 ```
 
@@ -24,7 +24,7 @@ The spec includes generated model routes (5 per model), custom controller routes
 
 Every field on a model contributes its type, validation rules, enums, and relations to the spec as schema components. Add a `description()` to any field to flow human-readable detail into the generated schema:
 
-```ts
+```ts title="document-models.ts"
 import { defineModel } from '@kwiva/data'
 
 export default defineModel('posts', (f) => ({
@@ -40,7 +40,7 @@ export default defineModel('posts', (f) => ({
 
 Every controller action accepts `tags`, `summary`, and `description` options that flow straight into the generated operation:
 
-```ts
+```ts title="document-controller-actions.ts"
 import { defineController } from '@kwiva/http'
 import { Post } from '../models/posts'
 

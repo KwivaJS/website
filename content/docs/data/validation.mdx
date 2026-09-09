@@ -16,7 +16,7 @@ Validation in Kwiva is enforced at multiple layers, all derived from the same mo
 
 ## Field-Level Validation
 
-```ts
+```ts title="field-level-validation.ts"
 export default defineModel('posts', (f) => ({
   title: f.string().validation((s) => s.min(1).max(200)),
   email: f.string().validation((s) => s.email()),
@@ -33,7 +33,7 @@ The `validation()` callback receives the Standard Schema builder for that field 
 
 Controllers attach schemas per route for the parts of the request they care about:
 
-```ts
+```ts title="request-layer-validation.ts"
 c.post('/', handler, {
   body: v.object({
     title: v.string().min(1),
@@ -58,7 +58,7 @@ Validation runs **before** guards and before the handler, so by the time your co
 
 Generated list endpoints validate their query input against the model. The `where`, `orderBy`, and `with` parameters are schema-checked against field names and types, meaning a client cannot inject an arbitrary filter column, order by a hidden field, or request a non-existent relation. This is the same discipline as model-level validation, applied to today's most common injection vector.
 
-```ts
+```ts title="query-parameter-validation-on-generated-routes.ts"
 GET /api/posts?where[status]=published&orderBy[createdAt]=desc
 GET /api/posts?where[secretField]=x      // 400 — not a queryable field
 GET /api/posts?with[0]=nonexistent       // 400 — relation does not exist
@@ -70,7 +70,7 @@ Only `orderable` fields may be ordered, only real relation names may be eager-lo
 
 For rules that do not fit the built-in set, define a reusable rule once and attach it anywhere:
 
-```ts
+```ts title="custom-rules.ts"
 import { defineValidationRule } from '@kwiva/data'
 
 export const strongPassword = defineValidationRule('strongPassword', (value) => {
@@ -80,7 +80,7 @@ export const strongPassword = defineValidationRule('strongPassword', (value) => 
 })
 ```
 
-```ts
+```ts title="custom-rules-2.ts"
 password: f.string().validation((s) => s.rule(strongPassword)),
 ```
 
@@ -96,7 +96,7 @@ A rule returns `null` when valid and a message when invalid; the framework colle
 
 Validation failures share the framework's error response shape:
 
-```json
+```json title="the-error-shape.json"
 {
   "code": "VALIDATION",
   "message": "Validation failed",
@@ -131,7 +131,7 @@ Coercion happens in the same validation stage as the checks, so the client contr
 
 Validation is a dedicated stage of the request pipeline, after parsing and before guards:
 
-```
+```plaintext title="where-validation-runs-in-the-request.txt"
 parse body/query → validate → guards (auth, tenant, policy) → handler
 ```
 

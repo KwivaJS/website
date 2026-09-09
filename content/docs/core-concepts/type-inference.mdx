@@ -7,7 +7,7 @@ description: "How types flow end-to-end from models through the route manifest t
 
 Kwiva's type system flows automatically from `defineX` definitions through the entire application stack. A change in a model definition updates the database table, the generated routes, the typed client methods, and the page loader types — without a codegen step, a manifest to regenerate, or a SDK to maintain.
 
-```
+```plaintext title="end-to-end-type-safety.txt"
 defineModel → model IR → REST/RPC routes → @kwiva/client → definePage loader → data hooks
 ```
 
@@ -21,7 +21,7 @@ The pipeline that carries types has a concrete shape — definitions are statica
 
 A model file is the source of truth for its resource. The field DSL produces both runtime schema and static types:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 defineModel('posts', (f) => ({
   id: f.id(),
@@ -38,7 +38,7 @@ At scan time the model becomes an entry in the model IR (`src/.kwiva/model-ir.js
 
 Each model produces deterministic REST routes — `list`, `get`, `create`, `update`, `delete` — plus custom controller actions. The route manifest records every route's path, method, schemas, tags, and permissions, and serves as the single input to the typed client:
 
-```
+```plaintext title="ir-rest-and-rpc.txt"
 route manifest → @kwiva/client types
 ```
 
@@ -48,7 +48,7 @@ The client infers the full surface at the type level. `client.posts.list()` retu
 
 Page loaders consume the same client, so their returned data is typed from the same definitions:
 
-```tsx
+```tsx title="client-page.tsx"
 // src/ui/pages/posts.$id.tsx
 definePage({
   loader: async ({ params, client }) => {
@@ -92,7 +92,7 @@ Each arrow in that table is a compile-time derivation, not a generated artifact.
 
 The practical workflow demonstrates why the pipeline matters. Update a model field:
 
-```ts
+```ts title="editing-an-existing-resource.ts"
 // before
 status: f.enum('draft', 'published'),
 // after

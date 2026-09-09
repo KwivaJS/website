@@ -11,7 +11,7 @@ The background layer and the web layer share one observability pipeline. A trace
 
 Every job that moves through the transport produces a trace from dispatch to start to finish, including queue wait time:
 
-```
+```plaintext title="what-is-tracked-automatically.txt"
 dispatch ──► (queued) ──► start ──► (handler) ──► finish / failed
                 └──────── wait time ────────┘
 ```
@@ -33,7 +33,7 @@ DLQ size is the metric that deserves a watch. It stays flat on a healthy system;
 
 The CLI is the fastest surface for looking at the current state:
 
-```bash
+```bash title="terminal"
 kwiva queue:failed        # dead-letter queue listing with attempt history + error
 kwiva queue:clear <queue> # drop pending work in a queue
 ```
@@ -44,7 +44,7 @@ kwiva queue:clear <queue> # drop pending work in a queue
 
 A job can report its own progression through the `job` object:
 
-```ts
+```ts title="job-progress.ts"
 job.progress(50)
 ```
 
@@ -54,7 +54,7 @@ Progress is advisory state attached to the job record. For a long-running, multi
 
 Each job handler receives a `logger` scoped to that execution:
 
-```ts
+```ts title="structured-job-logs.ts"
 export default defineJob('import-rows', async ({ payload, job, logger }) => {
   const rows = await readFile(payload.path)
   logger.info({ rows: rows.length, jobId: job.id }, 'import rows loaded')
@@ -68,7 +68,7 @@ The logger emits structured records — event name plus fields — rather than f
 
 Logs and traces are linked through correlation ids. Each job attempt carries an id that is propagated into every span and log record the attempt produces, and across retries of the same job. To follow one job through its retries:
 
-```bash
+```bash title="terminal"
 kwiva queue:work --trace
 ```
 
@@ -82,7 +82,7 @@ kwiva queue:work --trace
 
 Scheduled tasks report through the same machinery. Each `task.run` produces a structured log event with duration and result, and a corresponding span. Failures follow retries, then a `task_failures` metric with an alert hook configured in `src/config/telemetry.ts`. For run bookkeeping:
 
-```bash
+```bash title="terminal"
 kwiva schedule:list --json
 ```
 

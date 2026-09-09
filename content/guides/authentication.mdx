@@ -15,7 +15,7 @@ Adding authentication means declaring an auth surface once with `defineAuth` and
 
 The model declares the columns auth reads back, like `email`, `name`, and `role`. The engine adds its own managed columns, such as password hashes and session references, automatically at migration time:
 
-```ts
+```ts title="add-a-users-model.ts"
 import { defineModel } from "@kwiva/data"
 
 export default defineModel("users", (f) => ({
@@ -28,7 +28,7 @@ export default defineModel("users", (f) => ({
 
 ## Configure defineAuth
 
-```ts
+```ts title="configure-defineauth.ts"
 import { defineAuth } from "@kwiva/auth"
 
 export default defineAuth({
@@ -47,7 +47,7 @@ Sessions default to the `database` store with sliding expiry; switch to `redis` 
 
 `useSession` exposes the signed-in user, a sign-out action, and a pending flag. Sessions load from the cookie during SSR and hydrate on the client:
 
-```tsx
+```tsx title="read-the-session-on-the-client.tsx"
 export default function AuthStatus() {
   const { user, signOut, isPending } = useSession()
 
@@ -68,7 +68,7 @@ Provider screens (the ready-made `AuthScreen` pattern) can render the forms for 
 
 With sessions flowing, lock down routes and pages — see [How do I protect a route?](/guides/protect-routes) and [How do I add a policy?](/guides/policies). A signed-in requirement on a route looks like this:
 
-```ts
+```ts title="protect-the-rest-of-your-app.ts"
 c.get("/account", handler).guard({ beforeHandle: requireAuth })
 ```
 

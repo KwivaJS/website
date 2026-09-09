@@ -11,7 +11,7 @@ Permissions are strings, but they are contracts, not ad-hoc labels. A permission
 
 A permission string has exactly two parts:
 
-```
+```plaintext title="the-permission-grammar.txt"
 {resource}.{action}
 ```
 
@@ -56,7 +56,7 @@ Granting is data, not code. There is no special `grant` call in application logi
 
 The strongest enforcement point is the model itself. A model declared with the `permission` option gates every generated route by namespace:
 
-```ts
+```ts title="model-level-gating.ts"
 defineModel('posts', (f) => ({
   // ...
 }), { timestamps: true, permission: 'posts' })
@@ -70,7 +70,7 @@ The check runs at the guard stage of the pipeline, after the session has been lo
 
 Hand-written controllers gate individual actions with the same grammar. The `permission` route option names the exact ability a handler requires:
 
-```ts
+```ts title="route-level-gating.ts"
 export default defineController('posts', (c) => ({
   publish: c.post('/:id/publish', async ({ params }) => {
     const post = await Post.findOrFail(params.id)
@@ -89,7 +89,7 @@ Route-level gating is how custom actions get enforced. Anything beyond the four 
 
 Most checks never need explicit code — model and route options handle them. When you do check, three helpers mirror the same grammar:
 
-```ts
+```ts title="checking-in-application-code.ts"
 // server: does the current user hold this ability?
 ctx.can('posts.publish')                        // ability check (resource-less)
 ctx.can('posts.update', post)                   // resource check
@@ -122,7 +122,7 @@ The two-argument form binds the decision to a specific record. `ctx.can('posts.u
 
 For query-level scoping, v1.x adds policy-filtered result sets:
 
-```ts
+```ts title="query-level-scoping-v1.ts"
 Post.query().whereCan('posts.update')           // policy-filtered result set (v1.x)
 ```
 

@@ -11,7 +11,7 @@ The point of a service is reuse without imports. Because services are declared a
 
 ## Creating a Service
 
-```ts
+```ts title="src/app/services/email.ts"
 // src/app/services/email.ts
 import { defineService } from '@kwiva/services'
 
@@ -42,7 +42,7 @@ The first argument names the service; the second is the service body — a plain
 
 Services resolve through the application container:
 
-```ts
+```ts title="using-services.ts"
 import { resolve } from '@kwiva/core'
 import EmailService from '../services/email'
 
@@ -52,7 +52,7 @@ await email.sendWelcome(user)
 
 In a handler, the same service is available without importing its definition by reaching through the container, or used directly from the controller module like any dependency:
 
-```ts
+```ts title="using-services-2.ts"
 defineController('auth', (c) => ({
   register: c.post('/register', async ({ body }) => {
     const user = await User.create(body)
@@ -68,7 +68,7 @@ Whichever import style you prefer, the surface is the same typed methods — and
 
 Service method signatures are typed against the application's models and other definitions, so a service can augment a typed model instance without constructing anonymous tuples:
 
-```ts
+```ts title="src/app/services/payments.ts"
 // src/app/services/payments.ts
 import { defineService } from '@kwiva/services'
 
@@ -86,7 +86,7 @@ Types flow into service definitions the same way they flow everywhere else: mode
 
 Services compose like any plain module — one service calls another, and both sit in the same container:
 
-```ts
+```ts title="src/app/services/onboarding.ts"
 // src/app/services/onboarding.ts
 import { defineService } from '@kwiva/services'
 

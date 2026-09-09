@@ -26,7 +26,7 @@ All four factories are discovered by convention. A controller named `posts.ts` i
 
 Like every app-facing construct in Kwiva, controllers follow the `defineX` convention. A controller is a plain factory — no decorators, no classes:
 
-```ts
+```ts title="src/app/http/controllers/posts.ts"
 // src/app/http/controllers/posts.ts
 import { defineController } from '@kwiva/http'
 
@@ -58,7 +58,7 @@ The builder `c` exposes `get`, `post`, `put`, `patch`, and `delete` for resource
 
 Every request flows through one ordered, 14-step pipeline. The same pipeline serves API routes, rendered pages, WebSocket upgrades, and infrastructure routes:
 
-```
+```plaintext title="the-request-pipeline.txt"
 client request
   → adapter normalization
   → pipeline entry (request ID, trace span, onRequest middleware)
@@ -104,7 +104,7 @@ Security is wired into the same pipeline. Validation is schema-driven at every i
 
 A controller and its typed client, end to end:
 
-```ts
+```ts title="quick-start.ts"
 import { defineController } from '@kwiva/http'
 
 export default defineController('posts', (c) => ({
@@ -119,7 +119,7 @@ export default defineController('posts', (c) => ({
 }), { prefix: '/posts', tags: ['posts'] })
 ```
 
-```ts
+```ts title="quick-start-2.ts"
 import { createClient } from '@kwiva/client'
 
 export const client = createClient({ baseUrl: 'https://api.acme.dev' })

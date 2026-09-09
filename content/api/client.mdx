@@ -5,7 +5,7 @@ description: "Typed RPC client — createClient, model endpoints, controller act
 
 `@kwiva/client` is the typed RPC client for your application. It is scaffolded once as `src/client.ts` and derives its full shape from this app's controllers and models at the type level — the route manifest and model IR flow into ambient types under `src/.kwiva/types`, so there is no codegen step and no drift between the server contract and the client.
 
-```ts
+```ts title="kwiva-client.ts"
 import { createClient } from '@kwiva/client'
 
 export const client = createClient()
@@ -15,7 +15,7 @@ export const client = createClient()
 
 `createClient` builds the typed client for the current app.
 
-```ts
+```ts title="createclient.ts"
 const client = createClient()
 const apiClient = createClient({ baseUrl: '/api' })
 ```
@@ -34,7 +34,7 @@ const apiClient = createClient({ baseUrl: '/api' })
 
 Each model generates exactly five deterministic routes — `list`, `get`, `create`, `update`, `delete` — plus any custom controller actions. The client mirrors them under the model's resource name.
 
-```ts
+```ts title="model-endpoints.ts"
 const { data, total } = await client.users.list({ where: { role: 'admin' }, page: 1 })
 const user = await client.users.get('usr_01h2x8kq9f4m3p6t7y2wv0ba')
 const created = await client.users.create({ name: 'Ada L.', role: 'admin' })
@@ -54,7 +54,7 @@ List input is typed from the model: `where` filters match queryable fields, `pag
 
 Errors are part of the resolved type: calls return a discriminated union of the success envelope and `{ error: ApiError }`, so narrowing an error is a type-level operation.
 
-```ts
+```ts title="model-endpoints-2.ts"
 const result = await client.posts.get(id)
 
 if (result.error) {
@@ -69,7 +69,7 @@ console.log(result.data.title)
 
 Actions declared on controllers become methods alongside the generated model endpoints. `defineController` bodies, params, and schemas shape the client, so a route handler surfaces as a typed callable.
 
-```ts
+```ts title="custom-controller-actions.ts"
 await client.posts.publish('pst_01h2x8kq9f4m3p6t7y2wv0ba')
 ```
 
@@ -85,7 +85,7 @@ Failures across every call resolve to a typed error rather than an untyped throw
 | `message` | `string` | Human-readable message |
 | `issues` | array (optional) | Validation issues when input failed validation |
 
-```ts
+```ts title="typed-errors.ts"
 const result = await client.users.create({ name: '' })
 
 if (result.error) {
@@ -102,7 +102,7 @@ See [Errors](/docs/http/errors) for the server-side contract that produces these
 
 `client.stream` opens a typed subscription on a resource or channel and returns an async iterable of typed events. WebSocket is the primary transport; when WebSocket is unavailable the client transparently falls back to SSE (v1.x).
 
-```ts
+```ts title="subscriptions.ts"
 const stream = client.chat.stream({ roomId })
 
 for await (const event of stream) {
@@ -136,7 +136,7 @@ See [Sessions](/docs/auth/sessions) and [Protecting Routes](/docs/auth/protectin
 
 `createTestClient` (from `@kwiva/testing`) returns the same typed client bound to a real app instance, running in-process with no network. It is typically used inside the `withApp` harness, which boots the app, migrates, and seeds per test.
 
-```ts
+```ts title="createtestclient.ts"
 import { withApp, createTestClient } from '@kwiva/testing'
 
 test('posts CRUD', withApp(async (app) => {
@@ -153,7 +153,7 @@ test('posts CRUD', withApp(async (app) => {
 
 The test client is fully typed, so type expectations from `@kwiva/client` hold in tests:
 
-```ts
+```ts title="createtestclient-2.ts"
 expectTypeOf(client.posts.list({})).resolves.toMatchTypeOf<{ data: Post[]; total: number }>()
 expectTypeOf(client.users.get('x')).resolves.toMatchTypeOf<{ data: User } | { error: ApiError }>()
 ```

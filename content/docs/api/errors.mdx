@@ -28,7 +28,7 @@ On the client this is not a convention you memorize — it is the literal type. 
 
 Handlers prefer the `error` helper — a return value, not a throw:
 
-```ts
+```ts title="authoring-errors.ts"
 import { error } from '@kwiva/http'
 
 return error('NOT_FOUND', { message: 'no such post' })
@@ -37,7 +37,7 @@ return error('VALIDATION', { issues: [{ path: 'title', message: 'too long' }] })
 
 Services and models use typed exceptions:
 
-```ts
+```ts title="authoring-errors-2.ts"
 import { NotFoundError, ForbiddenError } from '@kwiva/http'
 
 throw new NotFoundError('post', id)
@@ -50,7 +50,7 @@ Unknown errors map to `INTERNAL_ERROR`: details are hidden in production and the
 
 The taxonomy is extensible from configuration — extend it, never bypass it:
 
-```ts
+```ts title="src/config/app.ts"
 // src/config/app.ts
 export default defineConfig('app', {
   defaults: {
@@ -68,7 +68,7 @@ In-scope `onError` hooks can translate domain exceptions into custom codes befor
 
 ## The Response Envelope
 
-```json
+```json title="the-response-envelope.json"
 {
   "error": {
     "code": "NOT_FOUND",
@@ -84,7 +84,7 @@ In-scope `onError` hooks can translate domain exceptions into custom codes befor
 
 Validation failures add field-mapped `issues`:
 
-```json
+```json title="validation-errors.json"
 {
   "error": {
     "code": "VALIDATION",
@@ -126,7 +126,7 @@ Handlers rarely map errors manually because the layer below already speaks the t
 
 The client returns the discriminated union, so branches are checked at compile time:
 
-```ts
+```ts title="client-side-handling.ts"
 const res = await client.posts.get(id)
 
 if (res.ok) {

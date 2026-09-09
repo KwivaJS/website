@@ -13,7 +13,7 @@ Modules are how Kwiva scales beyond a single app folder. Everything a module con
 
 A module is defined like every other construct — declaratively, as a `defineX` factory:
 
-```ts
+```ts title="modules/blog/index.ts"
 // modules/blog/index.ts
 import { defineModule } from '@kwiva/core'
 
@@ -66,7 +66,7 @@ Contribution points are referenced as lazy globs relative to the module entry, s
 
 A module is a folder, and its internal tree mirrors the app tree it will join. A representative chat module:
 
-```text
+```text title="a-local-module-layout.txt"
 modules/chat/
 ├─ index.ts                  # defineModule entry
 ├─ models/
@@ -91,7 +91,7 @@ Each subfolder uses the same [defineX](/docs/core-concepts/definex) conventions 
 
 Modules are registered in the application configuration:
 
-```ts
+```ts title="kwiva.config.ts"
 // kwiva.config.ts
 import { defineConfig } from '@kwiva/config'
 

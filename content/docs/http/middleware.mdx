@@ -11,7 +11,7 @@ Middleware is the composition layer of the HTTP pipeline. The framework ships th
 
 Middleware follows the `defineX` convention — one middleware per file in `src/app/http/middleware/`, discovered by convention:
 
-```ts
+```ts title="src/app/http/middleware/request-id.ts"
 // src/app/http/middleware/request-id.ts
 import { defineMiddleware } from '@kwiva/http'
 
@@ -25,7 +25,7 @@ export default defineMiddleware('request-id', async (ctx, next) => {
 
 The middleware receives the typed context and a `next` function. Code before `next` runs on the way in; code after it runs on the way out; the resolved response is returned up the chain.
 
-```ts
+```ts title="src/app/http/middleware/logger.ts"
 // src/app/http/middleware/logger.ts
 import { defineMiddleware } from '@kwiva/http'
 
@@ -45,7 +45,7 @@ The name registers the stage in the ordered stack. The same name is what you lis
 
 The global middleware stack is the ordered list in `src/config/app.ts`:
 
-```ts
+```ts title="src/config/app.ts"
 // src/config/app.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -79,7 +79,7 @@ Middleware applies at three levels:
 | Controller | `defineController(..., { middleware: ['auth', 'tenant'] })` | Every route in the controller |
 | Route | `c.get('/:id', handler, { middleware: ['rate-limit'] })` | The single route |
 
-```ts
+```ts title="scoping.ts"
 defineController('admin', (c) => ({ ... }), {
   middleware: ['auth', 'tenant'],
 })
@@ -93,7 +93,7 @@ Scopes compose. A route inherits the global stack, adds its controller's middlew
 
 Middleware can decide the request never reaches the handler. Returning a response instead of calling `next` short-circuits the pipeline — this is how authentication failures and rate limits are returned:
 
-```ts
+```ts title="src/app/http/middleware/auth.ts"
 // src/app/http/middleware/auth.ts
 import { defineMiddleware, error } from '@kwiva/http'
 
@@ -109,7 +109,7 @@ Short-circuiting is a return, not a throw: the stage returns a response value th
 
 Mutating the context before `next` affects the handler; mutating after affects the response. The `set` surface covers status, headers, and cookies:
 
-```ts
+```ts title="short-circuit-and-mutate.ts"
 export default defineMiddleware('no-store', async (ctx, next) => {
   const response = await next()
   ctx.set.headers['cache-control'] = 'no-store'
@@ -121,7 +121,7 @@ export default defineMiddleware('no-store', async (ctx, next) => {
 
 Middleware can attach directly to any lifecycle event with the `.on` variant, in addition to the default request/response wrapper:
 
-```ts
+```ts title="lifecycle-scoped-middleware.ts"
 import { defineMiddleware } from '@kwiva/http'
 
 export default defineMiddleware.on('onTransform', async (ctx, next) => {
@@ -130,7 +130,7 @@ export default defineMiddleware.on('onTransform', async (ctx, next) => {
 })
 ```
 
-```ts
+```ts title="lifecycle-scoped-middleware-2.ts"
 import { defineMiddleware } from '@kwiva/http'
 
 export default defineMiddleware.on('onAfterHandle', async (ctx, next) => {

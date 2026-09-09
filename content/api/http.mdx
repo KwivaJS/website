@@ -19,7 +19,7 @@ The package ships three factories plus runtime helpers:
 
 Defines a named group of route handlers. Handlers are declared inside a builder callback, and the whole group is registered under a controller name with optional `prefix`, `tags`, and `permission` options.
 
-```ts
+```ts title="definecontroller.ts"
 import { defineController } from "@kwiva/http"
 
 export default defineController(
@@ -117,7 +117,7 @@ A plain-object shorthand (`{ title: "string", body: "string?" }`) is accepted an
 
 Handlers and guard hooks receive one context argument whose shape is inferred from the controller options, route schemas, and app-level declarations. A handler destructures only what it needs:
 
-```ts
+```ts title="typed-context.ts"
 handler: async ({ params, query, body, headers, cookies, session, tenant, store, set, error }) => {
   set.status = 201
   set.headers["x-cache"] = "miss"
@@ -148,7 +148,7 @@ Because types are inferred from route schemas, `params.id` is `string`, `body` s
 
 Middleware are named pipeline stages that run before a request reaches its handler. Each file exports one named middleware; the name is what you reference when scoping it.
 
-```ts
+```ts title="definemiddleware.ts"
 import { defineMiddleware } from "@kwiva/http"
 
 export default defineMiddleware("request-id", async (ctx, next) => {
@@ -172,7 +172,7 @@ A middleware may short-circuit the pipeline by returning a response instead of c
 
 Middleware can attach at any lifecycle event through the `.on()` form instead of the default request stage:
 
-```ts
+```ts title="lifecycle-scoped-variants.ts"
 import { defineMiddleware } from "@kwiva/http"
 
 export const cacheTags = defineMiddleware.on("onAfterHandle", async (ctx) => {
@@ -201,7 +201,7 @@ These ship with the framework and need no user code: `request-id`, `session`, `t
 
 Server routes mount infra-level rules and handlers outside controllers. They are how you apply whole-path behaviors — response caching, redirects, proxying, CORS, rate limits, and health endpoints.
 
-```ts
+```ts title="src/routes/rules.ts"
 // src/routes/rules.ts
 import { defineServerRoute } from "@kwiva/http"
 
@@ -297,7 +297,7 @@ Middleware and guards can attach at these lifecycle events (app-wide, controller
 
 Guards apply schema, middleware, and `beforeHandle` authorization to a group of nested routes. The controller builder exposes `c.guard(options, builder)`:
 
-```ts
+```ts title="guards.ts"
 defineController(
   "admin",
   (c) =>
@@ -336,7 +336,7 @@ Guards nest and compose: each guard applies its schema, middleware, and `beforeH
 
 Routes validate five input locations: `body`, `query`, `params`, `headers`, and `cookies`. Each accepts a Standard Schema (Valibot by default) or the plain-object shorthand.
 
-```ts
+```ts title="validation.ts"
 c.post(
   "/:id/publish",
   async ({ params, body }) => {
@@ -359,7 +359,7 @@ c.post(
 
 Validation runs at step 11 of the lifecycle, after parsing and `onTransform`. A failure returns `422` with:
 
-```json
+```json title="validation-2.json"
 { "error": { "code": "VALIDATION", "message": "Validation failed", "issues": [{ "path": "title", "message": "must be at least 1 character" }] } }
 ```
 
@@ -384,7 +384,7 @@ Kwiva uses one error taxonomy with eight codes, two renderers (JSON for API rout
 
 ### Authoring errors
 
-```ts
+```ts title="authoring-errors.ts"
 import { error, NotFoundError, ForbiddenError } from "@kwiva/http"
 
 // helper return (preferred in handlers)
@@ -405,7 +405,7 @@ Any throw or `error()` return in any lifecycle stage enters `onError`. Mapping o
 
 ### Response shapes
 
-```jsonc
+```jsonc title="response-shapes.jsonc"
 // API (JSON)
 { "error": { "code": "NOT_FOUND", "message": "no such post", "requestId": "req_..." } }
 
@@ -417,7 +417,7 @@ Every error response carries `requestId`, matching the `x-request-id` request he
 
 On the client, the typed RPC result is a discriminated union:
 
-```ts
+```ts title="response-shapes-2.ts"
 const res = await client.posts.get(id)
 if (res.error) {
   switch (res.error.code) {
@@ -433,7 +433,7 @@ The union is derived from the taxonomy, so error codes are never string-matched 
 
 Multipart bodies parse at the `onParse` stage. A route opts in with the `file` option and reads the upload through `ctx.file()`:
 
-```ts
+```ts title="file-uploads.ts"
 c.post(
   "/avatar",
   async ({ file, session }) => {
@@ -455,7 +455,7 @@ c.post(
 
 A handler returns a streaming `Response` for chunked payloads. `ctx.stream` builds an SSE-friendly stream from a controller function:
 
-```ts
+```ts title="streaming-sse.ts"
 c.get("/events", async ({ stream }) =>
   new Response(
     stream((controller) => {
@@ -472,7 +472,7 @@ The controller receives an enqueue handle; each `enqueue` call emits one SSE fra
 
 A WebSocket endpoint is declared with `c.ws(path, handlers)` inside a controller:
 
-```ts
+```ts title="websockets.ts"
 import { defineController, channel } from "@kwiva/http"
 
 const feed = channel("feed")
@@ -500,7 +500,7 @@ Realtime channels carry the transport: `channel(pattern)` accepts wildcard patte
 
 CORS defaults live in `src/config/cors.ts` and can be overridden per controller, per route rule, or inline:
 
-```ts
+```ts title="cors-security-headers.ts"
 import { defineConfig } from "@kwiva/config"
 
 export default defineConfig("cors", {
@@ -534,7 +534,7 @@ Whole-response caching is expressed through server route rules. Rules apply at t
 | `prerender` | Crawled and rendered at build time |
 | (none) | Dynamic response |
 
-```ts
+```ts title="src/routes/rules-2.ts"
 // src/routes/rules.ts
 import { defineServerRoute } from "@kwiva/http"
 

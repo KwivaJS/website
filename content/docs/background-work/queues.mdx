@@ -18,7 +18,7 @@ The transport is framework-owned and configurable. The same `defineJob` file run
 
 The queue transport is declared once in `src/config/queue.ts`:
 
-```ts
+```ts title="src/config/queue.ts"
 // src/config/queue.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -51,7 +51,7 @@ The driver is a config decision, not a code change. Development defaults to `mem
 
 ## Running Workers
 
-```bash
+```bash title="terminal"
 kwiva queue:work --queue=emails,default --concurrency=5
 kwiva queue:listen                 # verbose mode (dev)
 ```
@@ -70,7 +70,7 @@ kwiva queue:listen                 # verbose mode (dev)
 
 Concurrency is controlled where the worker starts, not where the job is defined. A single worker process can run many jobs in parallel:
 
-```bash
+```bash title="terminal"
 kwiva queue:work --queue=emails --concurrency=5
 ```
 
@@ -80,7 +80,7 @@ This keeps throughput tuning an operational decision. Raise concurrency when job
 
 A job that exhausts its `attempts` is moved to the `failed_jobs` table. The CLI owns the failure lifecycle:
 
-```bash
+```bash title="terminal"
 kwiva queue:failed                 # DLQ table listing
 kwiva queue:retry <id>             # republish one failed job
 kwiva queue:retry --all            # republish everything in the DLQ
@@ -93,7 +93,7 @@ kwiva queue:clear <queue>          # drop all pending jobs in a queue
 
 Per-job rate limiting (v1.x) caps how often a given job type may run, which protects the systems jobs touch:
 
-```ts
+```ts title="rate-limiting.ts"
 export default defineJob('sync-crm', async ({ payload }) => {
   // ...
 }, {
@@ -110,7 +110,7 @@ When a job type hits its window, the worker leaves it queued instead of running 
 
 Queues support two composition forms (v1.x) from the dispatch side:
 
-```ts
+```ts title="chaining-and-batching.ts"
 await queue.chain([ImportRows, BuildReport, NotifyDone]).dispatch()
 
 await queue.batch(rows.map(r => ImportRows.dispatch(r)))
@@ -154,7 +154,7 @@ Scaling is horizontal by construction: add worker processes pointed at the same 
 
 Jobs dispatched inside a database transaction are held until the transaction commits, using the same mechanism as the event outbox. If the transaction rolls back, the dispatch is never delivered:
 
-```ts
+```ts title="transaction-aware-dispatch.ts"
 await db.transaction(async (tx) => {
   await Order.create({ amount: payload.total })
 

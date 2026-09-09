@@ -7,7 +7,7 @@ The `@kwiva/auth` package exposes `defineAuth`, the single factory that configur
 
 ## The `defineAuth` Factory
 
-```ts
+```ts title="the-defineauth-factory.ts"
 import { defineAuth } from '@kwiva/auth'
 
 export default defineAuth({
@@ -44,7 +44,7 @@ The file lives at `src/app/http/auth.ts` and is picked up by the framework autom
 
 Providers are declared under `providers`. Each provider is a key with an options object; a provider omitted from the map is disabled.
 
-```ts
+```ts title="providers.ts"
 export default defineAuth({
   providers: {
     password: { enabled: true, minLength: 10 },
@@ -97,7 +97,7 @@ Magic links are delivered through the mail integration, so this provider additio
 
 `defineAuth` does not create a user model; it maps an existing model onto the engine. The model named in `user.model` must declare the fields referenced by `user.fields`.
 
-```ts
+```ts title="user-model-contract.ts"
 import { defineModel } from '@kwiva/data'
 
 export default defineModel('users', (f) => ({
@@ -130,7 +130,7 @@ Engine-managed columns — the password hash, session references, OAuth accounts
 
 Every authenticated request carries a typed session. On the server it is read from the request context; on the client it is read from a hook.
 
-```ts
+```ts title="sessions.ts"
 const { session } = ctx
 
 if (!session.user) {
@@ -144,7 +144,7 @@ const actor = session.user
 
 ### Client hook
 
-```tsx
+```tsx title="client-hook.tsx"
 import { useSession } from '@kwiva/react'
 
 const { user, signOut, isPending } = useSession()
@@ -186,7 +186,7 @@ Form and state-changing routes are protected by the `csrf` middleware, which app
 
 Providers render ready-made screens through the ui-kit `AuthScreen` pattern, or you can build custom pages against the generated endpoints and hooks.
 
-```tsx
+```tsx title="client-usage.tsx"
 const { user, signOut } = useSession()
 
 if (user) {
@@ -218,7 +218,7 @@ From a single `defineAuth` declaration the framework mounts the following endpoi
 
 The `auth` middleware enforces `requireAuth` semantics: it rejects the request with a `401 UNAUTHORIZED` error when `ctx.session.user` is absent. Attach it to the ordered global stack in `src/config/app.ts`, or scope it per route and controller with `middleware: ['auth']`.
 
-```ts
+```ts title="requireauth-middleware.ts"
 const me = c.get('/me', async ({ session }) => session.user, {
   middleware: ['auth'],
 })
@@ -226,7 +226,7 @@ const me = c.get('/me', async ({ session }) => session.user, {
 
 A custom guard is written with `defineMiddleware` against the typed session:
 
-```ts
+```ts title="requireauth-middleware-2.ts"
 import { defineMiddleware, error } from '@kwiva/http'
 
 export default defineMiddleware('auth', async (ctx, next) => {
@@ -241,7 +241,7 @@ export default defineMiddleware('auth', async (ctx, next) => {
 
 Pages protect themselves with a `beforeLoad` guard that redirects before the loader runs:
 
-```ts
+```ts title="beforeload-page-guards.ts"
 import { definePage, redirect } from '@kwiva/react'
 
 export default definePage({
@@ -264,7 +264,7 @@ Hooks receive the relevant actor and let application code react to auth lifecycl
 | `onSignIn` | `{ user }` | Runs after a successful sign-in |
 | `onDeleteUser` | `{ user }` | Runs when an account is deleted |
 
-```ts
+```ts title="hooks.ts"
 export default defineAuth({
   providers: { password: { enabled: true } },
   session: { strategy: 'database', expiresIn: 60 * 60 * 24 * 7 },
@@ -296,7 +296,7 @@ export default defineAuth({
 
 When organizations are enabled, the organization and membership model maps onto Kwiva tenancy: an organization is a tenant and membership roles become policy roles. This requires the tenancy mode to be set to `org`.
 
-```ts
+```ts title="organizations.ts"
 export default defineAuth({
   providers: { password: { enabled: true } },
   orgs: { enabled: true },

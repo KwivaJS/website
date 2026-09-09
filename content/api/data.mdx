@@ -5,7 +5,7 @@ description: "Complete reference for @kwiva/data — defineModel, the field DSL,
 
 `@kwiva/data` is the package that owns the entire data plane. A single `defineModel` file in `src/app/models/` is the source of truth from which the framework derives database tables, migration files, REST and RPC endpoints, the typed client SDK, Studio screens, the OpenAPI spec, and MCP tools. The same package exports the runtime query plane, transactions, migrations, seeders, factories, and the database connection handle.
 
-```ts
+```ts title="kwiva-data.ts"
 import { defineModel, defineMigration, defineSeeder, defineFactory, db, Post, User } from '@kwiva/data'
 ```
 
@@ -13,7 +13,7 @@ import { defineModel, defineMigration, defineSeeder, defineFactory, db, Post, Us
 
 The model factory. One file per model, default export, stored in `src/app/models/`.
 
-```ts
+```ts title="definemodel.ts"
 defineModel(name, fields, options?)
 ```
 
@@ -23,7 +23,7 @@ defineModel(name, fields, options?)
 | `fields` | `(f) => ({ ... })` | Field factory function. Receives the field builder `f` and returns an object of field definitions. |
 | `options` | `ModelOptions` | Optional model-level behavior: timestamps, soft delete, audit, tenancy, permission, indexes, hooks, computed fields. |
 
-```ts
+```ts title="definemodel-2.ts"
 import { defineModel } from '@kwiva/data'
 
 export default defineModel('posts', (f) => ({
@@ -65,7 +65,7 @@ export default defineModel('posts', (f) => ({
 
 Every model flows through the derivation pipeline into a model intermediate representation used by every generator:
 
-```text
+```text title="what-definemodel-generates.txt"
 defineModel files -> model IR
   -> database table definitions and migration files
   -> REST routes (list/get/create/update/delete)
@@ -89,7 +89,7 @@ Unless `routes: false`, each model produces five deterministic routes:
 
 Fields are declared with the function-based DSL. Every field resolves through the same pipeline: type resolution, modifier chain, validation schema, database column.
 
-```ts
+```ts title="the-field-dsl.ts"
 defineModel('posts', (f) => ({
   id: f.id(),
   title: f.string().optional().default('draft').unique().indexed().description('Post title').validation((s) => s.min(1).max(200)),
@@ -144,7 +144,7 @@ Modifiers chain onto any field factory and may be combined.
 
 Model-level `uniques` and `indexes` express constraints across multiple columns:
 
-```ts
+```ts title="composite-constraints.ts"
 defineModel('posts', (f) => ({
   title: f.string(),
   authorId: f.uuid().indexed(),
@@ -172,7 +172,7 @@ Field factories produce TypeScript types automatically.
 
 Field-level validation uses Standard Schema. Every `.validation()` call receives a schema builder for the field's own type and returns a rule. The shipped validator is the default engine; it can be switched in the app configuration:
 
-```ts
+```ts title="validation.ts"
 export default defineConfig('app', {
   validator: 'valibot',
 })
@@ -180,7 +180,7 @@ export default defineConfig('app', {
 
 The validator is abstracted behind the Standard Schema interface, so switching engines requires no model-level changes.
 
-```ts
+```ts title="validation-2.ts"
 defineModel('posts', (f) => ({
   title: f.string().validation((s) => s.min(1).max(200)),
   body: f.text().validation((s) => s.min(10)),
@@ -209,7 +209,7 @@ Relations are declared with lazy references (arrow functions) so model files nev
 | `hasOne` | `f.hasOne(() => Model)` | On the related model | `with('name')` |
 | `belongsToMany` | `f.belongsToMany(() => Model, () => Junction)` | Junction table | `with('name')` |
 
-```ts
+```ts title="relations.ts"
 defineModel('posts', (f) => ({
   author: f.belongsTo(() => User),
   comments: f.hasMany(() => Comment),
@@ -226,7 +226,7 @@ In development, relation loads that happen outside `with()` are flagged by the N
 
 Every model exposes a `.query()` builder. It compiles to the framework-owned query engine and is fully typed against the model's fields.
 
-```ts
+```ts title="query-builder.ts"
 import { Post } from '@kwiva/data'
 
 const posts = await Post.query()
@@ -248,7 +248,7 @@ const popular = await Post.query().where('status', 'published').where('views', '
 
 ### Ordering, Limits, Selection, Joins
 
-```ts
+```ts title="ordering-limits-selection-joins.ts"
 const posts = await Post.query()
   .where('status', 'published')
   .orderBy({ createdAt: 'desc' })
@@ -271,7 +271,7 @@ const joined = await Post.query()
 
 ### Aggregates
 
-```ts
+```ts title="aggregates.ts"
 const count = await Post.query().where('status', 'published').count()
 const totalViews = await Post.query().sum('views')
 const avgViews = await Post.query().avg('views')
@@ -297,7 +297,7 @@ const stats = await Post.query()
 
 ### Eager Loading
 
-```ts
+```ts title="eager-loading.ts"
 const posts = await Post.query().with('author')
 const nested = await Post.query().with('comments.author')
 const multiple = await Post.query().with('author', 'comments', 'tags')
@@ -321,7 +321,7 @@ const users = await User.query().withCount('posts')
 | `Model.first()` | Returns the first record. |
 | `Model.exists(id)` | Returns a boolean existence check. |
 
-```ts
+```ts title="finders.ts"
 const post = await Post.findOrFail(id)
 const draft = await Post.first({ where: { status: 'draft' } })
 const first = await Post.first()
@@ -338,7 +338,7 @@ const exists = await Post.exists(id)
 | `instance.update(data)` | Validates and updates the record. |
 | `instance.delete()` | Deletes the record; performs a soft delete when enabled. |
 
-```ts
+```ts title="writes.ts"
 const created = await Post.create({ title: 'Hello', authorId })
 const many = await Post.createMany([{ title: 'A', authorId }, { title: 'B', authorId }])
 const updated = await post.update({ status: 'published' })
@@ -355,13 +355,13 @@ The builder supports offset pagination and cursor pagination.
 
 ### Offset Pagination
 
-```ts
+```ts title="offset-pagination.ts"
 const result = await Post.query()
   .where('status', 'published')
   .page(1, 20)
 ```
 
-```ts
+```ts title="offset-pagination-2.ts"
 {
   data: Post[],
   total: number,
@@ -372,13 +372,13 @@ const result = await Post.query()
 
 ### Cursor Pagination
 
-```ts
+```ts title="cursor-pagination.ts"
 const result = await Post.query()
   .where('status', 'published')
   .cursor('createdAt', 'desc', 'cursor-value')
 ```
 
-```ts
+```ts title="cursor-pagination-2.ts"
 {
   data: Post[],
   nextCursor: string | null,
@@ -390,7 +390,7 @@ Cursor pagination is stable under concurrent inserts and deletes, making it the 
 
 Generated list endpoints accept both strategies as query parameters: `page` and `size` for offset mode, `cursor` and `direction` (`next` | `prev`) for cursor mode. The default page size is 20 and can be tuned globally:
 
-```ts
+```ts title="cursor-pagination-3.ts"
 export default defineConfig('app', {
   pagination: { defaultPageSize: 25, maxPageSize: 100 },
 })
@@ -400,7 +400,7 @@ export default defineConfig('app', {
 
 The builder composes over raw SQL, so the escape hatch returns the same typed results:
 
-```ts
+```ts title="raw-sql.ts"
 const rows = await db.raw<{ n: number }>('select count(*) n from posts')
 const named = await db.raw('select * from posts where status = ?', ['published'])
 ```
@@ -409,7 +409,7 @@ const named = await db.raw('select * from posts where status = ?', ['published']
 
 Transactions are started from the database handle. If the callback throws, the entire transaction rolls back; a committed transaction is durable and atomic.
 
-```ts
+```ts title="transactions.ts"
 import { db } from '@kwiva/data'
 
 await db.transaction(async (tx) => {
@@ -422,7 +422,7 @@ await db.transaction(async (tx) => {
 
 Nested scopes use database savepoints. A failing savepoint rolls back only its own work, letting the outer transaction continue.
 
-```ts
+```ts title="nested-transactions-savepoints.ts"
 await db.transaction(async (tx) => {
   const user = await User.create({ email }, { tx })
 
@@ -443,7 +443,7 @@ await db.transaction(async (tx) => {
 
 Events emitted inside a transaction are held and delivered only after commit, so a failed transaction never leaks an event:
 
-```ts
+```ts title="transaction-aware-dispatch.ts"
 await db.transaction(async (tx) => {
   const order = await Order.create(payload, { tx })
   await OrderPlaced.emit({ orderId: order.id }, { tx })
@@ -452,14 +452,14 @@ await db.transaction(async (tx) => {
 
 ### Common Patterns
 
-```ts
+```ts title="common-patterns.ts"
 await db.transaction(async (tx) => {
   await Account.decrement('balance', amount, { where: { id: fromId }, tx })
   await Account.increment('balance', amount, { where: { id: toId }, tx })
 })
 ```
 
-```ts
+```ts title="common-patterns-2.ts"
 await db.transaction(async (tx) => {
   const order = await Order.create({ userId, total }, { tx })
   for (const item of items) {
@@ -474,7 +474,7 @@ Every query inside a transaction emits an observability span carrying normalized
 
 Enable `softDelete: true` to get a `deletedAt` column plus automatic query filtering. `delete()` stamps the timestamp instead of removing the row; normal queries exclude trashed rows.
 
-```ts
+```ts title="soft-deletes.ts"
 defineModel('posts', (f) => ({
   title: f.string(),
 }), {
@@ -491,7 +491,7 @@ defineModel('posts', (f) => ({
 | `Model.forceDelete(id)` | Permanently deletes one record. |
 | `Model.forceDeleteMany([ids])` | Permanently deletes many records. |
 
-```ts
+```ts title="soft-deletes-2.ts"
 await Post.restore(id)
 await Post.restoreMany([1, 2, 3])
 await Post.restore({ where: { status: 'archived' } })
@@ -507,7 +507,7 @@ await Post.forceDeleteMany([1, 2, 3])
 
 Soft-delete filtering also applies to eager-loaded relations. Related-model queries respect the parent scope:
 
-```ts
+```ts title="soft-deletes-3.ts"
 const post = await Post.with('comments').findOrFail(id)
 const all = await Post.with('comments').withTrashed().findOrFail(id)
 ```
@@ -523,7 +523,7 @@ Model hooks observe and mutate the row at lifecycle boundaries. `onCreating` run
 | `onUpdating` | `(row, { session })` | Before update. |
 | `onDeleting` | `(row, { session })` | Before delete; throwing aborts the delete. |
 
-```ts
+```ts title="hooks.ts"
 defineModel('posts', (f) => ({
   title: f.string(),
   slug: f.string().optional().unique(),
@@ -546,7 +546,7 @@ defineModel('posts', (f) => ({
 
 The `computed` option derives read-only fields from the row. Computed values are serialized into API responses and Studio views but are never stored or writable.
 
-```ts
+```ts title="computed-fields.ts"
 defineModel('posts', (f) => ({
   title: f.string(),
   body: f.text().optional(),
@@ -565,7 +565,7 @@ defineModel('posts', (f) => ({
 
 Migrations evolve the database schema over time. They are generated from model diffs and hand-editable for complex changes. Migration files live in `src/database/migrations/` and run in filename order.
 
-```bash
+```bash title="terminal"
 kwiva make:model invoice
 kwiva db:diff
 kwiva db:migrate
@@ -576,7 +576,7 @@ kwiva db:reset
 
 ### defineMigration
 
-```ts
+```ts title="definemigration.ts"
 defineMigration({ up, down })
 ```
 
@@ -585,7 +585,7 @@ defineMigration({ up, down })
 | `up` | `(sql) => sql\`...\`` | Applies the change using typed SQL steps. |
 | `down` | `(sql) => sql\`...\`` | Reverts the change. |
 
-```ts
+```ts title="definemigration-2.ts"
 import { defineMigration } from '@kwiva/data'
 
 export default defineMigration({
@@ -603,7 +603,7 @@ export default defineMigration({
 
 Custom migrations can contain any SQL the underlying database engine supports:
 
-```ts
+```ts title="definemigration-3.ts"
 export default defineMigration({
   up: (sql) => sql`
     alter table posts add column excerpt text
@@ -633,7 +633,7 @@ When tenancy is configured, migrations respect the configured tenancy strategies
 
 Seeders populate the database with initial or test data. They are safe to re-run: seeder inserts use upsert semantics, so repeated `db:seed` runs do not create duplicates.
 
-```ts
+```ts title="seeders.ts"
 defineSeeder(name, handler)
 ```
 
@@ -642,7 +642,7 @@ defineSeeder(name, handler)
 | `name` | `string` | Seeder identifier, used with `--seeder`. |
 | `handler` | `async ({ factory }) => void` | Performs inserts using the factory helper. |
 
-```ts
+```ts title="src/database/seeders/01-users.ts"
 // src/database/seeders/01-users.ts
 import { defineSeeder } from '@kwiva/data'
 
@@ -652,14 +652,14 @@ export default defineSeeder('users', async ({ factory }) => {
 })
 ```
 
-```bash
+```bash title="terminal"
 kwiva db:seed
 kwiva db:seed --seeder=users
 ```
 
 Seeders run in filename order, so numeric prefixes express dependencies:
 
-```ts
+```ts title="seeders-2.ts"
 export default defineSeeder('roles', async ({ factory }) => {
   await factory(Role).createMany(['admin', 'editor', 'viewer'])
 })
@@ -674,7 +674,7 @@ export default defineSeeder('users', async ({ factory }) => {
 
 Factories generate model-aware test and seed data. They respect required fields, enums, relations, defaults, and unique constraints automatically.
 
-```ts
+```ts title="factories.ts"
 defineFactory(Model, (f) => ({ ... }))
 ```
 
@@ -687,7 +687,7 @@ The factory builder provides four generators:
 | `f.relation(Model)` | `(model)` | Creates a related model instance. |
 | `f.seq(n)` | `(i) => value` | Sequential value by index. |
 
-```ts
+```ts title="factories-2.ts"
 import { defineFactory } from '@kwiva/data'
 
 export const PostFactory = defineFactory(Post, (f) => ({
@@ -706,7 +706,7 @@ Models expose `.factory()` sugar and a fluent runtime API:
 | `.state(name)` | Applies a named factory state. |
 | `.create(overrides?)` | Creates and persists records. |
 
-```ts
+```ts title="factories-3.ts"
 await Post.factory().count(5).create()
 await Post.factory().create({ title: 'Custom Title' })
 ```
@@ -715,7 +715,7 @@ await Post.factory().create({ title: 'Custom Title' })
 
 States are declared as extra keys on the returned field object and applied with `.state()`:
 
-```ts
+```ts title="named-states.ts"
 export const PostFactory = defineFactory(Post, (f) => ({
   title: f.fake((fake) => fake.lorem.sentence()),
   status: f.pick('draft'),
@@ -730,7 +730,7 @@ export const PostFactory = defineFactory(Post, (f) => ({
 }))
 ```
 
-```ts
+```ts title="named-states-2.ts"
 await Post.factory().state('published').create()
 await Post.factory().state('archived').create()
 ```
@@ -739,7 +739,7 @@ await Post.factory().state('archived').create()
 
 A `create` hook on the definition transforms data before insert:
 
-```ts
+```ts title="custom-create-logic.ts"
 export const UserFactory = defineFactory(User, (f) => ({
   email: f.fake((fake) => fake.internet.email()),
   name: f.fake((fake) => fake.person.fullName()),
@@ -754,7 +754,7 @@ export const UserFactory = defineFactory(User, (f) => ({
 
 ### In Tests
 
-```ts
+```ts title="in-tests.ts"
 const post = await PostFactory.create()
 const posts = await PostFactory.count(10).create()
 const published = await PostFactory.state('published').create()
@@ -764,7 +764,7 @@ const published = await PostFactory.state('published').create()
 
 Database connections are configured in `src/config/database.ts`. The development default is SQLite; production reads a Postgres connection string from the environment, so one file serves every environment.
 
-```ts
+```ts title="database-configuration.ts"
 import { defineConfig } from '@kwiva/data'
 
 export default defineConfig('database', {
@@ -790,7 +790,7 @@ export default defineConfig('database', {
 
 Separate workloads across databases with `connections`. Each named connection has its own driver, URL, and pool.
 
-```ts
+```ts title="named-connections.ts"
 export default defineConfig('database', {
   defaults: {
     driver: 'sqlite',
@@ -815,7 +815,7 @@ export default defineConfig('database', {
 
 Read replicas distribute read traffic across instances while writes stay on the primary:
 
-```ts
+```ts title="read-replicas.ts"
 export default defineConfig('database', {
   defaults: {
     driver: 'postgres',
@@ -842,7 +842,7 @@ Every query emits an observability span with normalized SQL, duration, and row c
 
 The storage singleton provides disk-based file and object storage with pluggable drivers. Disks are declared in `src/config/storage.ts`:
 
-```ts
+```ts title="file-storage.ts"
 import { defineConfig } from '@kwiva/data'
 
 export default defineConfig('storage', {
@@ -871,7 +871,7 @@ export default defineConfig('storage', {
 
 The runtime API is exported from `@kwiva/core`:
 
-```ts
+```ts title="storage-api.ts"
 import { storage } from '@kwiva/core'
 
 const path = await storage.put('uploads/avatars', bytes, {
@@ -906,7 +906,7 @@ When multi-tenancy is configured, storage paths are prefixed per tenant automati
 
 Validation happens at the route; storage handles the write; the returned path is stored on the model:
 
-```ts
+```ts title="server-side-uploads.ts"
 c.post('/avatar', async ({ file, session }) => {
   const { filename, bytes, type } = await file()
   return storage.put(`avatars/${session.user.id}`, bytes, {
@@ -919,7 +919,7 @@ c.post('/avatar', async ({ file, session }) => {
 
 `storage.fake()` swaps the active disk for an in-memory implementation, making file operations deterministic:
 
-```ts
+```ts title="testing.ts"
 storage.fake()
 
 const path = await storage.put('avatars/123', bytes, { disk: 'uploads', contentType: 'image/png' })

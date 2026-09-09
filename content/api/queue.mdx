@@ -7,7 +7,7 @@ The `@kwiva/queue` package provides `defineJob`, the factory for background jobs
 
 ## The `defineJob` Factory
 
-```ts
+```ts title="the-definejob-factory.ts"
 import { defineJob } from '@kwiva/queue'
 import { WelcomeMail } from '~/app/mail/welcome'
 
@@ -46,7 +46,7 @@ The handler receives a single context object, destructured in the signature abov
 
 ### Reporting progress
 
-```ts
+```ts title="reporting-progress.ts"
 job.progress(50)
 ```
 
@@ -68,7 +68,7 @@ job.progress(50)
 
 The `schema` option validates every payload at dispatch time and types it inside the handler. Shorthand tokens describe primitive shapes, and where a payload references a model identity the type is derived from the model IR so `payload.userId` is fully typed across dispatch and handler.
 
-```ts
+```ts title="payload-validation-and-typing.ts"
 defineJob('backfill-report', async ({ payload }) => {
   await Report.build({ period: payload.period })
 }, {
@@ -88,7 +88,7 @@ defineJob('backfill-report', async ({ payload }) => {
 
 ### Idempotency keys
 
-```ts
+```ts title="idempotency-keys.ts"
 idempotencyKey: (payload) => `welcome:${payload.userId}`
 ```
 
@@ -102,7 +102,7 @@ When a key is supplied, dispatching the same logical work twice is deduplicated:
 
 Dispatch is available both as a static method on the job and through the `queue` object.
 
-```ts
+```ts title="dispatch.ts"
 import SendWelcome from '~/app/jobs/send-welcome'
 
 await SendWelcome.dispatch({ userId: user.id })
@@ -110,7 +110,7 @@ await SendWelcome.dispatch({ userId: user.id }, { delay: 60 })
 await SendWelcome.dispatch({ userId: user.id }, { queue: 'nightly' })
 ```
 
-```ts
+```ts title="dispatch-2.ts"
 import { queue } from '@kwiva/queue'
 
 await queue.dispatch(SendWelcome, { userId: user.id })
@@ -127,7 +127,7 @@ await queue.dispatch(SendWelcome, { userId: user.id })
 
 Chains run jobs in sequence, one after another (v1.x):
 
-```ts
+```ts title="chaining.ts"
 await queue.chain([ImportRows, BuildReport, NotifyDone]).dispatch()
 ```
 
@@ -135,7 +135,7 @@ await queue.chain([ImportRows, BuildReport, NotifyDone]).dispatch()
 
 Batches dispatch a set of jobs together and report per-job outcomes (v1.x):
 
-```ts
+```ts title="batching.ts"
 const { successes, failures } = await queue
   .batch(rows.map((row) => ImportRows.dispatch(row)))
   .then((result) => result)
@@ -145,7 +145,7 @@ const { successes, failures } = await queue
 
 Workers consume queues and run the jobs. Run a worker in a separate process with `kwiva queue:work`, scoped by `--queue` and scaled with `--concurrency`; use `kwiva queue:listen` in development for verbose, always-on consumption.
 
-```bash
+```bash title="terminal"
 kwiva queue:work --queue=emails,default --concurrency=5
 kwiva queue:listen
 kwiva queue:work --queue=nightly --concurrency=1 --trace
@@ -163,7 +163,7 @@ Workers deploy as their own process via `kwiva deploy --entry worker` using the 
 
 A job that exhausts `attempts` is not retried again. It is moved to the dead-letter queue — the `failed_jobs` table — where it can be inspected and requeued.
 
-```bash
+```bash title="terminal"
 kwiva queue:failed          # list failed jobs
 kwiva queue:retry <id>      # requeue a single failed job
 kwiva queue:retry --all     # requeue every failed job
@@ -173,7 +173,7 @@ kwiva queue:retry --all     # requeue every failed job
 
 Queues and drivers are declared in `src/config/queue.ts` with `defineConfig`.
 
-```ts
+```ts title="configuration-and-transports.ts"
 import { defineConfig } from '@kwiva/config'
 
 export default defineConfig('queue', {
@@ -212,7 +212,7 @@ export default defineConfig('queue', {
 
 Jobs dispatched inside a database transaction are held until the transaction commits, using the same mechanism as the event outbox. If the transaction rolls back, the dispatch is never delivered.
 
-```ts
+```ts title="transaction-aware-dispatch.ts"
 await db.transaction(async (tx) => {
   await Order.create({ amount: payload.total })
 
@@ -228,7 +228,7 @@ Queued event listeners run through the queue transport by default. A listener ma
 
 Swap the transport for an in-memory fake and assert what was pushed:
 
-```ts
+```ts title="testing.ts"
 import { queue } from '@kwiva/queue'
 import SendWelcome from '~/app/jobs/send-welcome'
 

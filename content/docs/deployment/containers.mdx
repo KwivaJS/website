@@ -13,7 +13,7 @@ A container fleet is just many copies of the same immutable artifact. Because th
 
 Containers use the runtime presets. Choose based on what your base image and clusters can run:
 
-```bash
+```bash title="terminal"
 kwiva build --preset node_server   # portable Node entry
 kwiva build --preset bun-server    # Bun runtime entry
 ```
@@ -32,7 +32,7 @@ The build emits `.output/` with `server/` and `public/`. Only the runtime, the e
 
 A representative image (Node case):
 
-```dockerfile
+```dockerfile title="assemble-a-minimal-runtime-image.Dockerfile"
 FROM node:22-slim
 WORKDIR /app
 COPY .output/ .output/
@@ -47,7 +47,7 @@ Keeping the image minimal matters twice over: it is faster to pull across fleets
 
 The container's startup command is just the entry module:
 
-```text
+```text title="startup-command.txt"
 node .output/server/index.mjs
 ```
 
@@ -59,7 +59,7 @@ The Node and Bun presets produce different images, and the choice should match w
 
 For the leanest possible image, skip the runtime base image entirely and compile the binary:
 
-```bash
+```bash title="terminal"
 kwiva build --binary
 # copy the resulting executable into a distroless or scratch image
 ```

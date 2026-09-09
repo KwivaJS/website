@@ -11,7 +11,7 @@ Both share the same model: a baseline from the config folder, tightened or widen
 
 CORS is configured centrally in `src/config/cors.ts`:
 
-```ts
+```ts title="src/config/cors.ts"
 // src/config/cors.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -37,7 +37,7 @@ When the `cors` middleware is on the global stack, this preset is applied to eve
 
 Inline options win over config values, so a controller or route can override the global preset:
 
-```ts
+```ts title="per-route-overrides.ts"
 defineController('posts', (c) => ({ ... }), {
   prefix: '/posts',
   tags: ['posts'],
@@ -47,7 +47,7 @@ defineController('posts', (c) => ({ ... }), {
 
 Server routes apply CORS at the rule level, including combined rules:
 
-```ts
+```ts title="src/routes/rules.ts"
 // src/routes/rules.ts
 defineServerRoute('/api/**', { cors: true, rateLimit: { max: 600, per: 60 } })
 ```
@@ -80,7 +80,7 @@ The defaults are applied out of the box; no configuration is needed to get a rea
 
 Content Security Policy is where you refine the baseline for your application — script sources, style sources, and frame ancestors. The defaults are overridable per route through the `headers` route rule, so embedded or standalone surfaces get their own policy:
 
-```ts
+```ts title="src/routes/rules-2.ts"
 // src/routes/rules.ts
 defineServerRoute('/embed/**', {
   headers: {
@@ -107,7 +107,7 @@ Inline options always win over config folder values, consistent with the rest of
 
 Server routes can enforce CORS at matched-path granularity, including combined rules:
 
-```ts
+```ts title="src/routes/rules-3.ts"
 // src/routes/rules.ts
 defineServerRoute('/api/public/**', {
   cors: { origins: ['https://app.acme.dev'], credentials: true },

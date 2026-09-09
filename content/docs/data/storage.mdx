@@ -7,7 +7,7 @@ Kwiva provides a unified storage abstraction for file and object storage: user u
 
 ## Configuring Disks
 
-```ts
+```ts title="src/config/storage.ts"
 // src/config/storage.ts
 export default defineConfig('storage', {
   defaults: {
@@ -39,7 +39,7 @@ The driver table drives the choice: `local` keeps development friction at zero, 
 
 ## The Storage API
 
-```ts
+```ts title="the-storage-api.ts"
 import { storage } from '@kwiva/core'
 
 const path = await storage.put('uploads/avatars', bytes, {
@@ -74,7 +74,7 @@ const size = await storage.size(path)                          // quick byte cou
 
 `put` accepts a `visibility` option, and every URL helper is visibility-aware:
 
-```ts
+```ts title="urls-and-visibility.ts"
 await storage.put('covers/book.png', bytes, { disk: 'public', contentType: 'image/png' })
 const url = storage.url('covers/book.png', { disk: 'public' })   // public CDN URL
 
@@ -111,7 +111,7 @@ Paths are prefixed per tenant automatically (`storage/{tenantId}/...`), derived 
 
 Validation happens at the route; storage handles the write; the model stores the path:
 
-```ts
+```ts title="upload-flow-server-side.ts"
 c.post('/avatar', async ({ file, session }) => {
   const { filename, bytes, type } = await file()
   return storage.put(`avatars/${session.user.id}`, bytes, { contentType: type })
@@ -138,7 +138,7 @@ Static assets and `storage` are complementary: public/ for shipped application a
 
 ## Testing
 
-```ts
+```ts title="testing.ts"
 storage.fake()
 await putImage('uploads/avatar.png')
 // assert on stored paths and bytes without any driver

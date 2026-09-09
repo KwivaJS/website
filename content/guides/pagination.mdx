@@ -15,7 +15,7 @@ This guide covers the two pagination strategies built into the query builder —
 
 Offset pagination uses page numbers and page sizes. It's the simplest approach and works well for most use cases:
 
-```ts
+```ts title="offset-pagination-with.ts"
 const result = await Post.query()
   .where('status', 'published')
   .page(1, 20)
@@ -23,7 +23,7 @@ const result = await Post.query()
 
 The result carries the current page plus totals:
 
-```ts
+```ts title="offset-pagination-with-2.ts"
 {
   data: Post[],
   total: number,
@@ -38,7 +38,7 @@ For example, with 1500 matching records, `.page(3, 10)` returns `{ data: [...], 
 
 Cursor pagination uses a cursor value (typically `id` or `createdAt`) for stable, efficient pagination — ideal for infinite scroll feeds and high-concurrency lists:
 
-```ts
+```ts title="cursor-pagination-with.ts"
 const result = await Post.query()
   .where('status', 'published')
   .cursor('createdAt', 'desc', 'cursor-value')
@@ -46,7 +46,7 @@ const result = await Post.query()
 
 The response carries the next page cursor instead of totals:
 
-```ts
+```ts title="cursor-pagination-with-2.ts"
 {
   data: Post[],
   nextCursor: string | null,
@@ -70,7 +70,7 @@ The response carries the next page cursor instead of totals:
 
 Generated list endpoints accept pagination as query parameters — `page` and `size` for offset mode, `cursor` and `direction` for cursor mode. Pass them straight through to the query builder:
 
-```ts
+```ts title="reading-page-params-in-a-controller.ts"
 list: c.get('/', async ({ query }) => {
   return Post.query()
     .where('status', 'published')
@@ -80,7 +80,7 @@ list: c.get('/', async ({ query }) => {
 
 The default page size is 20. Configure it globally in `src/config/app.ts`:
 
-```ts
+```ts title="reading-page-params-in-a-controller-2.ts"
 export default defineConfig('app', {
   pagination: { defaultPageSize: 25, maxPageSize: 100 },
 })
@@ -94,13 +94,13 @@ For infinite scroll, use cursor mode and let the `nextCursor`/`hasMore` contract
 
 Start the dev server and request a page:
 
-```bash
+```bash title="terminal"
 curl "http://localhost:3000/posts?page=1&size=20"
 ```
 
 This returns `{ data, total, page, lastPage }`. For cursor mode:
 
-```bash
+```bash title="terminal"
 curl "http://localhost:3000/posts?cursor=abc123&direction=next"
 ```
 

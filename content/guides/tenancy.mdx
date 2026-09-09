@@ -15,7 +15,7 @@ Tenancy gives every tenant its own view of the data: requests resolve to a tenan
 
 Configure tenancy in `src/config/tenancy.ts`:
 
-```ts
+```ts title="enable-tenancy.ts"
 import { defineConfig } from '@kwiva/config'
 
 export default defineConfig('tenancy', {
@@ -51,7 +51,7 @@ The tenant is resolved once per request by the tenant middleware and exposed as 
 
 With `models: '*'` every model is already scoped. You can also opt a model in explicitly via `tenantField`:
 
-```ts
+```ts title="scope-the-models.ts"
 import { defineModel } from '@kwiva/data'
 
 export default defineModel('projects', (f) => ({
@@ -77,7 +77,7 @@ Beyond rows, state isolation is automatic across the rest of the stack:
 
 Drive requests as a specific tenant in tests to confirm isolation:
 
-```ts
+```ts title="verify-it-works.ts"
 withApp(async (app) => {
   const acme = app.asTenant('acme')
   const client = createTestClient(app, { tenant: acme })

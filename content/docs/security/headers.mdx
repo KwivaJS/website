@@ -36,7 +36,7 @@ The policy is driven by a `defaults` dict in the security configuration. If name
 
 Headers are configurable through the security config via lower-cased field names, mapping 1:1 to their HTTP equivalents:
 
-```ts
+```ts title="configuration.ts"
 export default defineConfig('security', {
   defaults: {
     securityHeaders: {
@@ -71,7 +71,7 @@ The framework's CSP default ships the directives needed to run an SSR-reactive a
 
 The header set is not a blunt instrument. A route that embeds an OAuth2 dialog in an iframe, a page that needs a specific permissions policy for camera access, or a widget endpoint with a narrow script source can override headers for that route alone:
 
-```ts
+```ts title="per-route-overrides.ts"
 export default defineController('widgets', (c) => ({
   view: c.get('/', async ({ headers }) => {
     headers.set('frame-ancestors', "'self' https://partner.example")

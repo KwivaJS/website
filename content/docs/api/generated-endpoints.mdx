@@ -23,7 +23,7 @@ Requests, bodies, and responses are fully typed — because they all derive from
 
 Generated routes come from a single model file:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -48,13 +48,13 @@ Change the model and every generated route, its schema, and its client signature
 
 The list route accepts `where`, `page`, `limit`, `orderBy`, `with`, and `q` as query parameters:
 
-```
+```plaintext title="reading-a-list.txt"
 GET /api/posts?page=1&limit=20
 ```
 
 Prefer the typed client for structured queries — filters are checked against the model at compile time:
 
-```ts
+```ts title="reading-a-list-2.ts"
 const { data } = await client.posts.list({
   where: { status: 'published' },
   with: ['comments'],
@@ -69,7 +69,7 @@ The `where` argument is schema-checked against the model; unknown fields return 
 
 `POST` and `PATCH` carry validated bodies from the model's field DSL and any route-level schemas:
 
-```ts
+```ts title="create-and-update.ts"
 const created = await client.posts.create({ title: 'Hello', status: 'draft' })
 const updated = await client.posts.update(id, { status: 'published' })
 ```
@@ -80,7 +80,7 @@ const updated = await client.posts.update(id, { status: 'published' })
 
 The five routes are the baseline, not the ceiling. Add application-specific actions with a controller:
 
-```ts
+```ts title="src/app/http/controllers/posts.ts"
 // src/app/http/controllers/posts.ts
 import { defineController } from '@kwiva/http'
 

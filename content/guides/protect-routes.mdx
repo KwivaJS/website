@@ -15,7 +15,7 @@ Protecting a route means rejecting requests that carry no valid session before a
 
 `requireAuth` is a `beforeHandle` guard that returns `401` when no user is signed in:
 
-```ts
+```ts title="guard-a-controller-action-with-requireauth.ts"
 import { defineController } from "@kwiva/http"
 import { Post } from "../models/posts"
 
@@ -35,7 +35,7 @@ Guard objects compose — chain further checks on the same route, such as `.guar
 
 The framework ships an `auth` middleware with `requireAuth` semantics that returns `401` for anonymous callers. Add it to the middleware stack in `src/config/app.ts`, or define a check of your own:
 
-```ts
+```ts title="protect-every-request-with-middleware.ts"
 import { defineMiddleware } from "@kwiva/http"
 
 export default defineMiddleware("auth", async (ctx, next) => {
@@ -48,7 +48,7 @@ export default defineMiddleware("auth", async (ctx, next) => {
 
 `beforeLoad` receives the session and runs on the server during SSR and again on the client during navigation. Throwing a `redirect` sends guests to `/login` before the loader or component runs:
 
-```tsx
+```tsx title="protect-pages-with-beforeload.tsx"
 import { definePage } from "@kwiva/react"
 
 export default definePage({
@@ -64,7 +64,7 @@ export default definePage({
 
 Auth checks prove someone is signed in; policies decide what they may do. Give a route a `permission` such as `posts.create` and it is checked against the matching policy before the handler runs. Branch on the same ability inside a handler:
 
-```ts
+```ts title="raise-the-bar-with-a-policy.ts"
 get: c.get("/:id", async (ctx) => {
   const post = await Post.findOrFail(ctx.params.id)
   return ctx.can("posts.update", post) ? post : error("FORBIDDEN")

@@ -11,7 +11,7 @@ Because pages are the unit of both rendering and routing, the same file drives *
 
 `definePage` comes from `@kwiva/react`. Its options cover the complete page lifecycle — from search-param validation before the route is even accepted, to the loader that fetches data, to the `<head>` that ships with the first paint:
 
-```tsx
+```tsx title="the-definepage-factory.tsx"
 import { definePage, Link, useNavigate, notFound, stream, redirect } from '@kwiva/react'
 
 export default definePage({
@@ -81,7 +81,7 @@ The route file name becomes the route identity: `posts.$id.tsx` declares a `$id`
 
 `component` receives everything the page declared. Loader results arrive as typed `loaderData`, params come from `Route.useParams()`, and search state is typed by `validateSearch`:
 
-```tsx
+```tsx title="the-page-component.tsx"
 const { id } = Route.useParams()
 const search = Route.useSearch()
 const loaderData = Route.useLoaderData()
@@ -93,7 +93,7 @@ Route hooks mirror the loaders' types exactly, because both are generated from t
 
 Set document-level metadata with the `head` option. Because it is a function of `loaderData`, the tags can describe the actual resource being rendered — an SEO description built from the post's excerpt, a page title from its heading:
 
-```tsx
+```tsx title="head-meta.tsx"
 head: ({ loaderData }) => ({
   title: loaderData.post.title,
   meta: [{ name: 'description', content: loaderData.post.excerpt }],
@@ -113,7 +113,7 @@ Every page gets opinionated fallback UI without extra wiring:
 | `errorComponent` | Route-scoped error boundary, receiving the thrown `error` |
 | `notFoundComponent` | Rendered when the route (or a loader) throws the typed `notFound()` |
 
-```
+```plaintext title="loading-error-and-not-found-ui.txt"
 Pending shown only if data takes longer than pendingMs
    └─ commits the pending component for at least pendingMinMs
 Error → errorComponent on that route, or the root boundary
@@ -126,7 +126,7 @@ Error → errorComponent on that route, or the root boundary
 
 `beforeLoad` runs before loaders execute, which makes it the right place for authorization redirects. Guards run on the server during SSR and on the client during navigation — the same code path:
 
-```tsx
+```tsx title="beforeload-guards.tsx"
 beforeLoad: ({ session, location }) => {
   if (!session.user) throw redirect({ to: '/login', search: { back: location.href } })
 }
@@ -138,7 +138,7 @@ Anything a guard throws stops the loaders for that route from running. Guards re
 
 Every app has a root route at `src/ui/pages/__root.tsx`. It is an ordinary `definePage` file whose component establishes the provider tree and the outlet that nested routes render into:
 
-```tsx
+```tsx title="the-root-route.tsx"
 import { definePage, Providers, Outlet } from '@kwiva/react'
 
 export default definePage({

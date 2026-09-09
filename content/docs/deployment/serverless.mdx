@@ -13,7 +13,7 @@ The platform-agnosticism has a second payoff: the same artifact builds for edge 
 
 ## Build for Serverless
 
-```bash
+```bash title="terminal"
 kwiva build --preset aws-lambda
 kwiva build --preset aws-lambda-sst
 ```
@@ -24,14 +24,14 @@ The output is still `.output/` with `server/` and `public/`; the adapter package
 
 Most serverless platforms are auto-detected when your continuous-integration runner deploys. When one is not, or you want to pin a target, choose explicitly:
 
-```bash
+```bash title="terminal"
 kwiva build                      # auto-detected in CI
 KWIVA_PRESET=aws-lambda kwiva build   # forced in the build environment
 ```
 
 Or set `deploy.preset` in `kwiva.config.ts` as the committed default:
 
-```ts
+```ts title="selection.ts"
 export default defineConfig({
   deploy: {
     preset: 'aws-lambda',
@@ -46,7 +46,7 @@ export default defineConfig({
 
 ## The Deploy Command Flow
 
-```bash
+```bash title="terminal"
 kwiva deploy [provider]
 ```
 

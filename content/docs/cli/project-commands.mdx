@@ -26,7 +26,7 @@ The project and lifecycle commands cover the whole arc of an application: create
 
 The commands line up with the way a project actually lives:
 
-```bash
+```bash title="terminal"
 kwiva new my-app            # 1. scaffold
 kwiva dev                   # 2. develop
 kwiva check                 # 3. keep the gate green
@@ -40,7 +40,7 @@ Each step feeds the next: generated files must pass `check`, `check` and `test` 
 
 ## Scaffolding: `kwiva new`
 
-```bash
+```bash title="terminal"
 kwiva new my-app
 kwiva new my-app --mode=api+spa
 ```
@@ -59,7 +59,7 @@ Omitting the name triggers an interactive prompt; supplying it runs non-interact
 
 ## Development: `kwiva dev`
 
-```bash
+```bash title="terminal"
 kwiva dev
 kwiva dev --port 4000
 kwiva dev --cluster      # v1.x multi-process dev
@@ -71,7 +71,7 @@ While you work, the development overlay renders the same telemetry the framework
 
 ## The Gate: `kwiva check`
 
-```bash
+```bash title="terminal"
 kwiva check
 kwiva check --fix       # apply lint + format fixes
 kwiva check --audit     # dependency audit (v1.x)
@@ -86,7 +86,7 @@ Generated output — and any code you write by hand — is expected to pass `kwi
 
 ## Tests: `kwiva test`
 
-```bash
+```bash title="terminal"
 kwiva test
 kwiva test --watch
 kwiva test --e2e
@@ -97,7 +97,7 @@ kwiva test users
 
 ## Build: `kwiva build`
 
-```bash
+```bash title="terminal"
 kwiva build
 kwiva build --preset node_server
 kwiva build --binary
@@ -116,7 +116,7 @@ The build config surface lives in `kwiva.config.ts > build`, where deployment pr
 
 ## Preview and Deploy
 
-```bash
+```bash title="terminal"
 kwiva preview            # serve the built artifact locally
 kwiva deploy             # build + deploy to the configured provider
 kwiva deploy cloudflare  # or a specific provider
@@ -126,7 +126,7 @@ kwiva deploy cloudflare  # or a specific provider
 
 ## The REPL: `kwiva console`
 
-```bash
+```bash title="terminal"
 kwiva console
 ```
 
@@ -134,7 +134,7 @@ kwiva console
 
 The REPL doubles as an observability surface:
 
-```text
+```text title="the-repl-kwiva-console.txt"
 app.trace.last()      // the most recent span tree
 app.logs.tail(20)     // the last 20 log lines
 ```
@@ -143,7 +143,7 @@ Model queries, worker logic, and telemetry inspection all share the same context
 
 ## Key Generation
 
-```bash
+```bash title="terminal"
 kwiva key:generate
 ```
 
@@ -151,7 +151,7 @@ kwiva key:generate
 
 ## Upgrade: `kwiva upgrade`
 
-```bash
+```bash title="terminal"
 kwiva upgrade
 ```
 
@@ -159,7 +159,7 @@ kwiva upgrade
 
 ## Config Caching: `kwiva config:cache`
 
-```bash
+```bash title="terminal"
 kwiva config:cache       # v1.x
 ```
 

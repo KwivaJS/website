@@ -11,7 +11,7 @@ The spec is a projection, not a maintenance burden. Every path, schema, and erro
 
 The route manifest is the intermediate representation of every route: path, method, request and response schemas, permission, tags, and summary. `@kwiva/http` renders the OpenAPI document from it once at boot, not by visiting each route. Model schemas, enums, relations, pagination shapes, and error responses all derive from the same representation.
 
-```
+```plaintext title="where-the-spec-comes-from.txt"
 route manifest ──► OpenAPI 3.1 ──► /openapi.json ──► /docs
 ```
 
@@ -40,7 +40,7 @@ Because the document renders from the full route manifest, it is complete rather
 
 A `posts` model and controller produce entries like this:
 
-```json
+```json title="a-generated-path.json"
 {
   "/posts": {
     "get": {
@@ -64,7 +64,7 @@ The spec improves as you add metadata to declarations:
 - **Route level** — `summary`, `tags`, and `description` on a handler flow directly into OpenAPI.
 - **Model level** — field `description()` flows into the schema descriptions.
 
-```ts
+```ts title="shaping-the-spec.ts"
 defineController('posts', (c) => ({
   publish: c.post('/:id/publish', async ({ params }) => {
     // ...
@@ -89,7 +89,7 @@ Each operation documents the failure codes its stage can produce. Validation-bea
 
 Emit the spec as a build artifact for external consumers:
 
-```bash
+```bash title="terminal"
 kwiva build --docs
 ```
 

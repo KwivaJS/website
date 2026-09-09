@@ -9,7 +9,7 @@ Studio is off by default. Enabling it is a single block in your app configuratio
 
 Studio lives under the `studio` key of the app config module:
 
-```ts
+```ts title="src/config/app.ts"
 // src/config/app.ts
 export default defineConfig('app', {
   defaults: {
@@ -32,7 +32,7 @@ With `enabled: true`, Studio is mounted at `route` and protected by `guard`. Bot
 
 Studio mounts as a single path namespace under the configured `route`. With the default config that is:
 
-```
+```plaintext title="where-it-mounts.txt"
 /studio              → landing / navigation
 /studio/posts        → list screen
 /studio/posts/:id    → detail screen

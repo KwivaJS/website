@@ -7,7 +7,7 @@ Everything in a Kwiva application is composed by one function: `defineApp` in `s
 
 ## The Kernel
 
-```ts
+```ts title="src/bootstrap/app.ts"
 // src/bootstrap/app.ts
 import { defineApp } from '@kwiva/core'
 import auth from '../app/http/auth'
@@ -43,7 +43,7 @@ The kernel also carries the app-level context that every request sees: `state` f
 
 Modules are registered in `kwiva.config.ts` through the `modules` key:
 
-```ts
+```ts title="kwiva.config.ts"
 // kwiva.config.ts
 export default defineConfig({
   modules: [
@@ -80,7 +80,7 @@ Switch one module for another with the same shape and the derived artifacts re-d
 
 The kernel assembles in a deterministic order:
 
-```text
+```text title="composition-order-boot.txt"
 1. config folder load + env validation        (fail-fast)
 2. module contributions merge (models/config/migrations)
 3. model scan → IR → migrations drift check   (dev warn)

@@ -37,7 +37,7 @@ The full command reference for this surface lives on [CLI Addon Commands](/docs/
 
 One command installs, registers, and checks:
 
-```bash
+```bash title="terminal"
 kwiva add @kwiva/blog
 ```
 
@@ -51,19 +51,19 @@ After `kwiva add`, the addon's contributions — models, controllers, pages, con
 
 Local addons work identically with a path instead of a package name:
 
-```bash
+```bash title="terminal"
 kwiva add ./addons/analytics --path
 ```
 
 Pinning follows the same one-step shape:
 
-```bash
+```bash title="terminal"
 kwiva add @kwiva/blogstore --version 2.1.0
 ```
 
 Manual registration in `kwiva.config.ts` remains supported for vendored and path-based modules that were never installed through the CLI:
 
-```ts
+```ts title="kwiva.config.ts"
 // kwiva.config.ts
 export default defineConfig({
   modules: [

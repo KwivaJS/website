@@ -67,7 +67,7 @@ Each factory maps to a home directory, which is how discovery knows what a file 
 
 Each `defineX` call lives in its own file, named after the construct it defines:
 
-```
+```plaintext title="one-construct-per-file.txt"
 src/app/models/posts.ts            → defineModel('posts', ...)
 src/app/http/controllers/posts.ts  → defineController('posts', ...)
 src/app/jobs/send-welcome.ts       → defineJob('send-welcome', ...)
@@ -82,7 +82,7 @@ The file's directory determines what it is; the filename determines what it regi
 
 `defineX` calls are plain function calls returning serializable definitions. There are no decorators and no classes. Reading app code reads like a description of the product:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -105,7 +105,7 @@ Because definitions are plain data and functions, they are statically analyzable
 
 Types flow from a `defineX` definition through the entire stack:
 
-```
+```plaintext title="type-inference-flows-automatically.txt"
 defineModel → defineController → @kwiva/client → definePage loader → data hooks
 ```
 
@@ -115,7 +115,7 @@ No codegen, no manual type annotations, one type universe. A client call is chec
 
 Every `defineX` accepts full inline options, and inline values always win over config-folder values:
 
-```ts
+```ts title="src/config/cache.ts"
 // src/config/cache.ts declares a global cache TTL
 // but this model tunes it inline
 export default defineModel('posts', (f) => ({ /* ... */ }), {
@@ -143,7 +143,7 @@ Names are lowercase throughout. Where a construct has no fixed singular or plura
 
 Options are not a separate feature of one or two factories — they are part of the grammar:
 
-```ts
+```ts title="inline-options-full-and-always-available.ts"
 export default defineController('reports', (c) => ({ /* ... */ }), {
   prefix: '/reports',
   cors: { origins: ['https://acme.dev'] },   // inline beats the folder

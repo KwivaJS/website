@@ -28,7 +28,7 @@ This is the complete contract. Success statuses are the standard set — 200, 20
 
 Two styles are supported, chosen by context:
 
-```ts
+```ts title="authoring-errors.ts"
 import { error, NotFoundError, ForbiddenError } from '@kwiva/http'
 
 // helper return — preferred in handlers
@@ -51,7 +51,7 @@ Unknown errors become `INTERNAL_ERROR` in production with details hidden; in dev
 
 The taxonomy is fixed, but it is extensible — not skippable. Custom codes register in `src/config/app.ts > errors` with a status mapping:
 
-```ts
+```ts title="src/config/app.ts"
 // src/config/app.ts (excerpt)
 export default defineConfig('app', {
   defaults: {
@@ -69,7 +69,7 @@ Registered codes map to the matching HTTP status and flow through the same envel
 
 API errors render as JSON with the taxonomy envelope:
 
-```json
+```json title="response-shapes.json"
 {
   "error": {
     "code": "NOT_FOUND",
@@ -81,7 +81,7 @@ API errors render as JSON with the taxonomy envelope:
 
 `VALIDATION` adds the field-mapped `issues` array:
 
-```json
+```json title="response-shapes-2.json"
 {
   "error": {
     "code": "VALIDATION",
@@ -120,7 +120,7 @@ See [Models](/docs/data/models) and [Data: soft deletes](/docs/data/soft-deletes
 
 The typed client returns discriminated errors with no string matching:
 
-```ts
+```ts title="client-side-typing.ts"
 const res = await client.posts.get(id)
 
 if (res.ok) {
@@ -158,7 +158,7 @@ Middleware and guards return errors with the same `error` helper, so a short-cir
 
 Every error response carries `requestId`, the same value as the `x-request-id` header. The structured log line for an error includes `level`, `code`, `route`, `requestId`, `tenantId`, and `traceId`:
 
-```ts
+```ts title="logs-and-correlation.ts"
 logger.error({ code, route, requestId, tenantId, traceId }, 'request failed')
 ```
 

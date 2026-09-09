@@ -20,7 +20,7 @@ Four principles shape the data layer:
 
 ## One Declaration, Many Artifacts
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -59,7 +59,7 @@ From this single file the framework produces:
 
 ## The Derivation Pipeline
 
-```
+```plaintext title="the-derivation-pipeline.txt"
 defineModel files
   └─► model IR (src/.kwiva/model-ir.json)
         ├─► SQL table definitions + migrations
@@ -72,7 +72,7 @@ defineModel files
 
 The pipeline runs during `kwiva dev` and on demand through the CLI. It scans `src/app/models/`, resolves the lazy relation references (so models compose without circular imports), and emits a deterministic intermediate representation. Field-level detail follows this chain:
 
-```
+```plaintext title="the-derivation-pipeline-2.txt"
 Field definition → Type resolution → Modifier chain → Validation schema → Database column
 ```
 

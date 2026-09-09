@@ -7,7 +7,7 @@ Loaders are the bridge between the typed client and the page. A loader is an asy
 
 ## The Loader Signature
 
-```tsx
+```tsx title="the-loader-signature.tsx"
 loader: async ({ params, search, client }) => ({
   post: await client.posts.get(params.id),
   comments: stream(client.comments.list({ postId: params.id })),
@@ -31,7 +31,7 @@ Every field is derived from the actual route file and app composition — there 
 
 Loaders run in parallel across every matched route — a layout loader and three nested page loaders all execute concurrently, and the router waits on the complete set before committing the render. Duplicate work is deduplicated: if two matched routes depend on the same resource, it is fetched once per request.
 
-```
+```plaintext title="parallel-execution.txt"
 request → all matched loaders resolve in parallel
   └─ layout loader       client.workspaces.list()
   └─ page loader         client.post.get(id)
@@ -44,7 +44,7 @@ On the server, parallel execution is in-process — the typed client resolves ca
 
 By default a loader participates in every navigation to its route. When the loader depends on only a slice of the search state, `loaderDeps` scopes re-execution to an actual change — pagination that does not re-run on pure query-term edits:
 
-```tsx
+```tsx title="loader-dependencies.tsx"
 loader: async ({ client, search: { page } }) =>
   client.posts.list({ page }),
 
@@ -59,7 +59,7 @@ The selector is optional. When a loader depends on every part of the search stat
 
 A loader can block on the data the first paint needs, and stream the rest. Wrap a promise with `stream()` to defer it:
 
-```tsx
+```tsx title="deferred-data-with-stream.tsx"
 loader: async ({ params, client }) => ({
   post: await client.posts.get(params.id),
   comments: stream(client.comments.list({ postId: params.id })),
@@ -68,7 +68,7 @@ loader: async ({ params, client }) => ({
 
 The blocking value (`post`) holds back the shell; the deferred value (`comments`) is awaited inside a suspense boundary on the page. The page renders the moment the post arrives (rendered and data in parallel):
 
-```tsx
+```tsx title="deferred-data-with-stream-2.tsx"
 component: ({ loaderData: { post, comments } }) => (
   <article>
     <h1>{post.title}</h1>
@@ -94,7 +94,7 @@ If a missing value would leave the shell useless, block it. Otherwise defer it a
 
 Guards run before loaders, so a thrown guard prevents every loader in the chain from executing:
 
-```tsx
+```tsx title="beforeload-guards.tsx"
 beforeLoad: ({ session, location }) => {
   if (!session.user) throw redirect({ to: '/login', search: { back: location.href } })
 },
@@ -106,7 +106,7 @@ Use guards for auth and permission checks; use loaders strictly for data. The di
 
 Loader return types flow into the component and into route hooks. Read them either from the component argument or imperatively:
 
-```tsx
+```tsx title="typed-loader-data.tsx"
 component: ({ loaderData }) => ...
 
 const loaderData = Route.useLoaderData()   // typed by the loader
@@ -118,7 +118,7 @@ If the loader's return shape changes, every consumer re-checks. There is no manu
 
 Loader results are **dehydrated** into the page stream on the server and **rehydrated** into the data-hook cache on the client under identical keys. Client navigation afterwards reads that cache directly — the loader's data and the hooks' data are one and the same:
 
-```
+```plaintext title="hydration-into-data-hooks.txt"
 server: loader runs → results dehydrated into the HTML stream
 client: hydrated into the data-hook cache → useResource/useList consume it without refetch
 ```

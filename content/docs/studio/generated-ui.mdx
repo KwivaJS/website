@@ -24,7 +24,7 @@ The URLs are derived from the model name, so a model named `products` lands at `
 
 Take a model:
 
-```ts
+```ts title="src/app/models/posts.ts"
 // src/app/models/posts.ts
 import { defineModel } from '@kwiva/data'
 
@@ -104,7 +104,7 @@ The audit trail is not decorative gating — it rests on the same policy engine.
 
 Studio holds zero copies of your schema. There is no Studio config file that re-declares fields, no admin-specific validation, no separate list of admin resources. The single pipeline is:
 
-```
+```plaintext title="no-duplicated-studio-side-schema.txt"
 defineModel ──► model IR ──► generated routes ──► typed client ──► Studio screens
 ```
 

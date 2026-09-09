@@ -9,7 +9,7 @@ Kwiva logs are structured and JSON-formatted by default, produced by a framework
 
 A single log line looks like this:
 
-```jsonc
+```jsonc title="structured-logs-by-default.jsonc"
 {
   "ts": 0,
   "level": "info",
@@ -52,7 +52,7 @@ The framework logs at standard severity levels, and the default minimum level is
 
 The minimum level and formatting are configured per environment:
 
-```ts
+```ts title="src/config/telemetry.ts"
 // src/config/telemetry.ts
 export default defineConfig('telemetry', {
   defaults: {
@@ -73,7 +73,7 @@ The level gate applies per line, and child loggers inherit the gate — so a `de
 
 The logger is importable anywhere in app code:
 
-```ts
+```ts title="writing-your-own-logs.ts"
 import { logger } from '@kwiva/core'
 
 logger.info('cleanup finished')
@@ -86,13 +86,13 @@ The first argument is optional structured context; the message follows. Errors c
 
 The same logger supports child instances that freeze context onto every line they emit. This is the idiomatic way to scope a logger to a tenant, a job run, or a request:
 
-```ts
+```ts title="adding-context.ts"
 logger.child({ tenantId }).info({ deleted: 3 }, 'cleanup done')
 ```
 
 The per-request logger is derived from the request store, so even your own handler logs automatically carry the request ID:
 
-```ts
+```ts title="adding-context-2.ts"
 // derived in the app bootstrap
 resolve: [
   ['logger', ({ store }) => logger.child({ requestId: store.requestId })],
@@ -105,7 +105,7 @@ Once that resolver is wired, `ctx.logger` inside any handler is a child logger p
 
 The per-request logger is the tool you reach for in normal handler code. It requires no context plumbing — the request store already carries the correlation IDs — and every line you write joins the request's log stream automatically:
 
-```ts
+```ts title="logging-from-handlers.ts"
 export default defineController('posts', (c) => ({
   create: c.post('/', async ({ body, session, logger }) => {
     const post = await Post.create({ ...body, authorId: session.user.id })
@@ -121,7 +121,7 @@ The rule to remember: if you have `logger` in scope from a handler, job, task, o
 
 Jobs and tasks get the same treatment as requests. A dispatched job's logger is a child logger scoped to the run, so a failure deep inside queued work is correlated to the exact job instance that produced it — which is what makes `requestId` plus `traceId` powerful: an event whose handler runs on the queue still resolves to the trace that emitted it.
 
-```ts
+```ts title="logging-from-background-work.ts"
 export default defineJob('send-welcome', async ({ payload, logger }) => {
   logger.info({ userId: payload.userId }, 'sending welcome')
 })
@@ -152,7 +152,7 @@ Fields arrive only when they apply — a cron task run has no `method` or `statu
 
 The `kwiva console` REPL exposes the last log lines directly:
 
-```text
+```text title="reading-logs-in-development.txt"
 app.logs.tail(20)
 ```
 

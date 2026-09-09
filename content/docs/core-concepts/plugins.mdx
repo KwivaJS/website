@@ -11,7 +11,7 @@ The distinction is one of target. A plugin changes what the framework does for e
 
 ## The `definePlugin` Factory
 
-```ts
+```ts title="the-defineplugin-factory.ts"
 import { definePlugin } from '@kwiva/core'
 
 export default definePlugin('request-timing', {
@@ -49,7 +49,7 @@ A plugin can contribute the same constructs an application can, plus framework-l
 - error mapping and handlers
 - lifecycle behavior at every hook
 
-```ts
+```ts title="what-a-plugin-can-do.ts"
 import { definePlugin } from '@kwiva/core'
 
 export default definePlugin('legacy-compat', {
@@ -90,7 +90,7 @@ Because ordering is stable, a plugin can rely on another plugin's `setup` having
 
 A plugin that times every request end to end combines several framework surfaces:
 
-```ts
+```ts title="a-practical-example.ts"
 import { definePlugin } from '@kwiva/core'
 
 export default definePlugin('request-timing', {

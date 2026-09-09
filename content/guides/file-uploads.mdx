@@ -15,7 +15,7 @@ Handling file uploads means reading multipart bytes from a request with `ctx.fil
 
 Define named disks in the storage config. Use `local` while developing and an `s3`-compatible disk in production:
 
-```ts
+```ts title="configure-a-storage-disk.ts"
 import { defineConfig } from "@kwiva/data"
 
 export default defineConfig("storage", {
@@ -30,7 +30,7 @@ export default defineConfig("storage", {
 
 `ctx.file()` resolves the uploaded file in a handler. `storage.put` writes the bytes to a disk and returns the stored path, which you typically save back onto a model field:
 
-```ts
+```ts title="accept-a-multipart-upload.ts"
 import { defineController } from "@kwiva/http"
 import { storage } from "@kwiva/core"
 
@@ -51,7 +51,7 @@ export default defineController("profile", (c) => ({
 
 The `file` option rejects files that don't match before the handler runs, so handlers only ever see conforming bytes:
 
-```ts
+```ts title="validate-size-and-type.ts"
 file: { maxSize: "2mb", types: ["image/png", "image/jpeg"] }
 ```
 
@@ -59,7 +59,7 @@ file: { maxSize: "2mb", types: ["image/png", "image/jpeg"] }
 
 The storage API reads files back, exposes public URLs for a public disk, and issues time-limited URLs for private access:
 
-```ts
+```ts title="read-and-serve-stored-files.ts"
 const file = await storage.get(path, { disk: "uploads" })
 const url = storage.url(path, { disk: "s3" })
 const signed = await storage.signedUrl(path, { expiresIn: 3600 })
@@ -71,7 +71,7 @@ Use the public URL for openly served assets and `signedUrl` when a file must sta
 
 When multi-tenancy is configured, storage paths are prefixed per tenant automatically, so no extra code is needed:
 
-```
+```plaintext title="keep-tenant-data-isolated.txt"
 storage/{tenantId}/uploads/avatars/{userId}/photo.png
 ```
 

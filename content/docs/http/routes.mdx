@@ -9,7 +9,7 @@ Because every route — generated or authored — becomes a manifest entry, the 
 
 ## URL Conventions
 
-```
+```plaintext title="url-conventions.txt"
 /api                        # API prefix (src/config/api.ts)
 /api/{model}                # generated → /api/posts
 /api/{model}/:id            # single resource
@@ -27,7 +27,7 @@ Naming is enforced by convention: lowercase plural models, kebab-case custom seg
 
 Controllers declare routes via the builder methods `get`, `post`, `put`, `patch`, and `delete`, each taking a path, a handler, and an optional schema:
 
-```ts
+```ts title="route-handlers.ts"
 c.get('/:id', async ({ params }) => Post.findOrFail(params.id))
 
 c.post('/', async ({ body, session }) =>
@@ -44,7 +44,7 @@ The method determines the HTTP verb, the handler produces the response, and the 
 
 Paths use `:param` segments. Params are parsed before the handler runs and typed from the route schema:
 
-```ts
+```ts title="paths-and-params.ts"
 c.patch('/posts/:id', async ({ params, body }) => {
   const post = await Post.findOrFail(params.id)
   return post.update(body)
@@ -107,7 +107,7 @@ Because generation happens from one intermediate representation, the client, the
 
 `defineServerRoute` adds infrastructure-level routes and rules outside the controller surface. Server routes live in `src/routes/*.ts` and are the place for redirects, proxies, caching rules, and engine-level controls:
 
-```ts
+```ts title="src/routes/rules.ts"
 // src/routes/rules.ts
 import { defineServerRoute } from '@kwiva/http'
 
@@ -144,7 +144,7 @@ Controllers mount under a prefix, which composes with the API prefix configured 
 
 URL versioning is configured in `src/config/api.ts`:
 
-```ts
+```ts title="versioning.ts"
 export default defineConfig('api', {
   defaults: {
     versioning: { strategy: 'url', default: 'v1' },

@@ -9,7 +9,7 @@ Kwiva keeps configuration in exactly one place. Every setting your application c
 
 Configuration is resolved low to high:
 
-```
+```plaintext title="the-precedence-model.txt"
 defineConfig defaults  →  src/config/*.ts module values  →  defineX inline options  →  env (runtime overrides)
 ```
 
@@ -26,7 +26,7 @@ Because types flow from each module's defaults and schema, there is no untyped c
 
 `kwiva.config.ts` at the project root is the build-time entry — it declares what to load, how to build, and how to deploy:
 
-```ts
+```ts title="kwiva.config.ts"
 // kwiva.config.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -46,7 +46,7 @@ export default defineConfig({
 
 Configuration lives in `src/config/` — one file per domain:
 
-```
+```plaintext title="the-config-folder.txt"
 src/config/
 ├─ app.ts
 ├─ database.ts
@@ -89,7 +89,7 @@ A `mail.ts` module for mailers is on the roadmap (v1.x).
 
 Each file uses `defineConfig` from `@kwiva/config`:
 
-```ts
+```ts title="src/config/database.ts"
 // src/config/database.ts
 import { defineConfig } from '@kwiva/config'
 
@@ -113,7 +113,7 @@ The `env` map declares which environment variables feed which keys — typed and
 
 Use `config()` from `@kwiva/core` anywhere in your application. The key path is typed against the merged config:
 
-```ts
+```ts title="reading-configuration.ts"
 import { config } from '@kwiva/core'
 
 const url = config('database.url')         // typed: string
@@ -122,7 +122,7 @@ const pool = config('database.pool.max')   // typed: number
 
 Typed environment access works the same way, restricted to variables declared in a module's `env` map:
 
-```ts
+```ts title="reading-configuration-2.ts"
 import { env } from '@kwiva/core'
 
 const dbUrl = env('DATABASE_URL')          // string — declared in database.ts
@@ -135,7 +135,7 @@ Undeclared reads fail at compile time (ambient types) and at boot (validation) �
 
 Every `defineX` factory accepts full inline options, and inline always wins (the rule of thumb: the folder centralizes and defaults; inline tunes per-construct; nothing can be configured from a third place):
 
-```ts
+```ts title="inline-overrides-in-definex.ts"
 export default defineModel('posts', (f) => ({ ... }), {
   cache: { ttl: 120, tags: ['posts'] },   // overrides src/config/cache.ts for this model
   rateLimit: { max: 100, per: 60 },       // overrides api defaults for generated routes
@@ -163,7 +163,7 @@ The `.env` family provides runtime values: `.env` (always), `.env.local` (develo
 
 Client-safe exposure is explicit and typed:
 
-```tsx
+```tsx title="environment-variables.tsx"
 // src/ui/** — only KWIVA_PUBLIC_* is legal here
 import { env } from '@kwiva/react'
 

@@ -15,7 +15,7 @@ This guide shows how to expose an HTTP API with `defineController`. A controller
 
 `kwiva make:controller` scaffolds a controller file:
 
-```bash
+```bash title="terminal"
 kwiva make:controller posts
 ```
 
@@ -25,7 +25,7 @@ This creates `src/app/http/controllers/posts.ts`.
 
 Open the generated file and define your handlers. Each handler receives a typed context with `body`, `params`, `query`, and `session`:
 
-```ts
+```ts title="src/app/http/controllers/posts.ts"
 // src/app/http/controllers/posts.ts
 import { defineController } from '@kwiva/http'
 import { Post } from '../models/posts'
@@ -78,7 +78,7 @@ The third argument configures the route group: `prefix` mounts the controller at
 
 For custom actions beyond the resource verbs, add a handler on a sub-path:
 
-```ts
+```ts title="route-options.ts"
 c.post('/:id/publish', async ({ params }) => {
   const post = await Post.findOrFail(params.id)
   return post.update({ status: 'published' })
@@ -89,7 +89,7 @@ c.post('/:id/publish', async ({ params }) => {
 
 With the dev server running, exercise the routes:
 
-```bash
+```bash title="terminal"
 curl http://localhost:3000/posts
 
 curl -X POST http://localhost:3000/posts \

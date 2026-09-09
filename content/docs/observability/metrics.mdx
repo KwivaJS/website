@@ -16,7 +16,7 @@ The pipeline works in four stages:
 
 The interval setting lives in the telemetry config:
 
-```ts
+```ts title="src/config/telemetry.ts"
 // src/config/telemetry.ts
 export default defineConfig('telemetry', {
   defaults: {
@@ -67,7 +67,7 @@ Pair a volume series with its duration series and a failure counter, and a dashb
 
 Cache health is expressed as a ratio of two counters:
 
-```text
+```text title="cache-hit-rate.txt"
 cache hit rate = cache_hits_total / (cache_hits_total + cache_misses_total)
 ```
 

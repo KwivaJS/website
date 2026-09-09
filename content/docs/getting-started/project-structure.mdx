@@ -115,7 +115,7 @@ Each directory maps to one factory from one package:
 
 The application is composed in `src/bootstrap/app.ts` with `defineApp`. Models, controllers, and middleware are imported from the discovery helper, so the file reads as a declaration of what the app is rather than a list of wiring:
 
-```ts
+```ts title="src/bootstrap/app.ts"
 // src/bootstrap/app.ts
 import { defineApp } from '@kwiva/core'
 import auth from '../app/http/auth'

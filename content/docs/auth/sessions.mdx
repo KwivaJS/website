@@ -11,13 +11,13 @@ Sessions ride through the request lifecycle at a defined point. During context a
 
 Every request that passes through the session middleware carries a `ctx.session` — typed as either a user payload or `null`, never an untyped blob:
 
-```ts
+```ts title="the-typed-server-session.ts"
 const { session } = ctx // typed: { user: { id, email, role } | null }
 ```
 
 A route that requires identity simply reads it:
 
-```ts
+```ts title="the-typed-server-session-2.ts"
 defineMiddleware('auth', async (ctx, next) => {
   if (!ctx.session.user) return error('UNAUTHORIZED')
   return next()
@@ -63,7 +63,7 @@ Cookie hardening is defense for the identity layer: script access is blocked (XS
 
 Sessions can be revoked at any time, independent of expiry. Deleting a session record (or an expired sweep of the store) invalidates it immediately; the same mechanism powers sign-out, admin account bans, and forced logouts. Query the store like any model to prune or audit:
 
-```ts
+```ts title="revocation.ts"
 const n = await Session.query().where('expiresAt', '<', new Date()).delete()
 ```
 
@@ -85,7 +85,7 @@ In v1.x the session store powers a device and session listing inside Studio, so 
 
 On the frontend the same identity arrives through `useSession()`:
 
-```tsx
+```tsx title="the-client-side.tsx"
 const { user, signOut, isPending } = useSession()
 ```
 

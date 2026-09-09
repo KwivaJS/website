@@ -86,7 +86,7 @@ Every response carries `x-request-id` — derived from the incoming header or ge
 
 Defaults are safe because they are defaults, and each one has a documented override:
 
-```ts
+```ts title="overriding-a-default.ts"
 export default defineConfig('security', {
   defaults: {
     // overrides are explicit, intentional, and replacement-in-kind
