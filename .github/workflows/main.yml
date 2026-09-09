@@ -19,6 +19,6 @@ jobs:
       - run: bun run build
       - uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.GH_TOKEN }}
           publish_dir: ./dist
           cname: kwiva.js.org
