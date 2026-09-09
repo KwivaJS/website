@@ -1,0 +1,189 @@
+# API Authentication (/docs/api/authentication)
+
+
+
+API endpoints are protected at two layers: authentication establishes who is calling, and authorization decides what that caller may do. This page covers authentication for the API; see [Authorization](/docs/authorization) for policies, roles, and permissions.
+
+Authentication is resolved by the pipeline, not by your handlers. The session middleware loads identity from cookies or tokens before guards run, and the typed context carries the result — so handlers and policies read `ctx.session` without ever touching cookie or token mechanics themselves.
+
+## Session Cookies (Default) [#session-cookies-default]
+
+By default the API authenticates with session cookies. The request lifecycle loads the session from the cookie before handlers run and exposes it as typed context:
+
+```ts title="session-cookies-default.ts"
+handler: async ({ session }) => {
+  session.user          // { id, email, role } | null
+  session.user?.id      // typed when signed in
+}
+```
+
+Sessions live behind a pluggable store — database by default — and support sliding expiry.
+
+### Cookie configuration [#cookie-configuration]
+
+```ts title="cookie-configuration.ts"
+import { defineAuth } from '@kwiva/auth'
+
+export default defineAuth({
+  session: {
+    strategy: 'database',          // database | cookie | jwt
+    expiresIn: 60 * 60 * 24 * 7,
+    cookie: { httpOnly: true, sameSite: 'lax', secure: true },
+  },
+})
+```
+
+The cookie flags are the browser-facing contract: `httpOnly` keeps the session out of client scripts, `sameSite: 'lax'` blocks cross-site sends on state-changing requests, and `secure` restricts transmission to HTTPS. See [Auth: sessions](/docs/auth/sessions) for store backends and expiry behavior.
+
+## Token Sessions [#token-sessions]
+
+For API clients that cannot manage cookies — mobile apps, server-to-server integrations — switch the session strategy to `jwt`. The client receives a signed token and presents it as a bearer credential on each request:
+
+```ts title="token-sessions.ts"
+defineAuth({
+  session: {
+    strategy: 'jwt',
+  },
+})
+```
+
+Token-backed auth routes are rate-limited by default, matching the rest of the auth surface.
+
+Token sessions suit automation clients that store credentials server-side. Cookie sessions remain the default because they keep credentials out of client-side storage entirely — choose `jwt` when cookies are not an option for the consumer.
+
+## The Generated Auth Surface [#the-generated-auth-surface]
+
+| Endpoint                                        | Purpose                                  |
+| ----------------------------------------------- | ---------------------------------------- |
+| `POST /auth/sign-up` · `/sign-in` · `/sign-out` | credential flows                         |
+| `GET /auth/oauth/:provider` · callback          | OAuth                                    |
+| `GET /auth/session`                             | current session (typed)                  |
+| `POST /auth/passkeys/*`                         | WebAuthn registration and authentication |
+
+Auth routes mount from `defineAuth` in `src/app/http/auth.ts`. See [Authentication](/docs/auth) for the full provider and session surface.
+
+## Protecting Endpoints [#protecting-endpoints]
+
+Attach the `auth` middleware to require a session:
+
+```ts title="src/app/http/middleware/auth.ts"
+// src/app/http/middleware/auth.ts
+import { defineMiddleware, error } from '@kwiva/http'
+
+export default defineMiddleware('auth', async (ctx, next) => {
+  if (!ctx.session.user) return error('UNAUTHORIZED')
+  return next()
+})
+```
+
+Scope it to a controller:
+
+```ts title="protecting-endpoints.ts"
+defineController('posts', (c) => ({ ... }), {
+  prefix: '/posts',
+  middleware: ['auth'],
+})
+```
+
+A missing or invalid session returns `401` with the `UNAUTHORIZED` code.
+
+### Guarded groups [#guarded-groups]
+
+Guards apply auth plus policy checks to a group of nested routes with a single declaration:
+
+```ts title="guarded-groups.ts"
+export default defineController('posts', (c) => c.guard({
+  middleware: ['auth', 'tenant'],
+  beforeHandle: ({ session }) => {
+    if (!session.user) return error('UNAUTHORIZED')
+  },
+}, (g) => ({
+  create: g.post('/', async ({ body, session }) => {
+    return Post.create({ ...body, authorId: session.user.id })
+  }, {
+    permission: 'posts.create',
+  }),
+})), { prefix: '/posts' })
+```
+
+The guard's middleware runs first, its check runs after validation, and the per-route permission runs last. Any denial short-circuits before the handler. See [Guards](/docs/http/guards).
+
+## Per-Route Permissions [#per-route-permissions]
+
+Authentication gets a caller in the door; permissions decide what they may touch. Routes carry a `permission` key checked against `definePolicy`:
+
+```ts title="per-route-permissions.ts"
+create: c.post('/', async ({ body, session }) => {
+  return Post.create({ ...body, authorId: session.user.id })
+}, {
+  permission: 'posts.create',
+})
+```
+
+A valid session without the `posts.create` permission receives `403 FORBIDDEN`. Generated model routes require `posts.read/create/update/delete` from the model's `permission` option. See [Permissions](/docs/authorization/permissions).
+
+## Enumeration Safety [#enumeration-safety]
+
+Auth errors are enumeration-safe: a bad email and a bad password both return `UNAUTHORIZED`, so callers cannot distinguish valid accounts from invalid ones. See [API Errors](/docs/api/errors) for the error contract.
+
+## CSRF [#csrf]
+
+Form routes carry session-token double-submit protection via the `csrf` middleware, on by default, so state-changing cookie-authenticated requests are protected against cross-site forgery. The form renders a token the middleware validates on submission; an attacker's site cannot forge it because they never read the session cookie. See [Security](/docs/security) for the full posture.
+
+## The Session Lifecycle [#the-session-lifecycle]
+
+A session is created at sign-in, stored behind the session store, verified on every request by the session middleware, and destroyed at sign-out or expiry. Sliding expiry extends the TTL on activity, so active users stay signed in while abandoned sessions age out. See [Auth: sessions](/docs/auth/sessions).
+
+## Public vs Protected [#public-vs-protected]
+
+Routes opt in to protection — there is no global everything-private flag to forget. A controller declares `middleware: ['auth']` or attaches a guard, and routes without the declaration stay public. Permission-gated models make even the generated list return `UNAUTHORIZED` for anonymous callers.
+
+## Where Auth Runs in the Pipeline [#where-auth-runs-in-the-pipeline]
+
+The session middleware resolves identity during context assembly; the `auth` middleware asserts it; guards assert specifics; permissions assert ability. Each runs at its fixed stage, which is what makes the ordering dependable:
+
+```ts title="where-auth-runs-in-the-pipeline.ts"
+session load → tenant resolve → validation → auth guard → permission → handler
+```
+
+See [Request Lifecycle](/docs/http/lifecycle).
+
+## OAuth and Passkeys [#oauth-and-passkeys]
+
+The generated surface mounts OAuth provider flows and WebAuthn passkey routes. Both resolve into the same session model: after a provider or passkey ceremony succeeds, the caller holds an ordinary session cookie and every downstream rule applies unchanged.
+
+## Rate Limiting on Auth Routes [#rate-limiting-on-auth-routes]
+
+Sign-in and token endpoints are rate-limited by default because credential endpoints are the primary automated-attack surface. Limits use the built-in `rate-limit` middleware, configurable in `src/config/api.ts`. A tripped limit returns `TOO_MANY_REQUESTS`. See [API Errors](/docs/api/errors).
+
+## Session Data and Per-Request Load [#session-data-and-per-request-load]
+
+The middleware loads the session on every request. Session data is available at `ctx.session` throughout the lifecycle — guards, handlers, and serialization read the same identity. For per-request fresh data (a profile row, a tenant), load it in a guard's `beforeHandle` or middleware after auth. See [Authorization](/docs/authorization).
+
+## Ownership Checks at the Edge [#ownership-checks-at-the-edge]
+
+Authenticated does not mean authorized. The session tells you who made the request; an owner-scoped query confirms they may read the resource:
+
+```ts title="ownership-checks-at-the-edge.ts"
+handler: async ({ session, params }) => {
+  const post = await Post.findFirst({
+    where: { id: params.id, authorId: session.user.id },
+  })
+  if (!post) return error('NOT_FOUND')
+  return post
+}
+```
+
+The pattern composes with policies — ownership in the middle, policy at the route. See [Policies](/docs/authorization/policies).
+
+## Sessions, Tokens, and Passkeys Together [#sessions-tokens-and-passkeys-together]
+
+The three mechanisms coexist: cookie sessions for browsers, token sessions for servers, passkeys for passwordless sign-in. A passkey sign-in still resolves to a cookie session. The taxonomy stays one: any missing or invalid credential resolves `UNAUTHORIZED`. See [Authentication: providers](/docs/auth/providers).
+
+## What's Next [#whats-next]
+
+* [Authentication](/docs/auth) — providers, sessions, and `useSession`
+* [Authorization](/docs/authorization) — policies, roles, and permissions
+* [Permissions](/docs/authorization/permissions) — permission keys and namespaces
+* [Sessions](/docs/auth/sessions) — store backends and expiry
+* [Protecting Routes](/docs/auth/protecting-routes) — middleware and page guards

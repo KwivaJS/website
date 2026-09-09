@@ -1,0 +1,145 @@
+# Model IR (/docs/advanced/model-ir)
+
+
+
+The model IR is the engineering spine of Kwiva. From the definitions in `src/app/models/`, the framework derives a single typed intermediate representation — the model IR — and every external artifact is generated from that one IR. This is why Kwiva can promise that your types, your API, your database, and your tooling can never disagree.
+
+## What the Model IR Is [#what-the-model-ir-is]
+
+When Kwiva runs `kwiva dev` or `kwiva build`, it scans `src/app/models/*.ts`, evaluates each `defineModel` call, and produces a typed intermediate representation capturing everything the definition declared:
+
+* Identity — the model name and its singular and plural references
+* Fields — name, type, modifiers such as optional, default, unique, indexed, and primary key
+* Relations — `belongsTo`, `hasMany`, `hasOne`, and `belongsToMany` as lazy references, with no circular imports
+* Validation — the field-level validation chaining, carried as the single validation source
+* Options — timestamps, audit fields, soft delete, tenant scoping, permissions, indexes, and uniques
+
+The IR is written to the generated directory and rebuilt on every dev and build run:
+
+```plaintext title="what-the-model-ir-is.txt"
+src/.kwiva/
+  model-ir.json         the typed model IR
+  route-manifest.json   the route IR, also derived from models and controllers
+  types/                generated ambient types
+```
+
+That directory is a build product. Never edit it by hand — it is regenerated deterministically from your definitions each time.
+
+## The Derivation Pipeline [#the-derivation-pipeline]
+
+One definition fans out into the entire data plane:
+
+```plaintext title="the-derivation-pipeline.txt"
+src/app/models/*.ts ──► IR (typed intermediate representation)
+ ├─► database schema + migrations + seeders      (@kwiva/data)
+ ├─► typed REST API (route registration)         (@kwiva/http + @kwiva/data)
+ ├─► typed RPC client SDK                        (@kwiva/client)
+ ├─► Studio screens                              (@kwiva/studio)
+ ├─► OpenAPI spec                                (@kwiva/http)
+ └─► MCP tools (optional)                        (@kwiva/mcp)
+```
+
+A model like this:
+
+```ts title="src/app/models/posts.ts"
+// src/app/models/posts.ts
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().validation((s) => s.min(1).max(200)),
+  body: f.text().optional(),
+  status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
+  authorId: f.uuid().indexed(),
+  publishedAt: f.timestamp().optional(),
+  author: f.belongsTo(() => User),
+  comments: f.hasMany(() => Comment),
+}), {
+  timestamps: true,
+  uniques: [['authorId', 'title']],
+  permission: 'posts',
+})
+```
+
+...becomes, in a single pass, a database table and migration, five REST endpoints, a fully typed client call, a Studio screen, an OpenAPI schema, and — if the model is opted in — MCP tools.
+
+Relations are written as lazy function references (`() => User`), which is what lets the scanner build the full graph without introducing circular imports between model files. The IR resolves those references into the typed relation graph once, and every downstream consumer reads that resolved graph.
+
+## A Single IR, Six Outputs [#a-single-ir-six-outputs]
+
+### Database schema and migrations [#database-schema-and-migrations]
+
+`@kwiva/data` translates the IR into schema and migrations. A model change produces a diff, and `kwiva db:migrate` turns that diff into SQL steps under `src/database/migrations/`. The same IR drives `seeders` and generated factories. Add a field, delete a relation, or add an index, and the diff against the live schema tells you precisely what a migration step must do — the diff is a derivation, not a guess.
+
+### Typed REST API [#typed-rest-api]
+
+`@kwiva/http` and `@kwiva/data` register exactly five generated routes per model — `list`, `get`, `create`, `update`, `delete` — plus any custom actions you add on a controller. Because the shape is deterministic, documentation and tooling can rely on it. Every model produces the same five-route contract, so client code, OpenAPI consumers, and Studio never have to discover the shape of a resource — they already know it.
+
+### Typed RPC client [#typed-rpc-client]
+
+`@kwiva/client` is generated from the same IR, so every model method and controller action appears on the client with end-to-end types. No separate schema is maintained on the client side that can drift from the server.
+
+```ts title="typed-rpc-client.ts"
+import { createClient } from '@kwiva/client'
+export const client = createClient()
+
+const { data } = await client.posts.list({ page: 1 })
+const post = await client.posts.update(id, { title: 'New title' })
+```
+
+The client is derived from the server's route manifest and model IR — it is the server's own types, projected across the wire, with zero handwritten duplication.
+
+### Studio [#studio]
+
+`@kwiva/studio` derives its screens from the IR: columns, filters, and forms all come from the model IR. There is no Studio-side duplication, so a new field on a model appears in Studio without configuring anything. The screens are re-derived, not hand-mirrored: whatever the model declares as its columns, filters, and validations is exactly what the generated interface shows.
+
+### OpenAPI [#openapi]
+
+The route manifest — itself derived from the IR and controller schemas — produces the OpenAPI 3.1 specification, served from your route registration. Schemas, summaries, tags, and descriptions on controllers and routes flow into the spec directly, which is why there is no separate hand-maintained API document to keep in sync.
+
+### MCP tools [#mcp-tools]
+
+`@kwiva/mcp` turns opted-in models into agent-callable tools — `list`, `get`, `create`, `update`, `delete` — and controller actions into tools with their exact input and output types. Tool input schemas come straight from the route validation schemas in the IR.
+
+## The "No Drift" Guarantee [#the-no-drift-guarantee]
+
+The no-drift guarantee is structural, not aspirational. Because there is exactly one IR, all six outputs above agree by construction — they are all compiled from the same input. The framework never runs a set of unrelated, hand-tuned generators that can fall out of sync.
+
+Concretely this means:
+
+1. A field added to a model appears in the migration, the REST schema, the client types, the Studio form, the OpenAPI spec, and the MCP tool in the same run.
+2. Validation defined on the field DSL is the validation everywhere — there are no duplicate schemas to keep in sync.
+3. The five generated routes per model are deterministic, which keeps client, OpenAPI, Studio, and MCP predictable for tooling and documentation.
+4. Collection-level permissions declared on a model gate the generated routes and Studio through the same policy namespace.
+
+A single derivation pass is the whole mechanism. Where other stacks maintain a database schema, an API schema, a client SDK, and an admin UI independently, Kwiva compiles all of them from one IR — so the question "which one is out of date?" has no answer.
+
+## Types Flow End-to-End [#types-flow-end-to-end]
+
+The IR is also the hub of the type graph. Types flow from the definitions through the entire stack:
+
+```plaintext title="types-flow-end-to-end.txt"
+defineModel → defineController → @kwiva/client → definePage loader → data hooks
+```
+
+There is no codegen step for types — no separate generated `.d.ts` to regenerate and forget — and no manual type annotations anywhere in the chain. The type universe that the compiler sees is the same one the database schema describes. The framework runs "serial derivation from one IR": resolver, client, Studio, OpenAPI, and MCP all generate from the single model IR rather than from ad-hoc per-output generators.
+
+## When the IR Is Built [#when-the-ir-is-built]
+
+The IR is produced during step 2 of every build, right after the application scan:
+
+1. Collect — scan models, controllers, pages, config, and routes
+2. Build the IR — model IR plus route manifest, written to `src/.kwiva/`
+3. Build the client — routes chunked per page
+4. Build the server — one server bundle through the engine preset
+5. Prerender — crawl or explicit list for static and ISR routes
+
+In development the same IR is built continuously, so a model edit is reflected in the client, OpenAPI, and MCP surface immediately. The dev loop re-derives on filesystem change — there is no "regenerate types" step a developer can forget.
+
+## What's Next [#whats-next]
+
+* [Models](/docs/data/models) — The `defineModel` factory that feeds the IR
+* [Generated Endpoints](/docs/api/generated-endpoints) — The five deterministic routes per model
+* [RPC Client](/docs/frontend/rpc-client) — The typed client generated from the same IR
+* [Studio Screens](/docs/studio/generated-ui) — The IR-derived admin interface
+* [Tool Generation](/docs/ai-mcp/tool-generation) — How the IR becomes agent-callable tools

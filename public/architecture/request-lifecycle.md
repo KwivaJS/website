@@ -1,0 +1,97 @@
+# Request Lifecycle (/architecture/request-lifecycle)
+
+
+
+Every request that enters a Kwiva application crosses a strict, ordered pipeline. The order matters: middleware run before guards, validation runs before handlers, cache rules short-circuit before session loading. Understanding the sequence tells you *where* to hook in and *why* things behave the way they do.
+
+## The Full Sequence [#the-full-sequence]
+
+```plaintext title="the-full-sequence.txt"
+ 1. client request
+ 2. runtime preset adapter            → Web Request normalization
+ 3. framework HTTP pipeline entry
+ 3.1  requestId assigned             (x-request-id: set or forwarded)
+ 3.2  tracing span begins            (http {method, route})
+ 3.3  onRequest middleware           (security headers, rate limit, CORS)
+ 4. routing
+ 4.1  route manifest match           (generated model routes, controllers, server routes)
+ 4.2  route rules apply              (cache hit? → serve + bypass pipeline)
+ 5. context assembly
+ 5.1  parse query / parse body       (json, form, multipart)
+ 5.2  cookies decoded, session load  (auth engine, database/redis store)
+ 5.3  tenant resolution              (domain/path/header → ctx.tenant)
+ 5.4  state/decorate/resolve         (typed app context)
+ 6. onTransform middleware           (mutate parsed values)
+ 7. validation                       (body/query/params/headers/cookies schemas)
+ 8. onBeforeHandle                   (guards: requireAuth, policy check)
+ 9. handler
+    ├─ API route  → controller action (service → model query → response object)
+    └─ page route → SSR render (beforeLoad → loaders → stream)
+10. onAfterHandle                    (response shaping, cache tags set)
+11. error path (any throw)           → taxonomy mapping → error response / error page
+12. onResponse                       (final headers, span close, metrics)
+13. engine writes response           (preset adapter)
+```
+
+### 1–3. Entry and pipeline start [#13-entry-and-pipeline-start]
+
+The runtime preset adapter normalizes the incoming request into a standard Web `Request`. The framework assigns a request ID, opens a tracing span, and runs `onRequest` middleware — security headers, rate limiting, and CORS happen here, before any routing.
+
+### 4. Routing and route rules [#4-routing-and-route-rules]
+
+The route manifest matches the request — a generated model route, a controller action, or a server route. Then route rules apply: if the path is cached (`cache`, `swr`, `isr`, `static`), the response is served directly and the rest of the pipeline is bypassed. This is why public cached pages skip auth entirely.
+
+### 5. Context assembly [#5-context-assembly]
+
+The typed request context is built: query and body are parsed, cookies are decoded and the session is loaded, the tenant is resolved, and application state is derived via `state`/`decorate`/`resolve`. Everything the handler will need is available and typed.
+
+### 6–8. Transform, validate, guard [#68-transform-validate-guard]
+
+`onTransform` middleware can mutate parsed values. Then validation runs against the declared schemas — body, query, params, headers, cookies — compiled once for speed. Guards (`requireAuth`, policy checks) run *after* validation, so validated data is available to authorization logic.
+
+### 9. Handler [#9-handler]
+
+The request reaches its handler. API routes call a controller action (service → model query → response object); page routes enter the SSR render path (`beforeLoad` → loaders → streamed HTML).
+
+### 10–13. Response and error path [#1013-response-and-error-path]
+
+`onAfterHandle` shapes the response and sets cache tags. Any thrown error enters the taxonomy mapping and becomes a typed error response or error page. `onResponse` finalizes headers, closes the tracing span, and records metrics. The engine writes the response through the preset adapter.
+
+## Timing Budgets [#timing-budgets]
+
+Targets for a representative application (p50):
+
+| Stage                         | Budget                      |
+| ----------------------------- | --------------------------- |
+| adapter → pipeline entry      | \< 1 ms                     |
+| session + tenant resolve      | \< 2 ms (db/redis hit)      |
+| validation                    | \< 0.5 ms (schema compiled) |
+| handler (model list, 20 rows) | \< 5 ms                     |
+| full API round-trip (local)   | \< 15 ms                    |
+| SSR shell (stream start)      | \< 50 ms                    |
+
+Each stage is a tracing span, so the development overlay can show the full waterfall for any request.
+
+## Ordering Guarantees [#ordering-guarantees]
+
+* Middleware run in `src/config/app.ts > middleware[]` order, **before** guards.
+* Guard `beforeHandle` runs **after** validation — the validated body is available for policy checks.
+* Cache and route rules short-circuit **before** session load; public ISR pages skip auth entirely.
+* Error mapping is the only code that can run after `onResponse` (it annotates the span with error attributes).
+
+## Session & Tenant Propagation [#session--tenant-propagation]
+
+* The session ID (cookie) is resolved through an engine-agnostic session store and exposed as typed `ctx.session`.
+* The tenant resolution strategy (`subdomain`, `path`, `header`, or `fixed` for single-tenant apps) is configured in `src/config/tenancy.ts`.
+* The resolved tenant is injected everywhere it matters: model query scoping, cache keys, storage prefixes, queue payloads, and log/trace attributes.
+
+## Background Work After Response [#background-work-after-response]
+
+Events and queue dispatch happen inside handlers and acknowledge in-band (transaction-aware). For post-response work, `ctx.waitUntil(promise)` schedules work after the response — edge-safe and available on every preset.
+
+## What to Read Next [#what-to-read-next]
+
+* [HTTP Lifecycle](/docs/http/lifecycle) — The same sequence from the HTTP package's perspective
+* [Core Concepts: Lifecycle](/docs/core-concepts/lifecycle) — Boot lifecycle and hook points
+* [Tenancy](/docs/tenancy) — How tenant resolution and scoping fit the flow
+* [Observability](/docs/observability) — Spans, logs, and metrics along the path

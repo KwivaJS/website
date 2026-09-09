@@ -1,0 +1,141 @@
+# Database Configuration (/docs/data/database-config)
+
+
+
+The database layer is configured from `src/config/database.ts`, one file that describes connections, pooling, logging, and environment mapping. The sensible default pairing is **SQLite for development, Postgres for production** — the same model files, migrations, and queries run against both, so the low-friction default does not fork your code.
+
+## The Config File [#the-config-file]
+
+```ts title="src/config/database.ts"
+// src/config/database.ts
+export default defineConfig('database', {
+  defaults: {
+    driver: 'sqlite',                          // dev default
+    url: 'sqlite://storage/database.db',
+    pool: { max: 10, idleTimeout: 30_000 },
+    logging: false,
+  },
+  env: { url: 'DATABASE_URL', driver: 'DB_DRIVER' },
+  connections: {
+    primary: { url: env('DATABASE_URL'), pool: { max: 20 } },
+    // replica: { url: env('READ_REPLICA_URL'), pool: { max: 10 }, readOnly: true }, // v2
+  },
+})
+```
+
+| Block         | Role                                                                              |
+| ------------- | --------------------------------------------------------------------------------- |
+| `defaults`    | Base settings for every connection                                                |
+| `env`         | Which environment variables override which settings                               |
+| `connections` | Named connections for the multi-connection surface (`v1.x`), read replicas (`v2`) |
+
+## Drivers [#drivers]
+
+| Driver     | Typical use             | Notes                                                   |
+| ---------- | ----------------------- | ------------------------------------------------------- |
+| `sqlite`   | Local development       | File-backed; zero setup; `sqlite://path`                |
+| `postgres` | Production default      | Primary production driver; the team's reference runtime |
+| `mysql`    | Existing infrastructure | Supported driver for migrations continuing on MySQL     |
+
+The driver is a single string per connection. `DB_DRIVER` lets each environment pick its own without editing the file.
+
+| Environment    | Driver                 | URL                                  |
+| -------------- | ---------------------- | ------------------------------------ |
+| Local dev      | `sqlite`               | `sqlite://storage/database.db`       |
+| CI             | `sqlite` or `postgres` | ephemeral file / `DATABASE_URL`      |
+| Production     | `postgres`             | `postgres://user:pass@host:5432/app` |
+| Existing MySQL | `mysql`                | driver-native DSN                    |
+
+```ts title="drivers.ts"
+url: 'sqlite://storage/database.db'        // sqlite file
+url: env('DATABASE_URL')                    // standard postgres/mysql DSN via env
+```
+
+## Environment Variables [#environment-variables]
+
+`env` maps config keys to environment variables, and environment values always win over hard-coded defaults:
+
+| Config entry | Env var        | Precedence                                              |
+| ------------ | -------------- | ------------------------------------------------------- |
+| `url`        | `DATABASE_URL` | Set env var = override; missing = use `defaults.url`    |
+| `driver`     | `DB_DRIVER`    | Set env var = override; missing = use `defaults.driver` |
+
+This is the same pattern as every config folder — see [Getting Started: Configuration](/docs/getting-started/configuration) for `defineConfig` semantics.
+
+## Connection URLs [#connection-urls]
+
+Connection strings follow the driver's native DSN style:
+
+```bash title="terminal"
+DATABASE_URL=postgres://user:pass@host:5432/app
+DB_DRIVER=postgres
+```
+
+`kwiva make:model`, `db:diff`, `db:migrate`, and `db:seed` all read the same config and env, so the CLI is always operating on the same database your app uses.
+
+## Pooling [#pooling]
+
+| Option             | Default | Meaning                                     |
+| ------------------ | ------- | ------------------------------------------- |
+| `pool.max`         | `10`    | Maximum concurrent connections              |
+| `pool.idleTimeout` | `30000` | Milliseconds an idle connection is retained |
+
+Tune `pool.max` for expected concurrency: small for local, larger for production workers (each worker holding a connection per in-flight operation). Excess connections exhaust the Postgres connection budget faster than they add throughput — raise only against measured demand.
+
+Sizing heuristics:
+
+| Workload                                          | `pool.max`                                                                |
+| ------------------------------------------------- | ------------------------------------------------------------------------- |
+| Local dev, one process                            | `10` (default)                                                            |
+| Single instance, moderate latency-sensitive reads | `20`                                                                      |
+| Multiple workers / high concurrency               | `workers × in-flight per worker`, capped by the server's connection limit |
+
+Pool exhaustion shows up as connection timeouts under load rather than SQL errors — if you see them, the first question is "how many concurrent transactions do we actually need", not "how many connections can the pool hold".
+
+## Logging and Slow Queries [#logging-and-slow-queries]
+
+| Option               | Default | Meaning                                             |
+| -------------------- | ------- | --------------------------------------------------- |
+| `logging`            | `false` | Emit query logging for development                  |
+| `slowQueryThreshold` | `500`   | Milliseconds above which a query is flagged as slow |
+
+```ts title="logging-and-slow-queries.ts"
+defaults: {
+  logging: true,
+  slowQueryThreshold: 250,
+}
+```
+
+With `logging: true`, queries log with trace correlation — each log line ties back to the request span, so a slow statement is traceable to the tenant and endpoint that caused it. The slow-query threshold also feeds the telemetry pipeline (see [Observability: Logging](/docs/observability/logging)).
+
+## Named Connections and Read Replicas [#named-connections-and-read-replicas]
+
+* **Named connections (`v1.x`)**: declare multiple connections under `connections` and target them from application code — separate databases for reporting, audit, or per-module schemas.
+* **Read replicas (`v2`)**: a `readOnly: true` connection routes read traffic while writes stay on `primary`.
+
+Until those land, the single configured connection serves everything — keep the config file minimal and rely on the driver split for environment differences.
+
+## Troubleshooting [#troubleshooting]
+
+| Symptom                        | Likely cause                                  | Fix                                                    |
+| ------------------------------ | --------------------------------------------- | ------------------------------------------------------ |
+| `DATABASE_URL` ignored         | Env not loaded, or key mismatch in `env` map  | Confirm the var name in `env` and that env loading ran |
+| Connection timeouts under load | `pool.max` too low for concurrency            | Measure concurrent transactions, size the pool         |
+| Slow queries not logged        | `logging: false` or threshold too high        | Enable `logging`, lower `slowQueryThreshold`           |
+| Wrong database for CLI         | `kwiva db:migrate` in one env, app in another | Check `DB_DRIVER` / `DATABASE_URL` per environment     |
+
+Because the CLI, migrations, seeders, and the app all read the same `src/config/database.ts`, a misconfiguration shows up identically in every entry point — the fix is always in this one file.
+
+> \[!TIP]
+> The dev/prod driver split is configuration, not code. Keep migrations and queries driver-portable (the `sql` migration tag is dialect-aware) so switching environments never involves rewriting SQL.
+
+## Observability [#observability]
+
+Every query emits an OTel span with normalized SQL text, duration, and row count; slow queries surface through `slowQueryThreshold`. Combined with transaction spans, the data layer is fully observable from one trace — see [Observability: Tracing](/docs/observability/tracing).
+
+## What's Next [#whats-next]
+
+1. [Migrations](/docs/data/migrations) — evolving the schema on these connections
+2. [Queries](/docs/data/queries) — the runtime query plane
+3. [Models](/docs/data/models) — the model IR these connections serve
+4. [Configuration](/docs/getting-started/configuration) — the config folder and `defineConfig`

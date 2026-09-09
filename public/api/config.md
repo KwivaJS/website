@@ -1,0 +1,248 @@
+# @kwiva/config (/api/config)
+
+
+
+`@kwiva/config` is the framework's configuration system. All configuration lives in the config folder (`src/config/*.ts`) loaded through the `kwiva.config.ts` entry file. Every module is created by `defineConfig`, every value is typed from its `defaults`, and every environment variable is declared once in its `env` map — making configuration typed, layered, and environment-aware.
+
+## Exports [#exports]
+
+| Export         | Purpose                                  | Stability |
+| -------------- | ---------------------------------------- | --------- |
+| `defineConfig` | Create a config module or the root entry | Stable    |
+
+The `config()` and `env()` read accessors ship from `@kwiva/core` and consume the modules you define here — see the [core reference](/api/core).
+
+## `defineConfig` [#defineconfig]
+
+The factory has two forms:
+
+1. A **module** — a named namespace in the config folder.
+2. The **root entry** — `kwiva.config.ts`, which loads the folder and holds build-time settings.
+
+### Module Form [#module-form]
+
+```ts title="src/config/database.ts"
+// src/config/database.ts
+import { defineConfig } from '@kwiva/config'
+
+export default defineConfig('database', {
+  defaults: {
+    driver: 'sqlite',
+    url: 'sqlite://storage/database.db',
+    pool: { max: 10 },
+    migrations: { table: 'kwiva_migrations' },
+  },
+  env: {
+    url: 'DATABASE_URL',
+    driver: 'DB_DRIVER',
+  },
+})
+```
+
+```ts title="module-form.ts"
+defineConfig(name: string, options: ConfigModuleOptions): ConfigModule
+```
+
+### Options [#options]
+
+| Option     | Type                  | Description                                                                                                                                 |
+| ---------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`     | `string`              | Namespace key, e.g. `'database'` — reads become `config('database.url')`                                                                    |
+| `schema`   | `StandardSchema`      | Optional validation schema for the merged module value                                                                                      |
+| `defaults` | `object`              | Default values; their type flows to every `config()` read                                                                                   |
+| `env`      | `Record<key, string>` | Maps config keys to environment variable names; the single declaration point for env typing, boot validation, and `.env.example` generation |
+
+### Root Entry Form [#root-entry-form]
+
+```ts title="kwiva.config.ts"
+// kwiva.config.ts
+import { defineConfig } from '@kwiva/config'
+
+export default defineConfig({
+  load: './src/config',
+  deploy: { preset: 'node_server' },
+  modules: ['@kwiva/auth-kit', './modules/billing'],
+})
+```
+
+```ts title="root-entry-form.ts"
+defineConfig(options: RootConfigOptions): RootConfig
+```
+
+The root entry is **build-time only**. It does not hold runtime values; runtime configuration belongs in `src/config/`.
+
+### Root Options [#root-options]
+
+| Option    | Type                      | Description                                                         |
+| --------- | ------------------------- | ------------------------------------------------------------------- |
+| `load`    | `string`                  | Path to the config folder, e.g. `'./src/config'`                    |
+| `deploy`  | `object`                  | Deploy target settings such as the output preset                    |
+| `build`   | `object`                  | Build-level escape hatch (target, sourcemaps, and related settings) |
+| `modules` | `Array<string \| Module>` | Module registry — first-party, npm, or local path                   |
+
+## The Config Folder [#the-config-folder]
+
+One module per domain, all lowercase:
+
+```plaintext title="the-config-folder.txt"
+src/config/
+├── app.ts           # identity, env, mode, middleware stack, timezone/locale
+├── database.ts      # connections, pool, migrations
+├── auth.ts          # providers, session, password policy
+├── session.ts       # session store + cookie shape
+├── api.ts           # API surface, versioning, rate limits, docs
+├── queue.ts         # connections, retries, dead-letter defaults
+├── cache.ts         # mounts, TTLs, tag strategy
+├── storage.ts       # disks and drivers
+├── schedule.ts      # timezone, task cron table
+├── tenancy.ts       # mode, resolution, tenant field
+├── cors.ts          # CORS policy
+├── security.ts      # headers, CSP, CSRF
+├── ui.ts            # renderer, theme, i18n
+├── telemetry.ts     # exporters, sampling
+└── modules.ts       # module registry
+```
+
+| Module        | Key keys (excerpt)                   |
+| ------------- | ------------------------------------ |
+| `app.ts`      | `name`, `env`, `url`, `middleware[]` |
+| `database.ts` | `driver`, `url`, `connections{}`     |
+| `queue.ts`    | `driver`, `default`                  |
+| `cache.ts`    | `mounts{}`, `defaultTtl`             |
+| `api.ts`      | `prefix`, `rateLimit`, `docs`        |
+| `tenancy.ts`  | `mode`, `tenantField`                |
+
+The `config()` accessor is the only way application code reads these values, and its types come straight from each module's `defaults` and schema:
+
+```ts title="the-config-folder-2.ts"
+import { config } from '@kwiva/core'
+
+const url = config('database.url')
+const pool = config('database.pool.max')
+```
+
+## Layer Precedence [#layer-precedence]
+
+Configuration follows a strict precedence model, low to high:
+
+```plaintext title="layer-precedence.txt"
+defaults  →  src/config/*.ts module values  →  defineX inline options  →  env (runtime overrides)
+```
+
+Later sources win. The rule of thumb: the folder centralizes and defaults; inline options tune per construct; inline always beats the folder. Nothing can be configured from a third place.
+
+```ts title="layer-precedence-2.ts"
+export default defineModel('posts', (f) => ({ ... }), {
+  cache: { ttl: 120, tags: ['posts'] },
+  rateLimit: { max: 100, per: 60 },
+})
+```
+
+```ts title="layer-precedence-3.ts"
+export default defineController('reports', (c) => ({ ... }), {
+  prefix: '/reports',
+  cors: { origins: ['https://acme.dev'] },
+})
+```
+
+```ts title="layer-precedence-4.ts"
+export default defineJob('cleanup', handler, {
+  queue: 'maintenance',
+  attempts: 3,
+})
+```
+
+Each inline example overrides the matching `src/config/*.ts` default for that single construct; other constructs keep the folder values. Module config overrides are namespaced and deep-merged — the app wins over module defaults.
+
+## Typed Env Access [#typed-env-access]
+
+Environment variables are declared exactly once: in the `env` map of a `src/config/*.ts` module. That declaration is the source for ambient typing, boot validation, and `.env.example` generation. App code reads them through `env()` from `@kwiva/core`:
+
+```ts title="src/config/database-2.ts"
+// src/config/database.ts
+export default defineConfig('database', {
+  env: { url: 'DATABASE_URL', driver: 'DB_DRIVER' },
+})
+```
+
+```ts title="typed-env-access.ts"
+import { env } from '@kwiva/core'
+
+const dbUrl = env('DATABASE_URL')
+const driver = env('DB_DRIVER')
+```
+
+### Signature [#signature]
+
+```ts title="signature.ts"
+env<K extends DeclaredEnvKey>(key: K): string
+```
+
+`env('NOT_DECLARED')` is a compile-time error (ambient types) and a boot-time error (validation). `kwiva dev`, `kwiva build`, and server start validate every declared variable and fail fast with a table of missing ones:
+
+```plaintext title="signature-2.txt"
+✗ Missing required environment variables:
+    DATABASE_URL   (declared in src/config/database.ts)
+    REDIS_URL      (declared in src/config/queue.ts)
+```
+
+Optional variables declare defaults in their module; secrets have no defaults.
+
+### Env Files [#env-files]
+
+| File              | Purpose                                                 |
+| ----------------- | ------------------------------------------------------- |
+| `.env`            | Loaded always in development                            |
+| `.env.local`      | Developer overrides, gitignored                         |
+| `.env.example`    | Committed template with every variable the app declares |
+| `.env.production` | Loaded in production builds, never committed            |
+
+### Naming Conventions [#naming-conventions]
+
+| Prefix                              | Meaning                                                   |
+| ----------------------------------- | --------------------------------------------------------- |
+| `KWIVA_*`                           | Framework-level knobs                                     |
+| `KWIVA_PUBLIC_*`                    | Safe to embed in client bundles, exposed via `env.public` |
+| `DATABASE_URL`, `REDIS_URL`, `S3_*` | Common service variables mapped by config modules         |
+| Engine-level deployment knobs       | Preset and base-URL settings, build-time only             |
+
+Only `KWIVA_PUBLIC_*` variables flow to the client. Non-public variables referenced from `src/ui/**` are a lint error. Client code reads public values through `env.public` from `@kwiva/react`:
+
+```ts title="naming-conventions.ts"
+import { env } from '@kwiva/react'
+
+const stripeKey = env.public('KWIVA_PUBLIC_STRIPE_KEY')
+```
+
+## Runtime vs Build-Time [#runtime-vs-build-time]
+
+* **Build-time**: `kwiva.config.ts` — `load`, `deploy.preset`, `build`, and the module list.
+* **Runtime**: everything in `src/config/` (overridable by environment variables), snapshotted into the runtime config channel.
+
+### Environment Modes [#environment-modes]
+
+| Mode          | Set by           | Effect                                              |
+| ------------- | ---------------- | --------------------------------------------------- |
+| `development` | Default          | Dev server, verbose errors, optional seed-on-boot   |
+| `production`  | Production build | Minified output, observability on, terse errors     |
+| `test`        | Test runner      | In-memory adapters where possible, seeded factories |
+
+`config('app.env')` is the canonical read; the platform environment variable is mapped onto it.
+
+## Config Caching [#config-caching]
+
+For production, cache the merged configuration with `kwiva config:cache`. The command merges and snapshots the config folder so cold starts do zero config-resolution IO. Rebuild the cache whenever a config module changes. Caching ships in the v1.x line alongside module and addon support.
+
+## Anti-patterns [#anti-patterns]
+
+* Scattering config across packages and `defineX` calls as the primary home — there must be a single source of truth.
+* Untyped `process.env` reads in app code — lint-gated.
+* Embedding `.env` values in client bundles — only `KWIVA_PUBLIC_*` flows to the client.
+
+## What to Read Next [#what-to-read-next]
+
+* [Configuration](/docs/core-concepts/configuration) — Architecture and precedence model
+* [Configuration Model](/docs/getting-started/configuration) — Getting started with config modules
+* [Core Reference](/api/core) — `config()` and `env()` accessors
+* [Application Composition](/docs/core-concepts/applications) — The kernel that loads your config
+* [The defineX Convention](/docs/core-concepts/definex) — Where `defineConfig` fits

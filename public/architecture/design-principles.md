@@ -1,0 +1,99 @@
+# Design Principles (/architecture/design-principles)
+
+
+
+Kwiva is designed from four principles. Every decision in the framework — the package boundaries, the `defineX` convention, the derivation pipeline, the deploy-anywhere runtime — traces back to them. If a feature, convention, or dependency choice can't be justified against one of these pillars, it doesn't ship.
+
+## The Four Pillars [#the-four-pillars]
+
+### 1. Expressive syntax — one grammar [#1-expressive-syntax--one-grammar]
+
+Every app-facing construct in Kwiva is a `defineX` factory. Models, controllers, pages, jobs, events, tasks, policies, modules, middleware — they all look the same, behave the same, and compose the same.
+
+The cost of a second grammar is compounding: two mental models, two sets of conventions, two error surfaces, two tooling surfaces. Kwiva intentionally keeps exactly one. When you've learned `defineModel`, you've already learned `defineController`, `defineJob`, and `definePage` — the arguments differ, the shape doesn't.
+
+The reward is a codebase that reads like a product description:
+
+```ts title="src/app/models/posts.ts"
+// src/app/models/posts.ts
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().validation((s) => s.min(1).max(200)),
+  body: f.text().optional(),
+  status: f.enum('draft', 'published', 'archived').default('draft'),
+  author: f.belongsTo(() => User),
+  comments: f.hasMany(() => Comment),
+}), { timestamps: true, permission: 'posts' })
+```
+
+### 2. Developer experience — CLI-first [#2-developer-experience--cli-first]
+
+Kwiva's experience is driven by the CLI, not by ceremony. `kwiva new` scaffolds a complete, working project. `kwiva make:model` scaffolds a model plus its migration and factory. `kwiva dev` gives instant feedback with a Rust-speed toolchain; `kwiva check` runs typecheck, lint, and format in one command.
+
+Configuration is typed, discovered, and validated at boot. Errors are friendly and actionable. The framework fails loudly at the right time — in your editor or terminal, not in production.
+
+### 3. Performance — Rust-speed toolchain [#3-performance--rust-speed-toolchain]
+
+Static machinery runs on a Rust-native toolchain: bundling, linting, formatting, transforming, minifying, and type-declaration emission. Development startup is near-instant; builds are fast; feedback loops are short. Performance isn't a runtime afterthought — it's baked into how the CLI works.
+
+### 4. Scalability — tenancy-first and deploy-anywhere [#4-scalability--tenancy-first-and-deploy-anywhere]
+
+Kwiva treats tenancy as an architectural concern from day one, not an afterthought bolted on later. Every data access path can be scoped by tenant automatically. The runtime is portable: one codebase builds for servers, edge functions, serverless providers, static output, and single-binary artifacts — the deployment target is a build-time choice, never a code change.
+
+## The Ownership Model [#the-ownership-model]
+
+Kwiva is explicit about *who owns what*. The framework controls its API surface and conventions; hidden internal engines power behavior; a deeply integrated toolchain does static work; and inspiration-only references shape design without becoming dependencies.
+
+| Role                | Meaning                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------- |
+| **Framework API**   | The `@kwiva/*` packages — the only thing application code imports                        |
+| **Internal engine** | A hidden, framework-owned implementation powering a package — never imported by app code |
+| **Toolchain**       | The Rust-speed toolchain the CLI integrates for bundling, lint, format, and transforms   |
+| **Reference**       | An inspiration-only library whose ergonomics shape the framework — zero dependency       |
+| **Application**     | Code the end-developer writes in their project                                           |
+
+The rule that follows from this model: &#x2A;*app code imports only `@kwiva/*` and writes only `defineX(...)`.** Everything underneath is framework-owned.
+
+## How Kwiva Chooses [#how-kwiva-chooses]
+
+When the framework adopts or rejects a technology, a small set of decision rules applies:
+
+1. Changes to the canonical stack require an engineering decision record.
+2. When ecosystems conflict, prefer the boundary Kwiva controls — an owned DSL and generators beat vendored frameworks.
+3. When two candidates are equal on capability, choose: (a) fewer moving parts, (b) stronger type derivation, (c) more portable output, (d) ecosystem momentum on the Rust-speed/Bun-native axis.
+
+## Core Architectural Decisions [#core-architectural-decisions]
+
+| Concern            | Kwiva choice                                               | Class         | Why / what was rejected                                               |
+| ------------------ | ---------------------------------------------------------- | ------------- | --------------------------------------------------------------------- |
+| Language           | TypeScript, strict                                         | —             | JavaScript loses the type derivation Kwiva is built around            |
+| Runtime            | Bun native, Node-compatible output                         | engine        | Node-first loses the single-binary path and startup speed             |
+| Toolchain          | Rust-speed (bundler, linter, formatter, transformer)       | toolchain     | Slower toolchains make feedback loops too long                        |
+| Server foundation  | Portable server carrier with deploy presets                | engine        | A bespoke server layer would duplicate a mature, portable one         |
+| HTTP layer         | Owned pipeline: controllers, middleware, lifecycle, guards | framework API | Delegating HTTP means inheriting someone else's conventions           |
+| Data foundation    | `defineModel` as single source of truth                    | framework API | App-facing query builders still require hand-written API/client/admin |
+| UI & routing       | Owned typed router; framework-owned SSR                    | framework API | A locked deploy model or untyped routing was rejected                 |
+| Auth               | Session/auth engine behind `@kwiva/auth`                   | engine        | Rolling auth from scratch risks correctness; hosted-only locks you in |
+| Client cache & RPC | Owned typed RPC client + framework data hooks              | framework API | Codegen steps and raw fetch in loaders are lint-gated away            |
+| Configuration      | Typed config folder + `defineConfig`, env-bound            | framework API | Scattered ad-hoc config and untyped `process.env` reads were rejected |
+| Testing            | Native test runner + owned harness, Playwright for e2e     | owned         | Slow runners and heavy frameworks were rejected                       |
+| Observability      | OpenTelemetry woven at the framework surface               | engine        | Ad-hoc logging alone can't diagnose distributed apps                  |
+
+## What Kwiva Rejects [#what-kwiva-rejects]
+
+The framework also draws clear lines about what it *won't* be:
+
+* **No library spaghetti.** Applications don't assemble a dozen independently-versioned libraries with conflicting conventions.
+* **No engine leakage.** Application code never imports an internal engine. It's enforced by a lint gate at `kwiva check`.
+* **No config sprawl.** Configuration lives in one typed model — `kwiva.config.ts` plus `src/config/` — with inline overrides always winning.
+* **No lock-in.** Deployment presets, runtime compatibility, and Standard-Schema-based validation keep the exit doors open.
+
+## What to Read Next [#what-to-read-next]
+
+* [Architecture Overview](/architecture) — The layered model in one picture
+* [Request Lifecycle](/architecture/request-lifecycle) — How one request crosses every layer
+* [Model Derivation](/architecture/model-derivation) — Why the model is the source of truth
+* [Package Boundaries](/architecture/package-boundaries) — The dependency graph and ownership map
+* [Core Concepts](/docs/core-concepts) — The mental model from a developer's perspective

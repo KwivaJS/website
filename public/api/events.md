@@ -1,0 +1,201 @@
+# Events (/api/events)
+
+
+
+The `@kwiva/events` package provides `defineEvent`, the factory for domain events: named, schema-validated occurrences that fan out to listeners (queued or synchronous) and can broadcast to realtime channels. Events are the seam between your domain code and side effects — webhooks, stats updates, notifications, and channel broadcasts — and the transactional outbox guarantees that events emitted inside a database transaction are delivered exactly once, after commit.
+
+## The `defineEvent` Factory [#the-defineevent-factory]
+
+```ts title="the-defineevent-factory.ts"
+import { defineEvent } from '@kwiva/events'
+
+export const MessagePosted = defineEvent('message.posted', (f) => ({
+  roomId: f.uuid(),
+  messageId: f.uuid(),
+  tenantId: f.uuid().optional(),
+}), {
+  broadcast: (event) => `chat.${event.roomId}`,
+  listeners: ['send-webhook', 'update-stats'],
+  queued: true,
+})
+```
+
+| Argument  | Type               | Description                                                            |
+| --------- | ------------------ | ---------------------------------------------------------------------- |
+| `name`    | `string`           | Unique dotted event name (e.g. `'message.posted'`, `'user.signed-up'`) |
+| `payload` | `(f) => ({ ... })` | Field-factory describing the payload shape                             |
+| `options` | `EventOptions`     | Broadcasting, listeners, and execution mode                            |
+
+### Payload schema [#payload-schema]
+
+The payload factory uses the same field DSL as models — `f.uuid()`, `f.string()`, `f.optional()`, and friends — and produces a Standard Schema-validated payload. Listeners, broadcasting, and the client all receive the payload fully typed.
+
+```ts title="payload-schema.ts"
+export const UserSignedUp = defineEvent('user.signed-up', (f) => ({
+  userId: f.uuid(),
+  email: f.string(),
+}))
+```
+
+### Event options [#event-options]
+
+| Option      | Type                | Description                                                                                 |
+| ----------- | ------------------- | ------------------------------------------------------------------------------------------- |
+| `broadcast` | `(event) => string` | Maps an event to the realtime channel it is broadcast on                                    |
+| `listeners` | `string[]`          | Named listeners to attach to this event                                                     |
+| `queued`    | `boolean`           | Runs listeners through the queue transport (default); set `false` for synchronous execution |
+
+## Emitting [#emitting]
+
+```ts title="emitting.ts"
+await MessagePosted.emit({ roomId, messageId })
+```
+
+`emit(payload)` validates the payload, resolves listeners, and — when `queued` is enabled — hands each listener to the queue transport as a job. When the event declares a `broadcast` mapping, the payload is also pushed to the resolved channel.
+
+### Transactional outbox (v1.x) [#transactional-outbox-v1x]
+
+Events emitted inside a database transaction are stored and delivered only after the transaction commits. A committed event is never lost; a rolled-back emit is never delivered.
+
+```ts title="transactional-outbox-v1.ts"
+await db.transaction(async (tx) => {
+  const message = await Message.create({ roomId, body })
+
+  await MessagePosted.emit({ roomId, messageId: message.id })
+})
+```
+
+## Listeners [#listeners]
+
+Listeners are attached by name and receive the typed event.
+
+```ts title="listeners.ts"
+MessagePosted.on('send-webhook', async (event) => {
+  await postToWebhook(event.roomId, event.messageId)
+})
+```
+
+Listener files are auto-discovered from `src/app/events/listeners/` — a file named after the listener in that folder is picked up without registration:
+
+```ts title="src/app/events/listeners/send-webhook.ts"
+// src/app/events/listeners/send-webhook.ts
+export default async (event) => {
+  await postToWebhook(event.roomId, event.messageId)
+}
+```
+
+### Queued vs synchronous [#queued-vs-synchronous]
+
+Listeners run through the queue transport by default. Each listener invocation becomes a queued job, so a busy listener never blocks the emitter and failures retry with queue semantics. A listener is synchronous when the event opts out with `queued: false`, or when it is defined to run inline.
+
+### Wildcards (v1.x) [#wildcards-v1x]
+
+A wildcard handler subscribes to every event under a name prefix:
+
+```ts title="wildcards-v1.ts"
+import { events } from '@kwiva/events'
+
+events.on('user.*', async (event) => {
+  logger.info({ event: event.name }, 'user lifecycle event')
+})
+```
+
+## Broadcasting to Channels [#broadcasting-to-channels]
+
+The `broadcast` option maps an event to a channel template. The resolved channel is policy-checked, so the same authorization rules that guard REST routes apply to subscribers.
+
+```ts title="broadcasting-to-channels.ts"
+export const MessagePosted = defineEvent('message.posted', (f) => ({
+  roomId: f.uuid(),
+  messageId: f.uuid(),
+}), {
+  broadcast: (event) => `chat.${event.roomId}`,
+})
+```
+
+### Channels [#channels]
+
+Realtime channels are defined with `channel` from `@kwiva/http`. A channel names a pattern, checks policy on upgrade, and handles inbound messages:
+
+```ts title="channels.ts"
+import { channel, broadcast } from '@kwiva/http'
+
+export const chat = channel('chat.{roomId}')
+  .policy(({ params, session }) => session.user && isMember(session.user, params.roomId))
+  .on('message', ({ payload }) => broadcast(payload))
+```
+
+Subscribe authorization is evaluated during the WebSocket handshake using the same policy engine as REST routes.
+
+### Manual broadcast [#manual-broadcast]
+
+Broadcast to a channel by name from anywhere on the server:
+
+```ts title="manual-broadcast.ts"
+import { broadcast } from '@kwiva/http'
+
+broadcast('chat.42', { type: 'message', body: 'hello' })
+```
+
+### Model events to broadcast [#model-events-to-broadcast]
+
+Model hooks provide sugar for broadcasting on model lifecycle events:
+
+```ts title="model-events-to-broadcast.ts"
+Post.onCreated(() => broadcast('posts'))
+```
+
+### Transport mapping [#transport-mapping]
+
+| Environment    | Transport                                                      |
+| -------------- | -------------------------------------------------------------- |
+| Server presets | WebSocket over the server's upgrade handler                    |
+| Edge presets   | Stateful channel storage wired by the preset's socket handling |
+| Static         | Realtime disabled; clients degrade gracefully                  |
+
+For fan-out across multiple instances, set `broadcast.driver` to `'redis'` in the API config so instances subscribe to the adapter and forward events to their local sockets.
+
+## Client Subscriptions [#client-subscriptions]
+
+On the client, events surfaced through channels are consumed with hooks from `@kwiva/react`:
+
+```tsx title="client-subscriptions.tsx"
+import { useChannel, usePresence } from '@kwiva/react'
+
+const { messages, send } = useChannel(`chat.${roomId}`, {
+  onMessage: (message) => {
+    console.log(message)
+  },
+})
+
+const { members } = usePresence(`chat.${roomId}`)
+```
+
+| Hook                        | Returns              | Description                                                                    |
+| --------------------------- | -------------------- | ------------------------------------------------------------------------------ |
+| `useChannel(name, options)` | `{ messages, send }` | Subscribes to a channel; `onMessage` payloads are typed from event definitions |
+| `usePresence(name)`         | `{ members }`        | Join and leave tracking on a channel (v1.x)                                    |
+
+Clients reconnect with backoff after a dropped connection and catch up on missed messages via event id (v1.x). When WebSockets are unavailable — behind restrictive proxies or edge constraints — the client falls back to SSE through `client.stream(channel)`.
+
+### Server-sent events [#server-sent-events]
+
+For one-directional feeds where WebSockets are overkill, an SSE route streams with the same channel policy semantics:
+
+```ts title="server-sent-events.ts"
+c.get('/feed', ({ stream }) =>
+  stream((controller) => {
+    posts.on('message', (message) => controller.enqueue(message))
+    return () => controller.close()
+  }),
+)
+```
+
+## What to Read Next [#what-to-read-next]
+
+* [Events & Broadcasting](/docs/realtime/events) — Domain events guide
+* [Channels](/docs/realtime/channels) — Channel API and policy-checked subscribe
+* [Client Usage](/docs/realtime/client-usage) — `useChannel`, `usePresence`, SSE fallback
+* [Realtime at Scale](/docs/realtime/scaling) — Fan-out across instances
+* [Queue Jobs](/docs/background-work/jobs) — Queued listener execution
+* [Auth Hooks](/api/auth) — Emitting events from sign-in and sign-up hooks

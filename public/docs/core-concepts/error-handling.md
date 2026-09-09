@@ -1,0 +1,183 @@
+# Error Handling (/docs/core-concepts/error-handling)
+
+
+
+## One Taxonomy, Two Renderers [#one-taxonomy-two-renderers]
+
+Kwiva has exactly one error taxonomy and two renderers: JSON for API routes and HTML for pages. Every error — wherever it is thrown — maps to a code in the taxonomy, carries a request ID for correlation, and is typed on the client. There is no second, ad-hoc way to report failures, and no path around the taxonomy.
+
+## The Taxonomy [#the-taxonomy]
+
+The taxonomy has one success resolution and seven error codes. Every request resolution lands on exactly one of them:
+
+| Code                | HTTP | Meaning                                        | Produced by            |
+| ------------------- | ---- | ---------------------------------------------- | ---------------------- |
+| `OK`                | 200  | Success — the request was handled              | Pipeline               |
+| `UNAUTHORIZED`      | 401  | No session or invalid credentials              | Auth, guards           |
+| `FORBIDDEN`         | 403  | Policy denial                                  | Policies, `permission` |
+| `NOT_FOUND`         | 404  | Missing resource or route                      | `findOrFail`, router   |
+| `CONFLICT`          | 409  | Uniqueness or optimistic-concurrency violation | Model layer            |
+| `VALIDATION`        | 422  | Schema failures                                | Validation stage       |
+| `TOO_MANY_REQUESTS` | 429  | Rate limit tripped                             | Middleware             |
+| `INTERNAL_ERROR`    | 500  | Unhandled error                                | Catch-all              |
+
+This is the complete contract. Success statuses are the standard set — 200, 201, 204 — and every failure maps into one of the seven error codes, with `OK` reserved for success. The same table is used by the HTTP layer ([HTTP errors](/docs/http/errors)) and the API client ([API errors](/docs/api/errors)), so a code means the same thing at every layer. On the typed client the discrimination is literal: `res.ok` is the `OK` resolution, and `res.error.code` is the failing code.
+
+## Authoring Errors [#authoring-errors]
+
+Two styles are supported, chosen by context:
+
+```ts title="authoring-errors.ts"
+import { error, NotFoundError, ForbiddenError } from '@kwiva/http'
+
+// helper return — preferred in handlers
+return error('NOT_FOUND', { message: 'no such post' })
+return error('VALIDATION', { issues: [{ path: 'title', message: 'too long' }] })
+
+// typed exceptions — preferred in services and models
+throw new NotFoundError('post', id)
+throw new ForbiddenError('posts.publish')
+```
+
+The `error` helper returns a typed error response from the handler. The typed exceptions throw, which is the right shape from deep inside a service or model where there is no return value to thread. Both end up as the same taxonomy entry, flow through the same mapping, and produce the same response envelope.
+
+Unknown errors become `INTERNAL_ERROR` in production with details hidden; in development they surface with the full stack. See [Observability: logging](/docs/observability/logging) for the correlation story.
+
+## Custom Codes [#custom-codes]
+
+The taxonomy is fixed, but it is extensible — not skippable. Custom codes register in `src/config/app.ts > errors` with a status mapping:
+
+```ts title="src/config/app.ts"
+// src/config/app.ts (excerpt)
+export default defineConfig('app', {
+  defaults: {
+    errors: {
+      PAYMENT_REQUIRED: { status: 402 },
+      TOO_LARGE: { status: 413 },
+    },
+  },
+})
+```
+
+Registered codes map to the matching HTTP status and flow through the same envelope, `onError` stage, and client typing as the built-in codes. Extend the taxonomy; never bypass it.
+
+## Reaching for Errors from Any Stage [#reaching-for-errors-from-any-stage]
+
+Middleware, guards, and handlers all produce errors through the same two styles. A guard denies with a returned error; a deep service or model throws a typed exception:
+
+```ts title="reaching-for-errors-from-any-stage.ts"
+import { error } from '@kwiva/http'
+
+// in a guard's beforeHandle — return, don't throw
+beforeHandle: ({ session, error }) => {
+  if (!session.user) return error('UNAUTHORIZED', { message: 'sign in required' })
+}
+
+// in a handler — same helper, same envelope
+if (!post) return error('NOT_FOUND', { message: 'no such post' })
+```
+
+Both enter the `onError` stage and resolve through identical mapping. The only rule is stylistic: return the helper where a value can be returned, throw the typed exception where it cannot (deep services, model internals). The taxonomy code, envelope, and client typing are identical either way.
+
+## Response Shapes [#response-shapes]
+
+API errors render as JSON with the taxonomy envelope:
+
+```jsonc title="response-shapes.jsonc"
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "no such post",
+    "requestId": "req_..."
+  }
+}
+```
+
+Page errors render as HTML through the route's error component or the root error boundary, themed and including the request ID. One taxonomy, two renderers — see [Rendering](/docs/rendering) for the page side.
+
+Validation failures extend the envelope with field-level issues:
+
+```jsonc title="response-shapes-2.jsonc"
+{
+  "error": {
+    "code": "VALIDATION",
+    "message": "validation failed",
+    "issues": [{ "path": "title", "message": "too long" }],
+    "requestId": "req_..."
+  }
+}
+```
+
+The `issues` array is the same shape produced by the validation stage, so clients can render field errors directly. See [Validation](/docs/http/validation).
+
+## The onError Stage [#the-onerror-stage]
+
+Any throw or `error()` return in any lifecycle stage enters the `onError` stage:
+
+* Mapping order: typed exception, registered custom code, then `INTERNAL_ERROR`.
+* `onError` hooks at app and controller scope can translate domain exceptions before mapping — for example, turning a payment-provider failure into a custom `PAYMENT` code.
+* After mapping, the trace span records the code, and metrics count per code and route.
+
+The hooks run before taxonomy mapping, so domain translation is the place to widen the taxonomy for application-specific failures. Because mapping never runs twice on the same error, the pipeline degrades rather than loops.
+
+## Model-Layer Integration [#model-layer-integration]
+
+The model layer throws into the same taxonomy, so handlers rarely map errors manually:
+
+* `findOrFail` throws `NOT_FOUND`.
+* Unique-constraint violations throw `CONFLICT` with the offending field.
+* Soft-deleted rows are invisible by default, so reads of a trashed row return `NOT_FOUND`, not a special deleted state.
+
+See [Models](/docs/data/models) and [Soft deletes](/docs/data/soft-deletes).
+
+## Client-Side Typing [#client-side-typing]
+
+The typed client returns discriminated errors with no string matching:
+
+```ts title="client-side-typing.ts"
+const res = await client.posts.get(id)
+
+if (res.ok) {
+  console.log(res.data)      // the resolved payload, fully typed
+} else {
+  switch (res.error.code) {
+    case 'NOT_FOUND':
+      // handle the missing resource
+      break
+    case 'FORBIDDEN':
+      // handle the policy denial
+      break
+    case 'TOO_MANY_REQUESTS':
+      // handle the limit
+      break
+  }
+}
+```
+
+`res.error.code` is a union drawn from the taxonomy, so the branches typecheck and a typo is a compile error. The success branch narrows to `res.data`; the failure branch narrows `error` to the taxonomy union plus any registered custom codes. See [Type Inference](/docs/core-concepts/type-inference) for how the client derives this.
+
+## Logs and Correlation [#logs-and-correlation]
+
+Every error response carries `requestId`, the same value as the `x-request-id` header. The structured log line for an error includes `level`, `code`, `route`, `requestId`, `tenantId`, and `traceId`:
+
+```ts title="logs-and-correlation.ts"
+logger.error({ code, route, requestId, tenantId, traceId }, 'request failed')
+```
+
+Production hides internals for `INTERNAL_ERROR`; the development overlay shows the full stack with source maps.
+
+## Failure of the Error System [#failure-of-the-error-system]
+
+The error system degrades, never loops:
+
+* If the error handler itself throws, the request returns a plain 500 and an alert metric fires.
+* If rendering an error page throws, a minimal built-in fallback page is served.
+* Error mapping is the only code that can run after `onResponse`, and it only records span error attributes.
+
+## What's Next [#whats-next]
+
+1. [HTTP errors](/docs/http/errors) — the taxonomy at the request layer
+2. [Validation](/docs/http/validation) — the `VALIDATION` code and the issues shape
+3. [Guards](/docs/http/guards) — where `UNAUTHORIZED` and `FORBIDDEN` originate
+4. [API: errors](/docs/api/errors) — the typed error contract on the client
+5. [Observability: logging](/docs/observability/logging) — correlating errors with `requestId`

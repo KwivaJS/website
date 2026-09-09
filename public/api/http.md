@@ -1,0 +1,566 @@
+# @kwiva/http (/api/http)
+
+
+
+`@kwiva/http` is the framework-owned HTTP layer: it defines how requests are matched to handlers, validated, authorized, cached, and answered. Every app-facing HTTP file — controllers, middleware, and infra server routes — is declared through one of its factories, and every factory output feeds a single typed route manifest that also drives OpenAPI, the typed client, and tooling.
+
+The package ships three factories plus runtime helpers:
+
+| Export                     | File convention                 | Purpose                                               |
+| -------------------------- | ------------------------------- | ----------------------------------------------------- |
+| `defineController`         | `src/app/http/controllers/*.ts` | Resource endpoints and custom actions                 |
+| `defineMiddleware`         | `src/app/http/middleware/*.ts`  | Named, reusable pipeline stages                       |
+| `defineServerRoute`        | `src/routes/*.ts`               | Infra routes and engine-level route rules             |
+| `error` / typed exceptions | —                               | The error taxonomy, returned or thrown                |
+| `channel`                  | —                               | Policy-checked realtime channels for WebSocket routes |
+
+## defineController [#definecontroller]
+
+Defines a named group of route handlers. Handlers are declared inside a builder callback, and the whole group is registered under a controller name with optional `prefix`, `tags`, and `permission` options.
+
+```ts title="definecontroller.ts"
+import { defineController } from "@kwiva/http"
+
+export default defineController(
+  "posts",
+  (c) =>
+    c.guard(
+      {
+        middleware: ["auth", "tenant"],
+        beforeHandle: ({ session }) => {
+          if (!session.user) return error("UNAUTHORIZED")
+        },
+      },
+      (g) => ({
+        list: g.get("/", async ({ query }) =>
+          Post.query()
+            .where("status", query.status)
+            .page(query.page ?? 1, 20),
+        { query: { status: "string?" } },
+        get: g.get("/:id", async ({ params }) => Post.findOrFail(params.id)),
+        create: g.post("/", async ({ body, session }) =>
+          Post.create({ ...body, authorId: session.user.id }),
+        { body: { title: "string", body: "string?" }, permission: "posts.create" },
+        update: g.patch("/:id", async ({ params, body }) => {
+          const post = await Post.findOrFail(params.id)
+          return post.update(body)
+        }, { body: UpdatePostBody }),
+        remove: g.delete("/:id", async ({ params }) => {
+          await Post.findOrFail(params.id).then((post) => post.delete())
+          return { ok: true }
+        }),
+        publish: g.post("/:id/publish", async ({ params }) => {
+          const post = await Post.findOrFail(params.id)
+          return post.update({ status: "published", publishedAt: new Date() })
+        }, { permission: "posts.publish" }),
+      }),
+    ),
+  { prefix: "/posts", tags: ["posts"] },
+)
+```
+
+### Factory signature [#factory-signature]
+
+| Argument  | Type                                 | Description                                                                                                         |
+| --------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `name`    | `string`                             | Controller/resource name used in the route manifest and generated routes (e.g. `"posts"`, `"reports"`)              |
+| `builder` | `(c: ControllerBuilder) => RouteMap` | Receives the builder (`c`) and returns an object of named routes; the builder may also be wrapped by `c.guard(...)` |
+| `options` | `ControllerOptions`                  | Mounting and behavior options described below                                                                       |
+
+### Route handlers [#route-handlers]
+
+The builder exposes one method per HTTP verb. Each returns a route entry from a named key:
+
+| Builder method                      | Description                                        |
+| ----------------------------------- | -------------------------------------------------- |
+| `c.get(path, handler, options?)`    | Read routes                                        |
+| `c.post(path, handler, options?)`   | Create routes and custom actions                   |
+| `c.put(path, handler, options?)`    | Full-replace updates                               |
+| `c.patch(path, handler, options?)`  | Partial updates                                    |
+| `c.delete(path, handler, options?)` | Deletes                                            |
+| `c.ws(path, handlers)`              | WebSocket endpoint (see [WebSockets](#websockets)) |
+
+The handler signature is `async (ctx) => value`. Whatever the handler returns is serialized as JSON (`200` by default); a handler may also return `new Response(...)`, a streaming response, or an `error(...)` result. Handlers receive the fully typed context object described below.
+
+A path may contain dynamic segments (`/:id`) and trailing action segments (`/:id/publish`). Path segments are inferred into `ctx.params` from the route schemas.
+
+### Handler options [#handler-options]
+
+`options` is the per-route schema and behavior object:
+
+| Option        | Type                                | Description                                                                        |
+| ------------- | ----------------------------------- | ---------------------------------------------------------------------------------- |
+| `body`        | Standard Schema or object shorthand | Validates the parsed request body                                                  |
+| `query`       | Standard Schema or object shorthand | Validates query string values                                                      |
+| `params`      | Standard Schema or object shorthand | Validates path parameters                                                          |
+| `headers`     | Standard Schema or object shorthand | Validates request headers                                                          |
+| `cookies`     | Standard Schema or object shorthand | Validates decoded cookies                                                          |
+| `file`        | `{ maxSize, types }`                | Enables and constrains multipart file handling (see [File uploads](#file-uploads)) |
+| `permission`  | `string`                            | Policy permission required by the route (`posts.create`)                           |
+| `summary`     | `string`                            | OpenAPI summary for the action                                                     |
+| `tags`        | `string[]`                          | OpenAPI grouping tags                                                              |
+| `description` | `string`                            | OpenAPI description for the action                                                 |
+
+A plain-object shorthand (`{ title: "string", body: "string?" }`) is accepted anywhere a schema is; the same object is interpreted as a field map. Custom route-level keys declared through app macros (for example `auth: true`, `cache: 60`) are type-checked and merge into this options object.
+
+### Controller options [#controller-options]
+
+| Option       | Type          | Description                                                   |
+| ------------ | ------------- | ------------------------------------------------------------- |
+| `prefix`     | `string`      | Base path for every route in the controller (e.g. `"/posts"`) |
+| `tags`       | `string[]`    | OpenAPI tags applied to the controller's routes               |
+| `permission` | `string`      | Policy namespace gating the controller's generated routes     |
+| `cors`       | `{ origins }` | Per-controller CORS override (inline config wins)             |
+
+## Typed context [#typed-context]
+
+Handlers and guard hooks receive one context argument whose shape is inferred from the controller options, route schemas, and app-level declarations. A handler destructures only what it needs:
+
+```ts title="typed-context.ts"
+handler: async ({ params, query, body, headers, cookies, session, tenant, store, set, error }) => {
+  set.status = 201
+  set.headers["x-cache"] = "miss"
+  return { id: params.id, ...body }
+}
+```
+
+| Context member                        | Description                                                                                                 |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `params`                              | Path parameters, typed from the route schema                                                                |
+| `query`                               | Query string, typed from the route schema                                                                   |
+| `body`                                | Parsed and validated request body                                                                           |
+| `headers`                             | Request headers                                                                                             |
+| `cookies`                             | Decoded cookies                                                                                             |
+| `session`                             | Loaded session (see [Request lifecycle](#request-lifecycle))                                                |
+| `tenant`                              | Resolved tenant, injected by tenant resolution                                                              |
+| `store`                               | Per-request store; types flow from app state declarations                                                   |
+| `set`                                 | Response writer: `set.status`, `set.headers`                                                                |
+| `error`                               | Builds a typed error response — same helper as the package export                                           |
+| `file`                                | Multipart file reader (see [File uploads](#file-uploads))                                                   |
+| `stream`                              | SSE stream builder (see [Streaming & SSE](#streaming--sse))                                                 |
+| `waitUntil`                           | Registers post-response work (`ctx.waitUntil(promise)`)                                                     |
+| `state`, `decorate`, `resolve` values | App-declared singletons and per-request derivations (documented with `defineApp` on [/api/core](/api/core)) |
+
+Because types are inferred from route schemas, `params.id` is `string`, `body` statically matches the declared `body` schema, and `store` reflects declared state. Values injected through `decorate` and `resolve` (for example `client`, `logger`, `tenant`) appear on the context with their declared types.
+
+## defineMiddleware [#definemiddleware]
+
+Middleware are named pipeline stages that run before a request reaches its handler. Each file exports one named middleware; the name is what you reference when scoping it.
+
+```ts title="definemiddleware.ts"
+import { defineMiddleware } from "@kwiva/http"
+
+export default defineMiddleware("request-id", async (ctx, next) => {
+  const id = ctx.headers["x-request-id"] ?? crypto.randomUUID()
+  ctx.set.headers["x-request-id"] = id
+  ctx.store.requestId = id
+  return next()
+})
+```
+
+### Factory signature [#factory-signature-1]
+
+| Argument  | Type                              | Description                                                                      |
+| --------- | --------------------------------- | -------------------------------------------------------------------------------- |
+| `name`    | `string`                          | Middleware identifier used in `middleware: [...]` arrays                         |
+| `handler` | `(ctx, next) => Response \| void` | Pipeline stage; call `next()` to continue, or return a response to short-circuit |
+
+A middleware may short-circuit the pipeline by returning a response instead of calling `next()` — used by auth failures and rate limiting.
+
+### Lifecycle-scoped variants [#lifecycle-scoped-variants]
+
+Middleware can attach at any lifecycle event through the `.on()` form instead of the default request stage:
+
+```ts title="lifecycle-scoped-variants.ts"
+import { defineMiddleware } from "@kwiva/http"
+
+export const cacheTags = defineMiddleware.on("onAfterHandle", async (ctx) => {
+  const tag = ctx.set.headers["x-cache-tags"]
+  if (tag) await invalidateOnTag(tag)
+})
+```
+
+Available lifecycle events are listed under [Request lifecycle](#request-lifecycle). The plain `defineMiddleware(name, handler)` form attaches at `onRequest`.
+
+### Scoping and ordering [#scoping-and-ordering]
+
+| Scope                    | Where                                                                    | Order                                 |
+| ------------------------ | ------------------------------------------------------------------------ | ------------------------------------- |
+| Global                   | `middleware` array in `src/config/app.ts`                                | Runs in array order for every request |
+| Controller / guard group | `middleware: ["auth", "tenant"]` in controller or `c.guard(...)` options | Applies to the group's routes         |
+| Route                    | `middleware: [...]` on an individual handler options                     | Applies to that route only            |
+
+Middleware always runs **before** guards. Route rules and cache short-circuits happen earlier in the lifecycle (see below).
+
+### Built-in middleware [#built-in-middleware]
+
+These ship with the framework and need no user code: `request-id`, `session`, `tenant`, `cors`, `rate-limit`, `security-headers`, `compression`, and `csrf`. Enable them by name in `src/config/app.ts`, or scope them per controller/route. The `request-id` built-in assigns and forwards `x-request-id`; `security-headers` sets the security header set described in [CORS & security headers](#cors--security-headers).
+
+## defineServerRoute [#defineserverroute]
+
+Server routes mount infra-level rules and handlers outside controllers. They are how you apply whole-path behaviors — response caching, redirects, proxying, CORS, rate limits, and health endpoints.
+
+```ts title="src/routes/rules.ts"
+// src/routes/rules.ts
+import { defineServerRoute } from "@kwiva/http"
+
+export default [
+  defineServerRoute("/products/**", { isr: 300, cache: { tags: ["catalog"] } }),
+  defineServerRoute("/pricing/**", { static: true }),
+  defineServerRoute("/news/**", { swr: 60 }),
+  defineServerRoute("/legacy/**", { redirect: { to: "/new/**", status: 308 } }),
+  defineServerRoute("/api/**", { cors: true, rateLimit: { max: 600, per: 60 } }),
+  defineServerRoute("/proxy/img", { proxy: "https://img.acme.dev/**" }),
+  defineServerRoute("/healthz", { handler: () => new Response("ok") }),
+]
+```
+
+### Factory signature [#factory-signature-2]
+
+| Argument | Type        | Description                                           |
+| -------- | ----------- | ----------------------------------------------------- |
+| `path`   | `string`    | Path or glob pattern (`"/healthz"`, `"/products/**"`) |
+| `rule`   | `RouteRule` | The rule or handler to apply at that path             |
+
+### Route rules [#route-rules]
+
+| Rule        | Shape                       | Behavior                                                       |
+| ----------- | --------------------------- | -------------------------------------------------------------- |
+| `cache`     | `n` (seconds) or `{ tags }` | Serve the cached response for `n` seconds                      |
+| `swr`       | `n` (seconds)               | Stale-while-revalidate: serve stale, refresh in the background |
+| `isr`       | `n` (seconds)               | Regenerate the response on an interval                         |
+| `static`    | `true`                      | Built once at build time                                       |
+| `prerender` | `true`                      | Crawled and rendered at build time                             |
+| `redirect`  | `{ to, status }`            | Redirect to the target pattern                                 |
+| `proxy`     | URL pattern                 | Proxy the request to the upstream                              |
+| `headers`   | header map                  | Add response headers                                           |
+| `cors`      | `true` or config            | Enable/configure CORS                                          |
+| `rateLimit` | `{ max, per }`              | Apply a rate limit                                             |
+| `handler`   | `(ctx) => Response`         | Serve a plain response at the path                             |
+
+See [Response caching](#response-caching) for rule semantics and constraints.
+
+## Request lifecycle [#request-lifecycle]
+
+Every request flows through a defined 14-step sequence. The numbered steps describe a normal request; the error path is entered from any step that throws or returns an error.
+
+1. **Client request** — the adapter receives the inbound connection.
+2. **Adapter normalization** — the preset adapter translates the connection into a standard Web Request.
+3. **Pipeline entry** — `x-request-id` is assigned (set or forwarded), an OTel server span begins tagged with the HTTP method and matched route, and global `onRequest` middleware runs (security headers, rate limit, CORS).
+4. **Routing** — the route manifest is matched across generated model routes, controller routes, and server routes.
+5. **Route rules** — an applicable rule is resolved; a cache hit (`cache`/`swr`/`isr`/`static`/`prerender`) serves the stored response and bypasses the rest of the pipeline before session load.
+6. **Context assembly: parse** — the query string is parsed and the body is parsed (`json`, `form`, `multipart`).
+7. **Context assembly: session** — cookies are decoded and the session is loaded from its store.
+8. **Context assembly: tenancy** — the tenant is resolved (subdomain, path, header, or fixed) into `ctx.tenant`.
+9. **Context assembly: injection** — app `state`, `decorate`, and `resolve` values are attached to the context.
+10. **`onTransform`** — middleware runs that mutates the parsed values before validation.
+11. **Validation** — `body`, `query`, `params`, `headers`, and `cookies` are checked against their schemas.
+12. **`onBeforeHandle`** — guards run (`requireAuth`, tenant, policy checks). Guard hooks run after validation, so validated values are available for policy checks.
+13. **Handler** — the controller action runs (service → model query → response object), or the page SSR path runs (`beforeLoad` → loaders → stream).
+14. **`onAfterHandle` / `onResponse`** — response shaping and cache tags are applied, final headers are set, the span closes, and the adapter writes the response. Error mapping is the only code that can run after `onResponse` (to record span error attributes).
+
+### Lifecycle hooks [#lifecycle-hooks]
+
+Middleware and guards can attach at these lifecycle events (app-wide, controller-wide, or route-level):
+
+| Hook             | When it runs                     | Typical use                                       |
+| ---------------- | -------------------------------- | ------------------------------------------------- |
+| `onRequest`      | Pipeline entry                   | Request ID, rate limiting, security headers, CORS |
+| `onParse`        | Body parsing                     | Custom body parsing                               |
+| `onTransform`    | After parsing, before validation | Mutating parsed values                            |
+| `onBeforeHandle` | After validation                 | Guards: auth, tenant, policy checks               |
+| `onAfterHandle`  | After the handler                | Response shaping, cache tags                      |
+| `onResponse`     | Before the adapter writes        | Header finalization, span close                   |
+| `onError`        | Any thrown/returned error        | Taxonomy mapping, domain translation              |
+| `onStop`         | Server shutdown                  | Cleanup hooks                                     |
+
+### Ordering guarantees [#ordering-guarantees]
+
+* Middleware run in `middleware[]` order and always **before** guards.
+* Guard `beforeHandle` hooks run **after** validation.
+* Cache/route rules short-circuit **before** session load, so public cached pages skip auth entirely.
+* Any throw or `error()` return in any stage enters the `onError` stage.
+
+### Timing budget [#timing-budget]
+
+| Stage                         | Budget (p50) |
+| ----------------------------- | ------------ |
+| Adapter → pipeline entry      | `&lt;1ms`    |
+| Session + tenant resolve      | `&lt;2ms`    |
+| Validation                    | `&lt;0.5ms`  |
+| Handler (model list, 20 rows) | `&lt;5ms`    |
+| Full API round-trip (local)   | `&lt;15ms`   |
+| SSR shell (stream start)      | `&lt;50ms`   |
+
+## Guards [#guards]
+
+Guards apply schema, middleware, and `beforeHandle` authorization to a group of nested routes. The controller builder exposes `c.guard(options, builder)`:
+
+```ts title="guards.ts"
+defineController(
+  "admin",
+  (c) =>
+    c.guard(
+      {
+        middleware: ["auth"],
+        beforeHandle: ({ session, error }) => {
+          if (session.user?.role !== "admin") return error("FORBIDDEN")
+        },
+      },
+      (g) => ({
+        list: g.get("/", async ({ query }) =>
+          Member.query().page(query.page ?? 1, 20),
+        { query: { page: "number?" } },
+        remove: g.delete("/:id", async ({ params }) => {
+          const member = await Member.findOrFail(params.id)
+          return member.delete()
+        }),
+      }),
+    ),
+  { prefix: "/members", tags: ["members"], permission: "members" },
+)
+```
+
+### Guard options [#guard-options]
+
+| Option         | Type                            | Description                                                                                |
+| -------------- | ------------------------------- | ------------------------------------------------------------------------------------------ |
+| `schema`       | route schema map                | Group-level validation applied to every route inside                                       |
+| `beforeHandle` | `(ctx) => void \| error result` | Authorization hook that runs after validation; returning an error short-circuits the route |
+| `middleware`   | `string[]`                      | Middleware scoped to the group                                                             |
+
+Guards nest and compose: each guard applies its schema, middleware, and `beforeHandle` to everything declared inside it, so you can wrap progressively narrower groups (authenticated → admin-only) by nesting `c.guard` calls. Guard hooks destructure the same typed context as handlers, including `session`, `tenant`, and `error`. See [Guards](/docs/http/guards) for route-level guard composition.
+
+## Validation [#validation]
+
+Routes validate five input locations: `body`, `query`, `params`, `headers`, and `cookies`. Each accepts a Standard Schema (Valibot by default) or the plain-object shorthand.
+
+```ts title="validation.ts"
+c.post(
+  "/:id/publish",
+  async ({ params, body }) => {
+    const post = await Post.findOrFail(params.id)
+    return post.update(body)
+  },
+  {
+    params: { id: "string:uuid" },
+    body: v.object({
+      title: v.string().min(1),
+      body: v.optional(v.string()),
+      tags: v.optional(v.array(v.string())),
+    }),
+    query: v.object({ draft: v.optional(v.string()) }),
+    headers: v.object({ authorization: v.string() }),
+    cookies: v.object({ theme: v.optional(v.string()) }),
+  },
+)
+```
+
+Validation runs at step 11 of the lifecycle, after parsing and `onTransform`. A failure returns `422` with:
+
+```json title="validation-2.json"
+{ "error": { "code": "VALIDATION", "message": "Validation failed", "issues": [{ "path": "title", "message": "must be at least 1 character" }] } }
+```
+
+`issues` entries carry `{ path, message }` per offending field so UI forms can map them back to inputs. See [Validation](/docs/http/validation) and [Security](/docs/security/input-validation) for the full ruleset.
+
+## Errors [#errors]
+
+Kwiva uses one error taxonomy with eight codes, two renderers (JSON for API routes, HTML for pages), and a typed shape on the client.
+
+### The taxonomy [#the-taxonomy]
+
+| Code           | HTTP | Meaning                                         | Thrown by              |
+| -------------- | ---- | ----------------------------------------------- | ---------------------- |
+| `BAD_REQUEST`  | 400  | Malformed input that isn't schema-validatable   | framework              |
+| `UNAUTHORIZED` | 401  | No session / invalid credentials                | auth, guards           |
+| `FORBIDDEN`    | 403  | Policy denial                                   | policies, `permission` |
+| `NOT_FOUND`    | 404  | Missing resource or route                       | `findOrFail`, router   |
+| `CONFLICT`     | 409  | Uniqueness or optimistic-concurrency violations | model layer            |
+| `VALIDATION`   | 422  | Schema failures                                 | validation stage       |
+| `RATE_LIMITED` | 429  | Rate limit tripped                              | middleware             |
+| `INTERNAL`     | 500  | Unhandled error                                 | catch-all              |
+
+### Authoring errors [#authoring-errors]
+
+```ts title="authoring-errors.ts"
+import { error, NotFoundError, ForbiddenError } from "@kwiva/http"
+
+// helper return (preferred in handlers)
+return error("NOT_FOUND", { message: "no such post" })
+return error("VALIDATION", { issues: [{ path: "title", message: "too long" }] })
+return error("UNAUTHORIZED")
+
+// typed exceptions (preferred in services and model layers)
+throw new NotFoundError("post", id)
+throw new ForbiddenError("posts.publish")
+```
+
+`error(code, options?)` maps the code to its HTTP status and response shape. Typed exceptions carry domain context (the resource name and id, the permission) and map through the same taxonomy.
+
+### Mapping order [#mapping-order]
+
+Any throw or `error()` return in any lifecycle stage enters `onError`. Mapping order is: typed exception → registered custom code → `INTERNAL`. App- and controller-scoped `onError` hooks can translate domain exceptions into custom codes before mapping. Unknown errors become `INTERNAL` in production (details hidden) and show the full stack in dev. Custom codes are registered in `src/config/app.ts > errors` with a status mapping — extend the taxonomy rather than bypassing it.
+
+### Response shapes [#response-shapes]
+
+```jsonc title="response-shapes.jsonc"
+// API (JSON)
+{ "error": { "code": "NOT_FOUND", "message": "no such post", "requestId": "req_..." } }
+
+// VALIDATION adds the issues array
+{ "error": { "code": "VALIDATION", "message": "Validation failed", "issues": [{ "path": "title", "message": "too long" }], "requestId": "req_..." } }
+```
+
+Every error response carries `requestId`, matching the `x-request-id` request header, so logs, traces, and client reports correlate. Page routes render a per-route `errorComponent` or the root error boundary instead of JSON.
+
+On the client, the typed RPC result is a discriminated union:
+
+```ts title="response-shapes-2.ts"
+const res = await client.posts.get(id)
+if (res.error) {
+  switch (res.error.code) {
+    case "NOT_FOUND":
+    case "FORBIDDEN":
+  }
+}
+```
+
+The union is derived from the taxonomy, so error codes are never string-matched by hand. See [Error Handling](/docs/http/errors) and [Error taxonomy](/api/core) for details.
+
+## File uploads [#file-uploads]
+
+Multipart bodies parse at the `onParse` stage. A route opts in with the `file` option and reads the upload through `ctx.file()`:
+
+```ts title="file-uploads.ts"
+c.post(
+  "/avatar",
+  async ({ file, session }) => {
+    const { filename, bytes, type } = await file()
+    return storage.put(`avatars/${session.user.id}`, bytes, { contentType: type })
+  },
+  { file: { maxSize: "2mb", types: ["image/png", "image/jpeg"] } },
+)
+```
+
+| Option    | Type       | Description                                                   |
+| --------- | ---------- | ------------------------------------------------------------- |
+| `maxSize` | `string`   | Maximum size, e.g. `"2mb"`                                    |
+| `types`   | `string[]` | Allowed content types; supports wildcards such as `"image/*"` |
+
+`file()` resolves to `{ filename, bytes, type }`. Size and type are enforced before the handler runs — a violation maps to a `422 VALIDATION` (or `BAD_REQUEST`) error. Store the result through the storage API — never write to the raw filesystem. See [File uploads](/docs/http/file-uploads) and [File storage](/docs/data/storage).
+
+## Streaming & SSE [#streaming--sse]
+
+A handler returns a streaming `Response` for chunked payloads. `ctx.stream` builds an SSE-friendly stream from a controller function:
+
+```ts title="streaming-sse.ts"
+c.get("/events", async ({ stream }) =>
+  new Response(
+    stream((controller) => {
+      controller.enqueue({ event: "data", value: 42 })
+      controller.enqueue({ event: "done" })
+    }),
+  ),
+)
+```
+
+The controller receives an enqueue handle; each `enqueue` call emits one SSE frame (`{ event, ...data }`). Any `ReadableStream` can be returned in a `new Response(stream)` the same way. See [Streaming & SSE](/docs/http/streaming).
+
+## WebSockets [#websockets]
+
+A WebSocket endpoint is declared with `c.ws(path, handlers)` inside a controller:
+
+```ts title="websockets.ts"
+import { defineController, channel } from "@kwiva/http"
+
+const feed = channel("feed")
+  .policy(({ session }) => session.user !== null)
+  .on("message", ({ payload }) => broadcast(payload))
+
+export default defineController("realtime", (c) => ({
+  connect: c.ws("/feed", {
+    open: (ws, ctx) => feed.subscribe(ws),
+    message: (ws, message, ctx) => broadcast(message),
+    close: (ws, ctx) => feed.unsubscribe(ws),
+  }),
+}))
+```
+
+| Handler   | Signature            | When it runs     |
+| --------- | -------------------- | ---------------- |
+| `open`    | `(ws, ctx)`          | Socket connected |
+| `message` | `(ws, message, ctx)` | Frame received   |
+| `close`   | `(ws, ctx)`          | Socket closed    |
+
+Realtime channels carry the transport: `channel(pattern)` accepts wildcard patterns such as `"chat.{roomId}"`, `.policy()` checks subscription authorization against the request context (session, channel params), and `.on("message", handler)` dispatches payloads. WebSockets are handled by the framework's realtime engine across the supported adapters, with an SSE fallback. See [WebSockets](/docs/http/websockets) and [Channels](/docs/realtime/channels).
+
+## CORS & security headers [#cors--security-headers]
+
+CORS defaults live in `src/config/cors.ts` and can be overridden per controller, per route rule, or inline:
+
+```ts title="cors-security-headers.ts"
+import { defineConfig } from "@kwiva/config"
+
+export default defineConfig("cors", {
+  defaults: {
+    origins: ["https://acme.dev"],
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+})
+```
+
+| Scope           | Form                                                                           |
+| --------------- | ------------------------------------------------------------------------------ |
+| Global defaults | `defineConfig("cors", { defaults })`                                           |
+| Controller      | `defineController(name, builder, { cors: { origins: ["https://acme.dev"] } })` |
+| Server route    | `defineServerRoute("/api/**", { cors: true })`                                 |
+| Middleware      | Reference the built-in `cors` middleware in `src/config/app.ts`                |
+
+Per-route and inline overrides win over defaults. The built-in `security-headers` middleware sets `x-content-type-options`, `x-frame-options`, `referrer-policy`, and HSTS, and CSP is configured from `src/config/security.ts` with defaults plus per-route overrides. See [CORS & Security Headers](/docs/http/cors) and [Security headers](/docs/security/headers).
+
+## Response caching [#response-caching]
+
+Whole-response caching is expressed through server route rules. Rules apply at the path level and short-circuit the pipeline on a hit before session load:
+
+| Rule        | Behavior                                                       |
+| ----------- | -------------------------------------------------------------- |
+| `cache: n`  | Serve the cached response for `n` seconds                      |
+| `swr: n`    | Stale-while-revalidate: serve stale, refresh in the background |
+| `isr: n`    | Regenerate the page on an `n`-second interval                  |
+| `static`    | Built once at build time                                       |
+| `prerender` | Crawled and rendered at build time                             |
+| (none)      | Dynamic response                                               |
+
+```ts title="src/routes/rules-2.ts"
+// src/routes/rules.ts
+import { defineServerRoute } from "@kwiva/http"
+
+export default [
+  defineServerRoute("/products/**", { isr: 300, cache: { tags: ["catalog"] } }),
+  defineServerRoute("/pricing/**", { static: true }),
+  defineServerRoute("/news/**", { swr: 60 }),
+  defineServerRoute("/docs/**", { cache: 3600 }),
+]
+```
+
+The `cache` rule accepts either a TTL in seconds or `{ tags }` so the cached responses can be purged through the cache-tag invalidation API. Rules apply to public pages only — the framework refuses to cache responses that set `Set-Cookie`, so session-bearing or personalized responses stay dynamic. In development, route caching is off by default; `kwiva dev --cache` simulates production behavior. See [Response caching](/docs/http/caching) and [Rendering caching](/docs/rendering/caching) for model and data-hook cache layers.
+
+## Route manifest [#route-manifest]
+
+Every controller and server route contributes to the route manifest (an intermediate representation of path, method, schemas, response type, permission, and tags). The same manifest renders OpenAPI 3.1 at `/openapi.json` (optional docs UI at `/docs`), generates the typed client surface, and feeds MCP tooling — so a route declared once never drifts between spec, client, and server. See [Routes](/docs/http/routes) and [/api/client](/api/client).
+
+## What to Read Next [#what-to-read-next]
+
+* [Controllers](/docs/http/controllers) — `defineController` in practice
+* [Request Lifecycle](/docs/http/lifecycle) — the 14-step pipeline and timing budget
+* [Middleware](/docs/http/middleware) — `defineMiddleware` and the built-in stack
+* [Guards](/docs/http/guards) — `c.guard` composition
+* [Validation](/docs/http/validation) — Standard Schema input checks
+* [Error Handling](/docs/http/errors) — the 8-code taxonomy and response shapes
+* [Routes](/docs/http/routes) — URL conventions, generated routes, versioning
+* [WebSockets](/docs/http/websockets) and [Channels](/docs/realtime/channels) — `c.ws` and realtime
+* [File uploads](/docs/http/file-uploads) and [File storage](/docs/data/storage) — `ctx.file()`
+* [Response caching](/docs/http/caching) and [CORS & Security Headers](/docs/http/cors)
+* [API Reference Index](/api) — other packages and stability indicators

@@ -1,0 +1,109 @@
+# Auto-Discovery (/docs/core-concepts/auto-discovery)
+
+
+
+## How Auto-Discovery Works [#how-auto-discovery-works]
+
+Kwiva registers application constructs by scanning conventional directories at boot time and registering every `defineX` file it finds. There is no central registry, no manual import list, and no config entry to add a new model, controller, or job. A capability exists because its file exists.
+
+The scan is the framework's own mirror of [application composition](/docs/core-concepts/applications): the kernel discovers constructs, merges module contributions, and registers routes and workloads — in that order, at boot. Because definitions are plain data and functions (the [defineX convention](/docs/core-concepts/definex)), the scanner can read them statically and turn them into the route manifest and model IR without executing side effects.
+
+## The Discovery Map [#the-discovery-map]
+
+| Directory                       | Factory                                              | Registration                                           |
+| ------------------------------- | ---------------------------------------------------- | ------------------------------------------------------ |
+| `src/app/models/*.ts`           | `defineModel`                                        | Model + generated routes                               |
+| `src/app/http/controllers/*.ts` | `defineController`                                   | HTTP routes                                            |
+| `src/app/http/middleware/*.ts`  | `defineMiddleware`                                   | Available middleware                                   |
+| `src/app/http/auth.ts`          | `defineAuth`                                         | Auth surface wired into the pipeline                   |
+| `src/app/services/*.ts`         | `defineService`                                      | Service container                                      |
+| `src/app/jobs/*.ts`             | `defineJob`                                          | Job registry                                           |
+| `src/app/events/*.ts`           | `defineEvent`                                        | Event registry                                         |
+| `src/app/policies/*.ts`         | `definePolicy`                                       | Policy registry                                        |
+| `src/app/tasks/*.ts`            | `defineTask`                                         | Task registry                                          |
+| `src/app/console/*.ts`          | `defineCommand`                                      | CLI commands                                           |
+| `src/app/mcp/*.ts`              | `defineMcpTool`                                      | MCP tools                                              |
+| `src/app/studio/*.tsx`          | `defineStudioScreen`                                 | Studio screens                                         |
+| `src/routes/*.ts`               | `defineServerRoute`                                  | Infrastructure routes + route rules                    |
+| `src/ui/pages/**/*.tsx`         | `definePage`                                         | Route tree                                             |
+| `src/database/**`               | `defineSeeder` / `defineFactory` / `defineMigration` | Database tooling                                       |
+| `src/config/*.ts`               | `defineConfig`                                       | Config values (load order-driven, not scan-registered) |
+
+Two notes on scope:
+
+* `src/config/*.ts` modules are loaded by the config entry (`kwiva.config.ts > load`) rather than registered as constructs — but they still follow the one-file-per-domain convention.
+* Module and plugin contributions come from their own folders inside a package, referenced by [module](/docs/core-concepts/modules) entry globs rather than the app's directories.
+
+> \[!NOTE]
+> The scanner operates on the standard tree only. A `defineModel` file placed anywhere else is not discovered — it is simply dead code, which the lint gate flags.
+
+## Adding a Construct [#adding-a-construct]
+
+To add a new model, create the file:
+
+```ts title="src/app/models/comments.ts"
+// src/app/models/comments.ts — auto-discovered at boot
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('comments', (f) => ({
+  id: f.id(),
+  body: f.text(),
+  postId: f.uuid().indexed(),
+  authorId: f.uuid().indexed(),
+  post: f.belongsTo(() => Post),
+  author: f.belongsTo(() => User),
+}))
+```
+
+No import anywhere, no registration, no config edit. At the next boot the model contributes its table definition, generated REST routes, client types, and Studio screens through the derivation pipeline (see [Model IR](/docs/advanced/model-ir) and [Type Inference](/docs/core-concepts/type-inference)).
+
+The same rule holds for every construct. Creating `src/app/jobs/send-welcome.ts` makes a job; creating `src/app/http/controllers/reports.ts` adds an API surface.
+
+## What Registration Produces [#what-registration-produces]
+
+"Registering" is not symbolic — each construct type produces a concrete, observable result the moment the kernel composes:
+
+| Construct    | Registration result                                                           |
+| ------------ | ----------------------------------------------------------------------------- |
+| Model        | Table definition, generated REST routes, client types, Studio screens         |
+| Controller   | Routes mounted under its prefix, namespaced on the typed client               |
+| Middleware   | A named pipeline stage available to the stack and guards                      |
+| Service      | An injectable entry in the service container                                  |
+| Job / Event  | An entry in the job and event registries                                      |
+| Task         | A schedulable task for cron or manual runs                                    |
+| Policy       | A rule in the permission namespace                                            |
+| Command      | A CLI command under its signature                                             |
+| Page         | A route in the frontend route tree                                            |
+| Server route | Infrastructure handling (redirects, caching rules, proxies) for path patterns |
+
+Because definitions are plain data and functions, registration is side-effect free: the scanner reads the definition statically and the kernel mounts whatever the definition declares. Nothing executes at scan time, which keeps discovery deterministic and inspectable.
+
+## Registration Conventions [#registration-conventions]
+
+Discovery works because files follow a small set of conventions:
+
+1. **One construct per file** — a file declares exactly one `defineX` construct (with the exception of grouped server-route files, which may export an array of rule objects).
+2. **Default export** — the `defineX` definition is the module's default export, so the scanner picks up the typed value directly.
+3. **Lowercase names** — filenames are lowercase and kebab-case (or follow the per-construct singular/plural rules), which keeps URLs, client methods, and import paths predictable. When a discovered file exports named values, those exports are PascalCase; the construct itself remains the default export.
+4. **Correct placement** — the directory is the declaration of what the file is; placement determines registration, so moving a file changes what it registers.
+5. **Explicit override possible** — for full control, the bootstrap file can pass discovered construct groups to `defineApp` explicitly, replacing scan-based registration for that group.
+
+These conventions are enforced, not suggested: the lint gate rejects constructs registered from the wrong directory or by signal other than the placement and export shape, so a file cannot quietly half-register.
+
+## Discovery Depth and Timing [#discovery-depth-and-timing]
+
+* Discovery is **boot-time**: the scan runs every time the kernel composes, so new files apply on restart. In development, the dev server watches the tree and re-scans on change.
+* Discovery is **shallow for files, recursive for pages**: most directories scan one level of `*.ts` files, while pages live in a recursive tree (`src/ui/pages/**/*.tsx`) because page files encode route paths.
+* Discovery is **static**: a file that is not present when the scan runs is not registered, and files outside the standard directories are ignored.
+
+## The CLI Connection [#the-cli-connection]
+
+Because placement and naming are enforced conventions, generators produce discoverable files by construction. `kwiva make:model post` writes `src/app/models/posts.ts`, `kwiva make:controller post` writes `src/app/http/controllers/posts.ts`, and so on. The generator refuses names that violate naming rules, so generated code is immediately discoverable. See [Generators](/docs/cli/generators).
+
+## What's Next [#whats-next]
+
+* [The defineX Convention](/docs/core-concepts/definex) — the grammar behind every discovered file
+* [Applications](/docs/core-concepts/applications) — how the kernel uses discovery during boot
+* [Modules](/docs/core-concepts/modules) — how feature packages contribute outside the app tree
+* [CLI Generators](/docs/cli/generators) — files that are discoverable by construction
+* [Project Structure](/docs/getting-started/project-structure) — the complete standard tree

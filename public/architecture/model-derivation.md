@@ -1,0 +1,96 @@
+# Model Derivation (/architecture/model-derivation)
+
+
+
+Kwiva's data architecture rests on a single idea: &#x2A;*declare the model once, derive everything from it.** A model isn't just a table definition — it's the source of truth for the database schema, migrations, seeders, REST routes, typed RPC client, generated admin UI, OpenAPI spec, and MCP tools.
+
+## One Model, Many Artifacts [#one-model-many-artifacts]
+
+```plaintext title="one-model-many-artifacts.txt"
+defineModel files ──scan──► model IR (intermediate representation)
+  ├─► database schema + migrations
+  ├─► REST API (5 routes per model)
+  ├─► typed RPC client SDK
+  ├─► Studio screens
+  ├─► OpenAPI spec
+  └─► MCP tools
+```
+
+The IR is the contract between the declaration and every consumer. It's a typed intermediate representation produced by scanning your model files, and every derived artifact reads from the same IR — never from ad-hoc, hand-written generators.
+
+## The Model Declaration [#the-model-declaration]
+
+Models live one-per-file in `src/app/models/`:
+
+```ts title="src/app/models/posts.ts"
+// src/app/models/posts.ts
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().validation((s) => s.min(1).max(200)),
+  body: f.text().optional(),
+  status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
+  publishedAt: f.timestamp().optional(),
+  authorId: f.uuid().indexed(),
+  author: f.belongsTo(() => User),
+  comments: f.hasMany(() => Comment),
+}), {
+  timestamps: true,
+  softDelete: true,
+  tenantField: 'tenantId',
+  permission: 'posts',
+})
+```
+
+Field types (`id`, `string`, `text`, `integer`, `float`, `boolean`, `timestamp`, `date`, `json`, `enum`, `uuid`, `ulid`, `bytes`), modifiers (`.optional()`, `.default()`, `.unique()`, `.indexed()`, `.primaryKey()`, `.autoincrement()`, `.validation()`), relations, and model options all feed the IR. Field definitions double as the validation source — there's no second schema to keep in sync.
+
+## The IR Pipeline [#the-ir-pipeline]
+
+The derivation pipeline runs at build and dev time:
+
+1. **Scan** — model files are discovered and parsed into the model IR.
+2. **Resolve** — relations are linked (lazy references keep files circular-import-free), options are validated, and types are resolved.
+3. **Derive** — every artifact is generated from the IR:
+   * database table definitions and migration files
+   * REST routes with validation, pagination, filters, policy checks, and tenant scoping
+   * typed RPC client types
+   * Studio screens
+   * OpenAPI components and schemas
+   * MCP tools
+
+## The Generated REST Surface [#the-generated-rest-surface]
+
+By default, each model generates five deterministic routes (unless `routes: false`):
+
+| Route                   | Handler | Extras                                             |
+| ----------------------- | ------- | -------------------------------------------------- |
+| `GET /api/posts`        | list    | `where`, `page`, `orderBy`, `with` (all validated) |
+| `GET /api/posts/:id`    | get     | policy `posts.read`                                |
+| `POST /api/posts`       | create  | body validation, hooks, audit                      |
+| `PATCH /api/posts/:id`  | update  | policy, optimistic concurrency (v1.x)              |
+| `DELETE /api/posts/:id` | delete  | policy, soft-delete                                |
+
+Custom actions extend the surface via controllers: `POST /api/posts/:id/publish` is a controller action, not a sixth generated route.
+
+## Beyond REST [#beyond-rest]
+
+* **Typed RPC client** — `client.posts.list({ where: { status: 'published' }, page: 1 })` is typed from the same IR. Zero codegen at the type level.
+* **Studio** — generated list, filter, create, and edit screens derive columns and forms from the IR, so the admin UI can't drift from the schema.
+* **OpenAPI** — components and schemas are produced from the IR and served at `/openapi.json`.
+* **MCP tools** — models become agent-callable tools (list/get/create/update/delete), policy-checked.
+
+## Why Single-Source Derivation [#why-single-source-derivation]
+
+* **No type drift** — the client, Studio, and API all come from one declaration.
+* **Predictable surface** — the deterministic five-route shape is documentable and toolable.
+* **Convention over generation** — you declare intent; the framework produces the mechanics.
+* **Consistent permissions** — the `permission` option gates routes, Studio, and MCP uniformly through policies.
+
+## What to Read Next [#what-to-read-next]
+
+* [Models](/docs/data/models) — The `defineModel` reference
+* [Fields & DSL](/docs/data/fields) — Every field type and modifier
+* [Migrations](/docs/data/migrations) — Model diff → SQL
+* [Generated Endpoints](/docs/api/generated-endpoints) — The REST surface in detail
+* [Studio](/docs/studio) — The derived operations UI

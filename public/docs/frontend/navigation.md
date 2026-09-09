@@ -1,0 +1,139 @@
+# Navigation & Link (/docs/frontend/navigation)
+
+
+
+Navigation is typed end to end. Links, programmatic navigation, and the current route all share the generated route tree, so a target that does not exist — or params and search that do not match the route file — fails at compile time instead of in the browser. The route-tree types live in `src/.kwiva/types`, generated from the file tree and ambiently available; every navigation surface checks against them.
+
+## Typed Links [#typed-links]
+
+`<Link>` is the declarative way to move between routes. Its `to` target is validated against the generated route tree, and `params` and `search` are checked against the target route's shape:
+
+```tsx title="typed-links.tsx"
+<Link to="/posts/$id" params={{ id: post.id }} preload="intent">
+  {post.title}
+</Link>
+```
+
+| Prop      | Role                                                          |
+| --------- | ------------------------------------------------------------- |
+| `to`      | Route target, typed against the generated tree                |
+| `params`  | Dynamic segments, typed per the target route file             |
+| `search`  | Search state, validated against the target's `validateSearch` |
+| `preload` | `intent` warms loader + data on hover/focus                   |
+
+A link to `posts.$id` must supply an `id`; a link to a route with required search schema must supply the required keys; anything else is a compile error. Links render as anchors, so middle-click, open-in-new-tab, and crawler behavior all keep working.
+
+### Search State on Links [#search-state-on-links]
+
+Search state is passed the same way, schema-validated on arrival:
+
+```tsx title="search-state-on-links.tsx"
+<Link to="/posts" search={{ page: 2, q: 'kwiva' }}>Next page</Link>
+```
+
+The target route's `validateSearch` runs on the incoming state, so invalid shapes are rejected before they reach the target's loaders. Because the schema is typed into link `search` props, the link and the route cannot drift — adding a required field to a route's `validateSearch` makes every link missing it a type error.
+
+## Programmatic Navigation [#programmatic-navigation]
+
+`useNavigate()` returns a typed navigation function for event handlers, effects, and flows that do not have markup:
+
+```tsx title="programmatic-navigation.tsx"
+const navigate = useNavigate()
+
+navigate({ to: '/posts', search: { page: 2 } })
+navigate({ to: '..', relative: true })   // relative to the current route
+```
+
+The same compile-time guarantees apply: `to`, `params`, and `search` are validated against the real route files. Relative navigation (`'..'`, `'.'`) resolves against the current route and keeps the same guarantees.
+
+## Route Hooks [#route-hooks]
+
+The current route exposes its state through typed hooks, generated from the same route file:
+
+```tsx title="route-hooks.tsx"
+const { id } = Route.useParams()          // dynamic segments
+const search = Route.useSearch()          // validated search state
+const loaderData = Route.useLoaderData()  // loader return value
+```
+
+These are described in [File-Based Routing](/docs/frontend/routing) and [Loaders & Data](/docs/frontend/loaders). Because all three derive from one route file, a param read, a search read, and a data read inside the same component always agree with each other and with the URL.
+
+## Intent Preloading [#intent-preloading]
+
+Navigation can be proactive. Two surfaces warm the next route before the user commits to it:
+
+| Surface                   | Behavior                                                                                       |
+| ------------------------- | ---------------------------------------------------------------------------------------------- |
+| `<Link preload="intent">` | Hover or focus on the link triggers the target loader and a data prefetch via the typed client |
+| `router.preloadRoute()`   | Programmatic preload of a named route, e.g. for an always-visible next-step link               |
+
+Both populate the **same cache** the data hooks read. Because preload writes loader-identical keys, the eventual navigate and render find the data already present — there is no double fetch between preload, navigate, and display.
+
+```plaintext title="intent-preloading.txt"
+hover link → preload runs loader → cache is warm
+navigate  → render reads cache  → no refetch, instant paint
+```
+
+The preload contract is the loader contract: the target route's loader runs with its real `params` and `search`, and its result lands under the exact keys the loaded page will read. See [Loaders & Data](/docs/frontend/loaders).
+
+## Scroll Restoration [#scroll-restoration]
+
+Scroll behavior is restored per route, keyed so each route resumes where the user left it:
+
+```tsx title="scroll-restoration.tsx"
+scrollRestoration: true
+```
+
+Custom behavior is available per route when a single keyed default is not enough — the same deployment that restores a long list's scroll position can start a fresh route at the top. Because restoration is keyed, revisiting a route returns to the position it was left at, independent of how many other navigations happened in between.
+
+## Active State [#active-state]
+
+The current route is part of the navigation story. Because links know their typed target and the router exposes the active match, navigation chrome can compare a link's target against the current route to render focus and selected states — a settings nav bar lights up the section you are in without string matching. The comparison is route-aware, so nested matches (a page inside a section) light the section the same way a direct match does.
+
+## What Happens During Navigation [#what-happens-during-navigation]
+
+A navigation is a transition, not a reload. The router resolves the target against the route tree, matches the full layout chain for it, and — when the target's data is not already in the cache — runs the matched loaders in parallel across every layout and page in the chain:
+
+```plaintext title="what-happens-during-navigation.txt"
+navigate({ to: '/posts/42' })
+  → router match (route tree)
+  → cache check (data present? render immediately)
+  → else: matched loaders run in parallel
+  → pending state may commit (pendingMs / pendingMinMs)
+  → render → scroll restoration
+```
+
+The same transition runs identically after a full page load (hydration) and after client-side navigation — the router picks up at the same route with the same search state either way. See [Server-Side Rendering](/docs/rendering/ssr) and [Hydration](/docs/rendering/hydration).
+
+## Pending UI During Navigation [#pending-ui-during-navigation]
+
+While a transition's loaders run, the route's `pendingComponent` governs what the user sees. Two knobs tune the flash:
+
+| Knob           | Effect                                                                      |
+| -------------- | --------------------------------------------------------------------------- |
+| `pendingMs`    | Delay showing the pending state — fast routes never flash a skeleton        |
+| `pendingMinMs` | Floor the minimum display time once shown — slow routes do not flicker away |
+
+A fast list navigation with data already cached renders without any pending flash; a genuinely slow route commits a skeleton for at least `pendingMinMs`. See [Pages](/docs/frontend/pages) for the pending-state contract.
+
+## Relative and Absolute Targets [#relative-and-absolute-targets]
+
+Navigation supports both absolute and relative targets. `navigate({ to: '/posts' })` goes from the root of the route tree; `navigate({ to: '..', relative: true })` resolves against the current route. Relative navigation keeps the same compile-time guarantees as absolute targets — the resolved route is still checked against the real route tree before the call type-checks.
+
+## Navigation and the Cache [#navigation-and-the-cache]
+
+Navigation always walks the shared cache. When the target route's data is already present — from a prior visit, a loader dehydration, or a preload — the render reads it directly and the fetch is skipped. When it is not, the loaders run in parallel across the matched chain and the render waits on the complete set. Either way the client never double-fetches what a loader or preload supplied. See [Data Hooks](/docs/frontend/data-hooks) and [Caching Strategies](/docs/rendering/caching).
+
+## Dev Ergonomics [#dev-ergonomics]
+
+* Invalid `to`, `params`, and `search` values fail at compile time via generated types in `src/.kwiva/types`
+* The dev overlay exposes the route tree and the type surface behind every link (v1.x)
+* `kwiva make:page` scaffolds pages that wire in `<Link>` and `useNavigate` stubs from the first file
+
+## What's Next [#whats-next]
+
+* [File-Based Routing](/docs/frontend/routing) — the route tree links are typed against
+* [Loaders & Data](/docs/frontend/loaders) — what preloading runs ahead of render
+* [Pages](/docs/frontend/pages) — where links and navigations point
+* [Data Hooks](/docs/frontend/data-hooks) — the cache preloading warms
+* [UI Components](/docs/frontend/ui-components) — the `Link` shipped by the kit

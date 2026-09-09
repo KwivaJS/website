@@ -1,0 +1,140 @@
+# Streaming SSR (/docs/rendering/streaming)
+
+
+
+Streaming SSR ships the shell of a page the moment it can render, and streams the rest in as its data resolves. The streaming is **suspense-aware**: the rendering runtime flushes each suspense boundary the instant the deferred segment behind it is ready. The user sees a real page start paint at shell time — not after every loader on the route has finished.
+
+Streaming is the default mechanism of the framework-owned SSR pipeline (ADR-0006): the engine serves, the framework renders with `renderToReadableStream`, and Suspense boundaries flush as deferred data resolves. On runtimes without streaming support, the pipeline degrades to a buffered render — capability is auto-detected and documented per preset.
+
+## The Shell-First Contract [#the-shell-first-contract]
+
+A page loader can split its work into blocking and deferred:
+
+```tsx title="the-shell-first-contract.tsx"
+loader: async ({ params, client }) => ({
+  post: await client.posts.get(params.id),                        // blocking
+  comments: stream(client.comments.list({ postId: params.id })),  // streams in
+}),
+```
+
+* Values awaited directly in the loader (the `post`) hold back the shell. Nothing on the route renders until every blocking value across all matched loaders resolves.
+* Values wrapped in `stream()` (the `comments`) defer the segment. The page renders as soon as the blocking data is ready; the deferred value streams into its suspense boundary when it arrives.
+
+The page marks where each deferred piece lands:
+
+```tsx title="the-shell-first-contract-2.tsx"
+component: ({ loaderData: { post, comments } }) => (
+  <article>
+    <h1>{post.title}</h1>
+    <Suspense fallback={<p>Comments…</p>}>
+      <Comments stream={comments} />
+    </Suspense>
+  </article>
+),
+```
+
+The shell flushes fully rendered — the correct `head` included — with the deferred regions in their fallback state. Streaming is not partial HTML sent before the page is structured; it is whole regions shipped as they complete.
+
+## Render in Parallel with Data [#render-in-parallel-with-data]
+
+Streaming is not merely progressive enhancement — it lets rendering and data run concurrently. While the server renders the blocking content and flushes it, the deferred queries continue in the background and flush as they complete. On a comment-heavy post, the headline and body reach first paint while the comment query is still running; comments then stream in without a second navigation.
+
+```plaintext title="render-in-parallel-with-data.txt"
+t0   blocking data resolves → shell flushes
+t0.. deferred query runs in parallel with rendering
+tN   deferred chunk resolves → suspense boundary flushes
+```
+
+This mirrors the parallel loader contract: all matched loaders run concurrently, and deferred lookups ride the same execution. See [Loaders & Data](/docs/frontend/loaders).
+
+## Streaming and Suspense Data Hooks [#streaming-and-suspense-data-hooks]
+
+Streamed loader data and suspense-enabled data hooks share one boundary model. A hook with `suspense: true` throws to the nearest suspense boundary while pending — the same boundary that renders a streamed `loaderData` segment — so a page can mix a blocking loader value, a deferred value, and a client-only query under the same boundary tree:
+
+```tsx title="streaming-and-suspense-data-hooks.tsx"
+<Suspense fallback={<p>Loading…</p>}>
+  <StreamedSegment stream={comments} />   // deferred loader value
+  <UserPanel />                           // suspense-enabled hook, fetches on client
+</Suspense>
+```
+
+The deferred loader value streams in from the server; the hook's query runs on the client and resolves into the same cache. Either way the boundary governs its own lifecycle, and errors stay scoped to the region. See [Data Hooks](/docs/frontend/data-hooks).
+
+## The Timing Budget [#the-timing-budget]
+
+Streaming exists to hold the shell-time budget. The framework's reference timing targets shape the split:
+
+| Stage                | Budget (p50, reference app)      |
+| -------------------- | -------------------------------- |
+| Shell (stream start) | \< 50ms                          |
+| Deferred chunk flush | as data resolves                 |
+| Full stream complete | blocked data + remaining queries |
+| Hydration            | after shell paint                |
+
+The loader split is what protects the shell budget: only direct `await`s in loaders hold up the `< 50ms` target, so the rule is to keep the blocking set minimal and defer everything else. The dev overlay shows the loader waterfall per request — see [Observability](/docs/observability/dev-overlay).
+
+## What Streaming Changes on the Client [#what-streaming-changes-on-the-client]
+
+The client treats streamed segments the same way it treats any suspense boundary. The shell hydrates immediately, the deferred region is hydrated when its chunk arrives, and the router stays on the same route and search state throughout. There is no page reload and no duplicated fetch — each chunk carries its own loader data keyed identically to the client cache.
+
+```plaintext title="what-streaming-changes-on-the-client.txt"
+shell → hydrates immediately
+chunk → hydrates its boundary as it arrives
+router → stays on the same route and search state throughout
+```
+
+Because each chunk dehydrates under loader-identical cache keys, a streamed segment that the client already has (from an earlier visit or a preload) hydrates without refetch. See [Hydration](/docs/rendering/hydration).
+
+## Streaming and Route Rules [#streaming-and-route-rules]
+
+Streaming composes with response caching. Route rules operate on the full stream:
+
+| Rule       | Behavior with streaming                                                |
+| ---------- | ---------------------------------------------------------------------- |
+| `cache: n` | The composed response is cached for `n` seconds                        |
+| `swr: n`   | Stale stream is served while the background revalidates a fresh one    |
+| `isr: n`   | The complete stream is cached and regenerated on interval or on demand |
+
+A streamed page is cached as a whole, not piecemeal — the shell and its deferred segments revalidate together, so a stale shell never matches fresh fragments. See [Caching Strategies](/docs/rendering/caching).
+
+## Errors in Streamed Segments [#errors-in-streamed-segments]
+
+Deferred values that reject after the shell has streamed cannot reset the page. Instead, the failing suspense boundary falls back to its error state with a retry — the shell stays intact and the region governs its own recovery. During development the overlay surfaces the loader stack and trace id for the rejected segment. On the server the rejection is logged against the request's span; the client never sees an uncaught stream error take down the page. See [Observability](/docs/observability).
+
+## When to Stream, When to Block [#when-to-stream-when-to-block]
+
+Decide per value, in the loader:
+
+| Value                                                    | Decision   | Rationale                                    |
+| -------------------------------------------------------- | ---------- | -------------------------------------------- |
+| The record the frame repeats (article title, layout nav) | **Block**  | A meaningful first paint needs it            |
+| Below-the-fold lists (comments, related items)           | **Stream** | Natural async, renders fine on arrival       |
+| Aggregated panels (counts, summaries)                    | **Stream** | Non-critical by latency                      |
+| Anything whose absence breaks the shell                  | **Block**  | A missing frame value wastes the whole shell |
+
+The rule of thumb: if a missing value would leave the shell useless, block it. Otherwise defer it and let the user watch the page fill in.
+
+## Streaming, Hydration, and Caching Together [#streaming-hydration-and-caching-together]
+
+Streaming, hydration, and caching share one result model: the full streamed response. The shell and its deferred chunks dehydrate into the same state payload, rehydrate into the same cache keys, and cache as one composed response. Their interaction:
+
+```plaintext title="streaming-hydration-and-caching-together.txt"
+shell + deferred chunks → one response
+  → dehydrated into the state payload
+  → cached whole under route rules
+  → client rehydrates each region under identical keys
+```
+
+This is why combining a streamed loader, a suspense-enabled data hook, and an `isr` rule stays correct — every stage agrees on what the response is. See [Hydration](/docs/rendering/hydration) and [Caching Strategies](/docs/rendering/caching).
+
+## Observability [#observability]
+
+Streaming adds two spans to the render pass: time-to-first-byte of the stream (shell time) and the flush schedule of deferred boundaries. Together with total SSR wall time and client hydration time, they make streaming behavior measurable rather than anecdotal. See [Observability](/docs/observability/metrics).
+
+## What's Next [#whats-next]
+
+* [Server-Side Rendering](/docs/rendering/ssr) — the pipeline streaming is part of
+* [Hydration](/docs/rendering/hydration) — how streamed chunks become client state
+* [Loaders & Data](/docs/frontend/loaders) — where deferred data is declared
+* [Caching Strategies](/docs/rendering/caching) — caching the full stream per route
+* [Frontend](/docs/frontend) — the page surface that declares deferred values

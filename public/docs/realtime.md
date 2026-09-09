@@ -1,0 +1,130 @@
+# Realtime (/docs/realtime)
+
+
+
+Kwiva's realtime layer composes four pieces that work together: domain events that travel through your application, broadcast channels that push payloads to connected clients, typed client hooks that subscribe from the frontend, and a scaling story for when the application runs on more than one instance. Because each piece is typed end to end, a `defineEvent` payload and the `onMessage` handler that receives it agree on their shape without any manually maintained contract. Rename a field on an event and every subscriber, every listener, and every broadcast target retypes in the same build — there is no stringly-typed message anywhere in the pipeline.
+
+Realtime is not a separate subsystem bolted onto the framework. Channels and events are defined with the same `defineX` conventions as models and controllers, they are checked by the same policy engine as REST routes, and they run on transports chosen by your deployment preset. Everything below builds on the request pipeline documented in [Controllers](/docs/http/controllers) and [Request Lifecycle](/docs/http/lifecycle).
+
+## The Pieces [#the-pieces]
+
+| Page                                                | What it covers                                                       |
+| --------------------------------------------------- | -------------------------------------------------------------------- |
+| [Channels](/docs/realtime/channels)                 | Named channels, dynamic segments, policy-checked subscribe, presence |
+| [Events & Broadcasting](/docs/realtime/events)      | Typed domain events, queued and sync listeners, broadcasting         |
+| [Client-Side Realtime](/docs/realtime/client-usage) | `useChannel`, `usePresence`, streaming subscriptions, SSE fallback   |
+| [Scaling Realtime](/docs/realtime/scaling)          | Many-instance behavior, fan-out, presence coordination               |
+
+## How the Pieces Fit [#how-the-pieces-fit]
+
+A typical realtime feature flows like this: something happens in your application — a post is created, a message is posted — and that something is captured as a domain event. The event fans out to listeners (queued or synchronous) and, when a channel mapping is declared, broadcasts to a realtime channel. Subscribed clients receive the update the moment it is produced:
+
+```ts title="how-the-pieces-fit.ts"
+// a model hook broadcasts straight to a channel
+Post.onCreated(() => broadcast('posts'))
+
+// a client subscribes to that channel with a typed hook
+const { messages } = useChannel('posts')
+```
+
+The model hook is the transport sugar: the create happens, the hook fires, and every subscribed client is notified. The client hook is the receiving end, typed against whatever payload the server emits. Neither side knows the other's implementation details; both are derived from framework definitions.
+
+Channels are the transport. Events are the meaning. If a feature is "something changed and someone should hear about it", the event names the change and the channel decides who hears it. The broadcast target is derived from typed, validated event fields, so the mapping from event to channel is always well-formed and always inside the surface your policies control.
+
+## A Real-Time Feature, End to End [#a-real-time-feature-end-to-end]
+
+Combining the pieces gives a complete, production-shaped feature. A chat channel with a membership policy:
+
+```ts title="a-real-time-feature-end-to-end.ts"
+import { channel } from '@kwiva/http'
+
+export const chat = channel('chat.{roomId}')
+  .policy(({ params, session }) => session.user && isMember(session.user, params.roomId))
+  .on('message', ({ payload }) => broadcast(payload))
+```
+
+A typed event that both queues work and broadcasts the new message to the room:
+
+```ts title="a-real-time-feature-end-to-end-2.ts"
+import { defineEvent } from '@kwiva/events'
+
+export const MessagePosted = defineEvent('message.posted', (f) => ({
+  roomId: f.uuid(),
+  messageId: f.uuid(),
+  tenantId: f.uuid().optional(),
+}), {
+  broadcast: (e) => `chat.${e.roomId}`,
+  listeners: ['send-webhook', 'update-stats'],
+  queued: true,
+})
+```
+
+A client component that subscribes with the same semantics:
+
+```tsx title="a-real-time-feature-end-to-end-3.tsx"
+const { messages, send } = useChannel(`chat.${roomId}`, {
+  onMessage: (m) => setMessages((prev) => [...prev, m]),
+})
+```
+
+One emit drives a broadcast to the room, two queued listeners for side effects, and a typed `onMessage` delivery to every subscribed client. Everything downstream of `emit` is derived from the three definitions above.
+
+## The Full Surface [#the-full-surface]
+
+Realtime is one consistent story across the framework:
+
+* **Channels** — defined once with the `channel()` factory from `@kwiva/http`, including authorization as part of the definition through `.policy()`. Dynamic segments (`chat.{roomId}`) make one definition cover many rooms.
+* **Events** — defined with `defineEvent`; payload fields derive from the same field DSL models use, and validation happens at the emit boundary.
+* **Listening** — listeners attach by name and run queued by default (`queued: true`), with synchronous execution as an explicit opt-out. Listener files auto-discover from `src/app/events/listeners/`.
+* **Broadcasting** — declared channel mappings on events, model-hook sugar on lifecycle hooks, and the ad hoc `broadcast(name, payload)` helper for server-side fan-out.
+* **Presence (v1.x)** — join and leave tracking per channel, readable client-side through `usePresence`.
+* **Client hooks** — `useChannel` and the presence hook with typed payloads from the server definitions, plus imperative streaming subscriptions for non-component code.
+* **Fallbacks** — SSE when WebSockets are blocked, graceful degradation on static output.
+* **Scaling** — a shared distribution plane so broadcasts cross instances without restructuring channel code.
+
+Nothing is hand-wired. A channel's policy, an event's payload, and a hook's `onMessage` signature are all derived from the definitions, so a change to a definition surfaces types immediately across every consumer.
+
+## Connection Lifecycle and Reliability [#connection-lifecycle-and-reliability]
+
+Realtime connections are not treated as permanent. The framework owns the parts of the lifecycle that are identical for every product:
+
+1. **Subscribe** — the client connects and the channel policy is checked during the WebSocket handshake, before the client receives a working socket. A denied client never subscribes.
+2. **Live** — inbound messages route through channel handlers; broadcasts route out through the channel.
+3. **Drop and reconnect** — on an unexpected disconnect the client reconnects with backoff rather than giving up or hammering the server.
+4. **Catch-up** — missed-message catch-up by event id is part of the realtime fast-follow (v1.x), so a client that blinks out does not permanently lose what it missed.
+5. **Degrade** — on fully static output, where the realtime transport does not exist, hooks keep their interface but stop receiving; components remain safe to render.
+
+Delivery is at-least-once by design. The broadcast plane may deliver a message more than once across reconnects, which is why queued listeners and event-handling jobs support idempotency keys. The transport guarantees arrival; the application dedupes where a duplicate side effect would be harmful.
+
+## Transport and Engine Mapping [#transport-and-engine-mapping]
+
+The realtime transport follows the deployment preset, so choosing a deployment target chooses the transport:
+
+| Environment                                           | Transport                                                                                              |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Server presets (primary and Node-compatible runtimes) | Framework-owned channel engine over the server's WebSocket upgrade                                     |
+| Edge presets with stateful workers                    | Stateful channel primitives via the preset's WebSocket wiring, coordinated by the preset's state model |
+| Static output                                         | Realtime disabled; clients degrade gracefully                                                          |
+
+For one-directional feeds where a bidirectional socket is overkill, the framework's streaming helper serves server-sent events with the same channel policy semantics. The choice between transports is an operational decision, not a code change — the client subscription surface stays identical.
+
+## When Realtime Fits [#when-realtime-fits]
+
+Realtime broadcasting is the right tool for anything where freshness beats refetching:
+
+* **Live chat** — per-room channels with dynamic segments and presence
+* **Activity feeds** — events broadcast to user-scoped channels
+* **Shared lists** — a board of records that multiple users edit simultaneously
+* **Dashboards** — metrics and status pushed instead of polled
+* **Notifications** — server-initiated push to a user's connected devices
+
+Where a one-directional push is all you need — a feed that only flows server to client — server-sent events via the `stream` helper are a lighter option, and the client can still subscribe through the same channel semantics. Where the data genuinely changes on every poll and latency is not critical, ordinary HTTP requests and data hooks remain the simplest tool; realtime exists to remove polling, not to replace a request you would only make once.
+
+## What's Next [#whats-next]
+
+* [Channels](/docs/realtime/channels) — define a channel and enforce who may subscribe
+* [Events & Broadcasting](/docs/realtime/events) — define typed events and route them to channels
+* [Client-Side Realtime](/docs/realtime/client-usage) — subscribe from React with typed hooks
+* [Scaling Realtime](/docs/realtime/scaling) — how all of this behaves across instances
+* [WebSockets](/docs/http/websockets) — raw socket routes for custom protocols
+* [Background Work](/docs/background-work/jobs) — queued listeners that run event handling off the request path

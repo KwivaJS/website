@@ -1,0 +1,167 @@
+# UI Components (/docs/frontend/ui-components)
+
+
+
+Kwiva ships a built-in UI kit — a component layer that provides the default look for generated screens and page scaffolds. It is fully replaceable: applications can use the kit, plain utility-first CSS, or their own component system. The framework requires only the token surface that the generated Studio screens use.
+
+The kit is layered on **Base UI** primitives and **Tailwind v4** styling, and it is model-aware where it counts: its headline pieces are typed by the data layer, so screens are **derived, not duplicated**. Change the model, and the tables and forms that describe it change with it.
+
+## Scope of the Kit [#scope-of-the-kit]
+
+The kit's job has two halves:
+
+* **Ship a coherent default look** for generated screens and scaffolds, so a new app is presentable before any styling work.
+* **Stay fully replaceable** — the framework only requires the token surface, so a team can restyle entirely without fighting the framework.
+
+Anything that is not presentational — data access, validation, navigation typing — lives in `@kwiva/react` and `@kwiva/client`, not in the kit. The kit is the last mile between model metadata and pixels.
+
+## Layering [#layering]
+
+The kit is organized into four layers:
+
+```plaintext title="layering.txt"
+the built-in UI kit
+ ├─ tokens      design tokens: colors, radii, spacing, dark mode
+ ├─ primitives  accessible components: dialog, popover, select, tabs, toast
+ ├─ components  DataTable, form fields, Sidebar, Topbar, EmptyState, Avatar, Badge
+ └─ patterns    CrudPage, SettingsPage — used by Studio and scaffolds
+```
+
+* **Tokens** are the only cross-package contract between the kit and the rest of the app.
+* **Primitives** establish the accessibility baseline — focus management and aria wiring — so higher layers inherit it.
+* **Components** compose primitives into model-aware, data-aware surfaces.
+* **Patterns** combine components into whole screen shapes used by Studio and generated scaffolds.
+
+Because accessibility lives in the primitives layer, every higher-layer component inherits focus management and aria wiring for free. See [Studio: Generated UI](/docs/studio/generated-ui) for how patterns drive screens.
+
+## The Component Inventory [#the-component-inventory]
+
+The kit's shipped surface covers the shapes an admin surface needs most. A representative inventory:
+
+| Group      | Components                              | Notes                                           |
+| ---------- | --------------------------------------- | ----------------------------------------------- |
+| Layout     | `Sidebar`, `Topbar`, `EmptyState`       | Composes the shell of most admin screens        |
+| Data       | `DataTable`                             | Model-typed columns, filters, server pagination |
+| Forms      | `Form.Text`, `Form.Select`, `Form.Date` | Field metadata derived from `defineModel`       |
+| Feedback   | `Badge`, `Avatar`, `Toast`              | Primitive-backed, token-styled                  |
+| Navigation | `Link`                                  | The typed, preloading link from the router      |
+| Patterns   | `CrudPage`, `SettingsPage`              | Whole screens used by Studio and scaffolds      |
+
+Nothing in this group is load-bearing for the framework itself — the only requirement is the token surface. A team that prefers a different table or form library swaps those pieces without touching the data layer or the server.
+
+## Layout Primitives & Link [#layout-primitives--link]
+
+The kit ships layout primitives (Sidebar, Topbar, EmptyState) and the `Link` navigation component for consistent application chrome. Layout chrome composes the same way pages do — a `Sidebar` plus an `EmptyState` covers the shell of most admin screens, and `Link` carries the typed, preloading navigation described in [Navigation & Link](/docs/frontend/navigation).
+
+## Form Primitives [#form-primitives]
+
+Forms are derived from `defineModel`. Field metadata — validation rules, enums, optionality — comes from the field DSL, so the form needs no second schema:
+
+```tsx title="form-primitives.tsx"
+import { Form } from '@kwiva/ui-kit'
+
+<Form model={Post} onSubmit={save.mutate}>
+  <Form.Text name="title" />
+  <Form.Select enum="status" />
+  <Form.Date name="publishedAt" />
+</Form>
+```
+
+Server-side validation errors map per field through the typed client's error contract, so a model's `min`/`max` rules surface under the exact field that failed. On the client, the same schema powers inline validation before submit, via `useForm` — see [Data Hooks](/docs/frontend/data-hooks) and [Data Validation](/docs/data/validation).
+
+## DataTable [#datatable]
+
+`DataTable` is the workhorse of generated screens — server-driven pagination and filtering through the typed list endpoint of the model:
+
+```tsx title="datatable.tsx"
+import { DataTable } from '@kwiva/ui-kit'
+
+<DataTable
+  model={Post}                                   // typed columns from the model IR
+  columns={['title', 'status', 'author', 'publishedAt']}
+  filters={{ status: ['draft', 'published'] }}   // generated from enum fields
+  search={['title']}                             // full-text where allowed
+  rowActions={[{ label: 'Edit', to: p => `/posts/${p.id}/edit` }]}
+  bulkActions={[{ label: 'Archive', run: rows => client.posts.archiveMany(rows.map(r => r.id)) }]}
+/>
+```
+
+* Columns, filter options, and searchable fields derive from the model IR
+* Filtering and pagination run server-side through the typed client
+* Actions are policy-aware — hidden without the matching permission
+* Row actions navigate through the typed router; bulk actions dispatch through the typed client
+
+The same table powers Studio's generated list screens, which is why a model change (a new enum, a reordered field list) updates the generated admin without touching the screen code.
+
+## Tokens & Theming [#tokens--theming]
+
+Tokens are declared in a stylesheet that ships with the preset and can be overridden per app:
+
+```css title="tokens-theming.css"
+/* src/styles/tokens.css — the default preset, overridable */
+@import 'tailwindcss';
+@theme {
+  --color-ember: #e25822;
+  --color-ink: #2b2b2b;
+  --color-crust: #faf3e8;
+  --radius-card: 12px;
+}
+```
+
+Theme selection lives in configuration and the root provider:
+
+| Surface                    | Role                                  |
+| -------------------------- | ------------------------------------- |
+| `src/config/ui.ts > theme` | Default theme for the app             |
+| `<Providers theme=...>`    | Theme override at the top of the tree |
+
+Dark mode is token-swapped — the same components re-theme without layout changes. Because tokens are the only cross-package contract, restyling is a token change, not a component fork.
+
+## Patterns: Whole Screens [#patterns-whole-screens]
+
+Patterns combine components into screen-shaped surfaces used by Studio and generated scaffolds. `CrudPage` is the canonical example — a DataTable plus a create/edit form shell, wired to the model's list and mutation endpoints:
+
+```tsx title="patterns-whole-screens.tsx"
+<CrudPage
+  model={Post}
+  columns={['title', 'status', 'author', 'publishedAt']}
+  fields={['title', 'body', 'status', 'publishedAt']}
+  onCreate={client.posts.create}
+  onUpdate={client.posts.update}
+  onDelete={client.posts.delete}
+/>
+```
+
+`SettingsPage` composes the same way for configuration surfaces — form sections, token-styled chrome, and the standard SettingsPage shell. Patterns inherit everything below them: model-typed columns, server validation mapping, policy-aware actions, and the accessibility baseline.
+
+## Accessibility & i18n [#accessibility--i18n]
+
+* Base UI primitives are the accessibility baseline — focus management and aria wiring live once at the primitive layer
+* All components read labels from the i18n catalog (v1.x) — generated scaffolds are translatable by default
+* The compact runtime mode is supported — components avoid runtime-specific APIs, so the same tree renders under either runtime
+
+## Styling Conventions [#styling-conventions]
+
+* Tailwind v4 utility-first styling; tokens as the only cross-package contract
+* `src/ui/styles/` holds app-level CSS entries, generated by `kwiva new`
+* The build pipeline handles CSS through its own CSS plugin plus the Tailwind v4 fast engine
+
+## The Kit Exists to Extend Studio [#the-kit-exists-to-extend-studio]
+
+Studio generates schema-derived screens from the model IR, and it renders them with this kit. Its purpose is twofold: Studio ships with a coherent default look, and that look is **extendable** — override screens per model or restyle entirely via the token surface. Because the kit and Studio read the same model metadata, a customization that works in one applies to the other. See [Studio](/docs/studio/generated-ui) and [Customization](/docs/studio/customization).
+
+## Usage Rules [#usage-rules]
+
+* Applications may use the kit, plain utility-first CSS, or their own system
+* The framework requires only the token surface Studio uses
+* No component code leaks into the data layer or server code — components render on the client boundary
+* The compact runtime mode is supported: components avoid runtime-specific APIs
+* The compact runtime mode is supported — components stay framework-agnostic within the React compat surface
+
+## What's Next [#whats-next]
+
+* [Studio](/docs/studio/generated-ui) — how the kit renders generated screens
+* [Studio Customization](/docs/studio/customization) — overriding screens per model
+* [Pages](/docs/frontend/pages) — where components and patterns live
+* [Navigation & Link](/docs/frontend/navigation) — the typed `Link` shipped by the kit
+* [Data Models](/docs/data/models) — the field DSL components derive from

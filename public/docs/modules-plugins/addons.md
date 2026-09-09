@@ -1,0 +1,145 @@
+# Addons & Distribution (/docs/modules-plugins/addons)
+
+
+
+An **addon** is any installable capability package: a **module** (a full-stack capability), a **plugin** (an HTTP-level extension), or a **theme** (a ui-kit skin). All three share one installation path — the addon workflow is the single way capabilities are installed and registered in a Kwiva app. This page covers that workflow end to end: what an addon is, how it installs, how it is discovered, how versions are resolved, and how you publish your own.
+
+## What Is an Addon? [#what-is-an-addon]
+
+The source of an addon does not change the workflow:
+
+| Source      | Example                            | How it installs                       |
+| ----------- | ---------------------------------- | ------------------------------------- |
+| First-party | `@kwiva/blog`                      | `kwiva add @kwiva/blog`               |
+| Third-party | any addon tagged for the ecosystem | `kwiva add <addon>`                   |
+| Local       | `./addons/analytics`               | `kwiva add ./addons/analytics --path` |
+
+The kind of addon shapes what it contributes but not how it is managed. A module brings the full vertical stack — models, controllers, pages, jobs, config, and migrations. A plugin extends the HTTP surface — middleware, route rules, and lifecycle hooks. A theme restyles the ui-kit. All three install, list, update, and remove through the same commands.
+
+## The Addon CLI [#the-addon-cli]
+
+| Command                           | Purpose                                                                     |
+| --------------------------------- | --------------------------------------------------------------------------- |
+| `kwiva add <addon>`               | Install and register an addon — package, config entry, and migrations check |
+| `kwiva add <addon> --path`        | Install a local addon from a workspace path                                 |
+| `kwiva add <addon> --version <v>` | Pin a specific version                                                      |
+| `kwiva addons list`               | Show installed addons: contributions and versions                           |
+| `kwiva addons search <term>`      | Search the registry                                                         |
+| `kwiva addons info <addon>`       | Show details of an addon before you commit                                  |
+| `kwiva addons remove <addon>`     | Remove an installed addon, leaving its migrations intact and flagged        |
+| `kwiva addons update [addon]`     | Update addons within their `requires` compatibility ranges                  |
+| `kwiva addons outdated`           | List addons with newer compatible versions available                        |
+
+The full command reference for this surface lives on [CLI Addon Commands](/docs/cli/addon-commands).
+
+## Installing an Addon [#installing-an-addon]
+
+One command installs, registers, and checks:
+
+```bash title="terminal"
+kwiva add @kwiva/blog
+```
+
+`kwiva add` does three things at once:
+
+1. **Installs** the package from the registry.
+2. **Registers** it — it writes the module entry into `kwiva.config.ts` for you.
+3. **Checks migrations** — module migrations are validated so the addon's schema steps apply cleanly with the app's migrations, and anything needing `db:migrate` is flagged.
+
+After `kwiva add`, the addon's contributions — models, controllers, pages, config, migrations — are live in the app, registered in configuration, and subject to the same conventions and gates as first-party code.
+
+Local addons work identically with a path instead of a package name:
+
+```bash title="terminal"
+kwiva add ./addons/analytics --path
+```
+
+Pinning follows the same one-step shape:
+
+```bash title="terminal"
+kwiva add @kwiva/blogstore --version 2.1.0
+```
+
+Manual registration in `kwiva.config.ts` remains supported for vendored and path-based modules that were never installed through the CLI:
+
+```ts title="kwiva.config.ts"
+// kwiva.config.ts
+export default defineConfig({
+  modules: [
+    './modules/billing',  // vendored or path-based registration
+  ],
+})
+```
+
+## Registry and Distribution Conventions [#registry-and-distribution-conventions]
+
+Publishing an addon is a small, explicit contract:
+
+1. The package **exports the `defineModule` result** as its default export.
+2. It is **tagged with the `kwiva-addon` keyword** in the package registry.
+3. It declares **`requires` ranges** for its `@kwiva/*` peer dependencies.
+
+With that contract in place:
+
+* `kwiva add @acme/chat` installs and registers the module.
+* `kwiva addons search chat` lists it — backed by a curated addon index.
+* The app pins versions with semver; compatibility is enforced via `requires` ranges.
+
+The keyword is the discovery bridge. `kwiva addons search` matches on it, and the curated addon index maintains quality and compatibility signals for what search returns. `kwiva addons info` is the pre-install look: description, contribution summary (which models, controllers, pages, or config the addon brings), requirements, and changelog.
+
+## Version and Upgrade Management [#version-and-upgrade-management]
+
+Kwiva resolves upgrades against declared compatibility rather than blindly bumping:
+
+* `kwiva addons update` brings every addon to the newest version **within its `requires` range** — it refuses to jump outside a declared compatible window.
+* `kwiva addons outdated` reports what is behind, so upgrades become deliberate decisions rather than periodic rituals.
+* `kwiva addons info <addon>` shows the installed version, available versions, and requirements before you commit to a move.
+* `kwiva addons remove <addon>` unregisters and removes the addon cleanly — the package is uninstalled and the registry entry removed, but any schema the addon contributed is left intact and flagged so database data is never silently dropped.
+
+Because the app pins versions and addons declare `requires`, two apps can hold different addon versions without breakage — upgrades are deliberate, per-app decisions. When an addon's `requires` range conflicts with what the app already pins, resolution rejects the combination instead of running an incompatibility.
+
+> \[!TIP]
+> `kwiva addons outdated` plus `kwiva addons info` is the review loop for a low-risk upgrade: find what is behind, read the requirements and changelog, then `kwiva addons update <addon>` to move within the compatible range.
+
+## First-Party Addons [#first-party-addons]
+
+Framework-maintained addons cover the common platform capabilities:
+
+| Addon                  | Ships                                                                 |
+| ---------------------- | --------------------------------------------------------------------- |
+| `@kwiva/auth-kit`      | Ready auth screens (sign-in, sign-up, OAuth) + user-management polish |
+| `@kwiva/blog`          | Posts, tags, and comments models + pages + feed                       |
+| `@kwiva/billing`       | Plans, subscriptions, invoices + webhooks (engine-agnostic gateway)   |
+| `@kwiva/notifications` | In-app + email notification stack                                     |
+| `@kwiva/analytics`     | Event tracking + dashboards                                           |
+
+These demonstrate the shape a well-built addon takes — namespaced contributions, config defaults apps can override, migrations ordered before app migrations, and `requires` ranges that keep them upgradable.
+
+## Authoring and Publishing an Addon [#authoring-and-publishing-an-addon]
+
+Everything else is publishable by anyone. The authoring surface is the same one you use in an application — `defineModule` for modules, `definePlugin` for plugins, and a ui-kit skin for themes:
+
+1. **Scaffold** — `kwiva make:module analytics` creates the module folder with slots for each contribution type.
+2. **Author** — declare contributions through `defineModule`; set namespaced config defaults; declare `requires`.
+3. **Test locally** — register the module from its workspace path (`./addons/analytics`) in a real app and exercise what it contributes.
+4. **Build** — `kwiva module:build` packages the module with its contribution manifest and a compiled distribution (bundled output plus isolated type declarations).
+5. **Publish** — publish to the package registry tagged with the `kwiva-addon` keyword.
+
+From then on, `kwiva add @acme/analytics` installs it into any compatible app, and `kwiva addons search analytics` makes it discoverable to everyone else.
+
+## The Consumer–Author Contract [#the-consumerauthor-contract]
+
+The contract holds in both directions:
+
+* **Consumers** get a surface with no guessing — search, info, install, update, remove, and audit are all first-class commands.
+* **Authors** get one publishing path — package with the keyword, and the addon becomes discoverable through the CLI rather than word of mouth.
+
+That symmetry is what makes the addon model a distribution story rather than a set of copy-paste instructions.
+
+## What's Next [#whats-next]
+
+* [Defining Modules](/docs/modules-plugins/defining-modules) — the contribution points an addon ships
+* [Application Composition](/docs/modules-plugins/composition) — how registered modules join the kernel
+* [Modules & Plugins](/docs/modules-plugins) — the composition model at a glance
+* [CLI Addons](/docs/cli/addon-commands) — the command reference for addon workflows
+* [Modules Reference](/docs/cli/generators) — generators that scaffold new modules

@@ -1,0 +1,138 @@
+# Deployment (/docs/deployment)
+
+
+
+Kwiva follows **one codebase, many targets**. The same application you compose with `defineX` files in `src/` compiles to a deployment artifact for a Node runtime, a Bun runtime, serverless platforms, edge platforms, container images, a prerendered static site, or a standalone binary — with zero application-code changes.
+
+Deployment is a build-time decision, not a design constraint. You write models, controllers, middleware, and pages once against the framework API, and the target decides how the built output is boxed, shipped, and started. Swap from a shared Node host to a serverless function platform, or from a container fleet to a single binary, and the rebuild is the only change that moves.
+
+## How Deployment Works [#how-deployment-works]
+
+Deployment in Kwiva is **build-time only**. Your app never knows where it will run; the target is decided when you build, not when you write code.
+
+```bash title="terminal"
+kwiva build              # produce .output/ for the selected adapter
+kwiva preview            # run the built artifact locally
+kwiva deploy [provider]  # push to a host — or run the artifact yourself
+```
+
+The `kwiva build` command runs the client build and the server build, then emits `.output/` containing `server/` and `public/`. The generated `server/` entry is what every target actually runs:
+
+```text title="how-deployment-works.txt"
+.output/
+  server/
+    index.mjs            the composed web-standard handler entry
+  public/
+    ...                  rendered client assets, static files
+```
+
+That one entry is reinterpreted per target:
+
+| Target                    | What runs                                                         |
+| ------------------------- | ----------------------------------------------------------------- |
+| Node runtime              | `node .output/server/index.mjs`                                   |
+| Bun runtime               | `bun .output/server/index.mjs`                                    |
+| Container images          | The same entry inside a minimal runtime image                     |
+| Serverless and edge hosts | The artifact is reinterpreted by the adapter into function output |
+| Single binary             | `kwiva build --binary` compiles everything into one executable    |
+
+The application is always written against Web Standards — `Request`, `Response`, `fetch`, `WebSocket` — so the runtime differences stay inside the framework. Whatever target you build for, the app sees the same request pipeline, the same context, and the same `defineX` surface.
+
+### Selecting an Adapter [#selecting-an-adapter]
+
+The adapter (deploy preset) is chosen at build time through one of four mechanisms:
+
+| Mechanism       | Where                           | Notes                                           |
+| --------------- | ------------------------------- | ----------------------------------------------- |
+| `--preset` flag | `kwiva build --preset <preset>` | Explicit, per-build                             |
+| preset env var  | Build environment               | Force a preset in CI                            |
+| `deploy.preset` | `kwiva.config.ts`               | Committed default                               |
+| Auto-detection  | CI                              | Recognized platforms are detected automatically |
+
+Explicit selections override auto-detection: if your continuous-integration runner is already recognized by a platform, you do not need to configure anything; if you want to pin a target or run a build outside a recognized pipeline, set the preset env var, pass `--preset`, or commit `deploy.preset` in your config file.
+
+## The Build → Preview → Deploy Loop [#the-build--preview--deploy-loop]
+
+`kwiva preview` runs the built artifact locally, exactly as a host would. This is the fastest feedback loop before pushing anywhere:
+
+1. `kwiva build [--preset] [--binary]` — produce the artifact for a target
+2. `kwiva preview` — sanity-check that artifact locally
+3. `kwiva deploy [provider]` — push to a host, or run the artifact yourself
+
+For a raw smoke test of a specific adapter, build with an explicit `--preset` and run the generated entry directly instead of deploying:
+
+```bash title="terminal"
+kwiva build --preset node_server
+node .output/server/index.mjs
+```
+
+The same artifact is validated locally and then pushed, so the thing you tested is the thing that ships.
+
+## Scaffold Modes Map to Adapters [#scaffold-modes-map-to-adapters]
+
+The mode you choose at scaffold time selects a sensible default adapter:
+
+| Mode                  | Default adapter                    | What changes                           |
+| --------------------- | ---------------------------------- | -------------------------------------- |
+| `fullstack` (default) | Node runtime (auto-detected in CI) | SSR + API                              |
+| `api+spa`             | Node runtime + client build only   | No SSR renderer; SPA served            |
+| `static`              | static                             | Prerender everything; no server needed |
+| `standalone`          | Bun runtime + compile              | Single-file, zero-dependency binary    |
+| `edge`                | Edge worker adapter                | Edge-safe constraint set applies       |
+
+You are not locked into the scaffold default. A `fullstack` app can be built for serverless, containers, or a binary later; a `static` build can be regenerated as a fullstack deployment if you add API routes. The mode is a starting default, and the adapter matrix is your way around it.
+
+## Which Target Should You Choose? [#which-target-should-you-choose]
+
+The matrix is large, but the decision usually collapses to what your operations team already runs:
+
+| You have...                           | Build for...               | Why                                             |
+| ------------------------------------- | -------------------------- | ----------------------------------------------- |
+| A managed Node host or your own VM    | `node_server`              | Default production preset; simplest operations  |
+| A Bun-capable host or a tiny artifact | `bun-server` or `--binary` | Native runtime, single-file output              |
+| Spiky, elastic traffic                | Serverless or edge         | Functions scale with demand, idle costs nothing |
+| An orchestrator fleet                 | Containers                 | Images plus health probes, declarative scaling  |
+| A mostly-read site                    | `static`                   | Prerendered output, no server to operate        |
+
+The choice is never permanent. Because the adapter is a build-time property, you can move a `node_server` deployment to containers next quarter, or a fullstack site to static when its content stops changing daily — the rebuild is the only change that moves, and the artifact remains the same `.output/` contract you validated with `kwiva preview`.
+
+## Environment Variables That Matter [#environment-variables-that-matter]
+
+A small set of environment variables controls deployment behavior across targets:
+
+| Variable                         | Purpose                                                    |
+| -------------------------------- | ---------------------------------------------------------- |
+| `KWIVA_PRESET`                   | Force a deploy preset in CI                                |
+| `KWIVA_APP_BASE_URL` / `baseURL` | Serve under a subpath                                      |
+| `PORT`                           | Port for hosted platforms                                  |
+| `KWIVA_API_SECRET`               | Runtime config override pattern for the app config channel |
+| `KWIVA_TENANT_MODE`              | App-level tenancy default                                  |
+| `KWIVA_DB_URL`                   | App-level database connection                              |
+| `KWIVA_CACHE_URL`                | App-level cache connection                                 |
+
+Typed env access through `env(...)` validates required variables at boot, so a misconfigured production environment fails fast at startup rather than mid-request. Provider credentials used by `kwiva deploy` are separate — they are injected as environment tokens at deploy time and never needed at runtime.
+
+## Deploying [#deploying]
+
+`kwiva deploy [provider]` is a thin wrapper that runs the provider's own deploy path with your credentials, then prints the artifact digest and the deploy command it executed. Self-hosters skip the wrapper entirely: build with a preset, copy `.output/`, and run the entry.
+
+Rolling back is a pointer swap, not a code change. Keep N previous builds; managed platforms roll back by environment, and self-hosters keep a tar of `.output/`. Deployment artifacts are therefore immutable — you never recompile in production, you repoint to a previous build.
+
+## Adapting to a Target [#adapting-to-a-target]
+
+| Page                                                          | Purpose                                                |
+| ------------------------------------------------------------- | ------------------------------------------------------ |
+| [Runtime Adapters](/docs/deployment/adapters)                 | What an adapter is, the full matrix, choosing one      |
+| [Node/Bun Deployment](/docs/deployment/node-bun)              | Running on a Node or Bun runtime, single-binary output |
+| [Serverless Deployment](/docs/deployment/serverless)          | Function-based targets and their constraints           |
+| [Container Deployment](/docs/deployment/containers)           | Container images at scale                              |
+| [Production Checklist](/docs/deployment/production-checklist) | Pre-deploy and operational checks                      |
+
+## What's Next [#whats-next]
+
+* [Runtime Adapters](/docs/deployment/adapters) — understand the full matrix
+* [Node/Bun Deployment](/docs/deployment/node-bun) — deploy to a Node or Bun runtime
+* [Serverless Deployment](/docs/deployment/serverless) — function-based targets and constraints
+* [Production Checklist](/docs/deployment/production-checklist) — pass every pre-deploy check
+* [First Deployment](/docs/getting-started/first-deployment) — walk the loop from a fresh project
+* [Observability](/docs/observability) — wire logs, traces, and metrics before you ship

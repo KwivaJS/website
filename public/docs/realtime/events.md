@@ -1,0 +1,191 @@
+# Events & Broadcasting (/docs/realtime/events)
+
+
+
+Events are the meaning layer of Kwiva's realtime stack. A channel moves bytes; an event names what happened. `defineEvent` gives every event a typed, validated payload, and a single definition can both fan out to listeners and broadcast to a realtime channel — one emit, many effects, all derived from one file.
+
+Events are also the seam between your domain code and its side effects. Webhooks, stats aggregation, notifications, and channel broadcasts all hang off an event without the emitting code knowing they exist. That decoupling is the point: the code that produces the event expresses only what happened, never who must react.
+
+## Defining an Event [#defining-an-event]
+
+Events are defined per file with `defineEvent`:
+
+```ts title="src/app/events/user-signed-up.ts"
+// src/app/events/user-signed-up.ts
+import { defineEvent } from '@kwiva/events'
+
+export const UserSignedUp = defineEvent('user.signed-up', (f) => ({
+  userId: f.uuid(),
+}))
+```
+
+`defineEvent` takes three arguments: a unique dotted name, a payload factory, and an options object. The name is namespaced and verb-first (`user.signed-up`, `message.posted`) so events read as a past-tense record of the domain. The payload is declared with the same field DSL used by models. In this case the payload carries a single UUID field; larger payloads compose more fields, including optional ones and nested shapes.
+
+| Argument  | Type               | Description                                       |
+| --------- | ------------------ | ------------------------------------------------- |
+| `name`    | `string`           | Unique dotted event name, e.g. `'message.posted'` |
+| `payload` | `(f) => ({ ... })` | Field factory describing the payload shape        |
+| `options` | `EventOptions`     | Addressing, listeners, and execution mode         |
+
+## Typed Payloads from the Field DSL [#typed-payloads-from-the-field-dsl]
+
+The payload fields are not documentation — they are the contract. Emitting the event requires the declared fields, listeners receive them typed, and any broadcast derived from the event uses the same shape:
+
+```ts title="typed-payloads-from-the-field-dsl.ts"
+import { defineEvent } from '@kwiva/events'
+
+export const MessagePosted = defineEvent('message.posted', (f) => ({
+  roomId: f.uuid(),
+  messageId: f.uuid(),
+  tenantId: f.uuid().optional(),
+}))
+```
+
+Because validation flows from field types, an emit with a missing `roomId` fails validation at the boundary — the same principle that guards controllers and models applies to events, so a malformed event never reaches a listener. The payload also produces a Standard Schema-compatible validator, so the event definition and the runtime check are the same artifact.
+
+## Emitting an Event [#emitting-an-event]
+
+An event is emitted with a plain `await`:
+
+```ts title="emitting-an-event.ts"
+await MessagePosted.emit({ roomId, messageId })
+```
+
+The framework validates the payload against the event's schema, resolves the registered listeners, and — when a broadcast mapping is declared — pushes the payload to the resolved channel. Emit is callable from a controller, a job, a task, a model hook, or a command; it is a plain application operation like any other.
+
+> \[!TIP]
+> `emit` returns after the event has been produced and handed to its delivery path. When listeners are queued, the emit call does not wait for the listeners to finish — it hands each one to the queue. Synchronous listeners run on the current call stack.
+
+## Event Options [#event-options]
+
+The options object controls where an event goes and how its work executes:
+
+| Option      | Type                | Description                                                                       |
+| ----------- | ------------------- | --------------------------------------------------------------------------------- |
+| `broadcast` | `(event) => string` | Maps the event to the realtime channel it is broadcast on                         |
+| `listeners` | `string[]`          | Named listeners to attach to this event                                           |
+| `queued`    | `boolean`           | Runs listeners through the queue transport; set `false` for synchronous execution |
+
+```ts title="event-options.ts"
+export const MessagePosted = defineEvent('message.posted', (f) => ({
+  roomId: f.uuid(),
+  messageId: f.uuid(),
+  tenantId: f.uuid().optional(),
+}), {
+  broadcast: (e) => `chat.${e.roomId}`,      // → channel name (policy-checked)
+  listeners: ['send-webhook', 'update-stats'],
+  queued: true,                              // listeners run on the queue
+})
+```
+
+With `queued: true`, the listeners named in the array execute on the queue, keeping the request path clear of webhook calls and stats aggregation. The choice of sync versus queued is per-event and explicit, so listening work never silently stalls the caller's stack.
+
+## Listeners: Queued or Sync [#listeners-queued-or-sync]
+
+Every event declares how its work is handled. Listeners attach by name and receive the typed event:
+
+```ts title="listeners-queued-or-sync.ts"
+MessagePosted.on('send-webhook', async (event) => {
+  await sendWebhook(event)
+})
+
+// or as a file: src/app/events/listeners/send-webhook.ts (auto-discovered)
+```
+
+Listener files auto-discover from `src/app/events/listeners/` — a file named after the listener is picked up without registration. When an event is defined with `queued: true` (the default), each listener invocation becomes a queued job, so a busy listener never blocks the emitter and failures retry with queue semantics. A listener is synchronous when the event opts out with `queued: false`.
+
+**Queued versus synchronous:**
+
+* **Queued (default)** — each listener runs as a job on the queue transport. Durable, retryable, off the request path.
+* **Synchronous** — the listener runs inline on the emit call stack. Immediate, but it blocks the emitter; reach for it only when the listener is fast and its failure should fail the emit.
+
+## Broadcasting to Channels [#broadcasting-to-channels]
+
+An event can declare a channel mapping, turning every emit into a realtime broadcast:
+
+```ts title="broadcasting-to-channels.ts"
+{
+  broadcast: (e) => `chat.${e.roomId}`,
+}
+```
+
+The mapping function receives the typed payload and returns a channel name. Because the broadcast target is derived from validated, typed payload fields, the channel is always well-formed and the caller cannot broadcast into a channel they cannot address. The resolved channel is policy-checked, so the same authorization rules that guard REST routes apply to subscribers.
+
+A separate broadcast surface exists for ad-hoc use. An event like `user.signed-up` can be broadcast per user without a declared mapping:
+
+```ts title="broadcasting-to-channels-2.ts"
+UserSignedUp.broadcast('user.{id}')
+```
+
+Broadcasts are policy-checked on the channel, so client-side subscribers are still subject to the same authorization as any other channel join. The `broadcast` helper also stands alone for server-side fan-out from anywhere in the application:
+
+```ts title="broadcasting-to-channels-3.ts"
+import { broadcast } from '@kwiva/http'
+
+broadcast('chat.42', { type: 'message', body: 'Hello' })
+```
+
+## Model Events to Broadcast [#model-events-to-broadcast]
+
+The tightest integration is the model hook sugar: a model lifecycle hook can broadcast straight to a channel:
+
+```ts title="model-events-to-broadcast.ts"
+Post.onCreated(() => broadcast('posts'))
+```
+
+This is the pattern for "a record changed, refresh the list": the create happens, the hook fires, and every subscribed client is notified. It composes with the other lifecycle hooks and keeps broadcasting declarative rather than scattered across controllers. Handlers can pass additional context:
+
+```ts title="model-events-to-broadcast-2.ts"
+Post.onUpdated(async (post) => broadcast('posts', { id: post.id, status: post.status }))
+```
+
+## Transactional Outbox (v1.x) [#transactional-outbox-v1x]
+
+Events emitted inside a database transaction are stored and delivered only after the transaction commits — an emit that rolls back never fires:
+
+```ts title="transactional-outbox-v1.ts"
+await db.transaction(async (tx) => {
+  const message = await Message.create({ roomId, body })
+
+  await MessagePosted.emit({ roomId, messageId: message.id })
+})
+```
+
+This outbox behavior closes the hardest race in event-driven code: the gap between "the row is in the database" and "the event was delivered". A committed event is never lost; a rolled-back emit is never delivered. The same mechanism holds jobs dispatched inside a transaction, so enqueueing and emitting stay consistent with your commit boundaries.
+
+## Wildcards (v1.x) [#wildcards-v1x]
+
+Event subscriptions support wildcard matching, letting a single handler observe an entire event family:
+
+```ts title="wildcards-v1.ts"
+import { events } from '@kwiva/events'
+
+events.on('user.*', async (event) => {
+  logger.info({ event: event.name }, 'user lifecycle event')
+})
+```
+
+A handler subscribed to a prefix receives every event whose name begins with it. Wildcards are part of the events fast-follow and are enabled as the event system matures.
+
+## Events, Jobs, and Reliability [#events-jobs-and-reliability]
+
+Queued listeners and jobs share the same transport. If background work is really a reaction — "when a user signs up, send a welcome" — an event listener is the correct shape, because the coupling lives in the event rather than in the caller. The framework's reliability guarantees carry over: at-least-once delivery, retries with backoff, and dead-letter handling are properties of the queue the listener runs on, not something each listener reimplements. See [Jobs](/docs/background-work/jobs) and [Queues & Workers](/docs/background-work/queues).
+
+## Deciding Between Listeners and Broadcasts [#deciding-between-listeners-and-broadcasts]
+
+| Concern                  | Use                                  | Why                                           |
+| ------------------------ | ------------------------------------ | --------------------------------------------- |
+| Something must react     | Listener                             | Sync work or queued work, typed and validated |
+| Something must be pushed | Broadcast                            | Connected clients learn instantly             |
+| Both                     | Event with `broadcast` plus listener | One definition, one emit                      |
+| A record changed         | Model hook to broadcast              | Lifecycle baked into the model                |
+
+The same event can do both: persist a record, broadcast the change to the channel, and queue a webhook listener — one emit, three effects, all derived from one definition. The production shape of that is documented end to end in [Realtime](/docs/realtime).
+
+## What's Next [#whats-next]
+
+* [Channels](/docs/realtime/channels) — the broadcast destinations events target
+* [Client-Side Realtime](/docs/realtime/client-usage) — receive broadcasts with `useChannel`
+* [Jobs](/docs/background-work/jobs) — queued listeners and background handling
+* [Queues](/docs/background-work/queues) — how queued listeners are executed
+* [Models](/docs/data/models) — model hooks that drive broadcasts

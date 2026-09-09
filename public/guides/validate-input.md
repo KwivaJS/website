@@ -1,0 +1,100 @@
+# How do I validate input? (/guides/validate-input)
+
+
+
+This guide shows the two layers of validation in Kwiva: field-level rules derived from the model DSL, and route-level schemas declared on controller handlers. Both use the Standard Schema interface.
+
+## Prerequisites [#prerequisites]
+
+* A model defined with `defineModel` (see [create a model](/guides/create-model))
+* A controller using `defineController`
+* The `@kwiva/http` package installed
+
+## Validate at the field level [#validate-at-the-field-level]
+
+Attach validation directly to fields with the `.validation()` modifier. These rules drive generated API routes, `Post.create`, and `post.update`:
+
+```ts title="src/app/models/posts.ts"
+// src/app/models/posts.ts
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().validation((s) => s.min(1).max(200)),
+  body: f.text().validation((s) => s.min(10)),
+  email: f.string().validation((s) => s.email()),
+  age: f.integer().validation((n) => n.min(0).max(150)),
+  status: f.enum('draft', 'published', 'archived').validation((s) => s.enum(['draft', 'published', 'archived'])),
+}), {})
+```
+
+The `.validation()` modifier accepts a function that receives a schema builder and returns a validation rule.
+
+## Validate the request body [#validate-the-request-body]
+
+For route-specific shapes that go beyond the model, declare a Standard Schema on the handler. The schema is validated before the handler runs:
+
+```ts title="validate-the-request-body.ts"
+import { defineController } from '@kwiva/http'
+
+export default defineController('posts', (c) => ({
+  create: c.post('/', async ({ body }) => {
+    return Post.create(body)
+  }, {
+    body: v.object({ title: v.string().min(1), body: v.optional(v.string()) }),
+    permission: 'posts.create',
+  }),
+}))
+```
+
+## Validate query and params [#validate-query-and-params]
+
+The same option object accepts `query`, `params`, `headers`, and `cookies` schemas:
+
+```ts title="validate-query-and-params.ts"
+c.post('/:id', async ({ body }) => {
+  return Post.update(body)
+}, {
+  body: v.object({ title: v.string().min(1) }),
+  query: v.object({ draft: v.optional(v.string()) }),
+  params: v.object({ id: v.string().uuid() }),
+})
+```
+
+Generated list routes also validate query parameters against the model — `where`, `orderBy`, and pagination shapes are schema-checked automatically.
+
+## Validation error responses [#validation-error-responses]
+
+When a schema fails, Kwiva returns HTTP 422 with the `VALIDATION` code and field-mapped issues:
+
+```json title="validation-error-responses.json"
+{
+  "code": "VALIDATION",
+  "issues": [{ "path": "title", "message": "Invalid value" }]
+}
+```
+
+## Verify it works [#verify-it-works]
+
+Send an invalid payload to the route, then a valid one:
+
+```bash title="terminal"
+curl -X POST http://localhost:3000/posts \
+  -H "Content-Type: application/json" \
+  -d '{"body": "too short"}'
+```
+
+This returns 422 with the `VALIDATION` code. A payload matching the schema passes through to the handler:
+
+```bash title="terminal"
+curl -X POST http://localhost:3000/posts \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Hello World", "body": "A sufficiently long body"}'
+```
+
+## Related Documentation [#related-documentation]
+
+* [Validation](/docs/data/validation) — Field-level validation and Standard Schema
+* [Validation](/docs/http/validation) — Per-route body, query, and params schemas
+* [Fields & DSL](/docs/data/fields) — The `.validation()` modifier
+* [Error Handling](/docs/core-concepts/error-handling) — The error taxonomy and response shapes

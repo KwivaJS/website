@@ -1,0 +1,194 @@
+# Request Lifecycle (/docs/advanced/request-lifecycle)
+
+
+
+Every request a Kwiva application serves travels the same ordered pipeline. Middleware, guards, and handlers all depend on this contract, so the sequence is worth knowing precisely before attaching anything to it. This page walks all fourteen steps, then the hooks, scoping, context assembly, handler branches, error path, and the tracing waterfall that makes it observable.
+
+## The Pipeline, Step by Step [#the-pipeline-step-by-step]
+
+```plaintext title="the-pipeline-step-by-step.txt"
+  1. client request
+  2. preset adapter                     → Web Request normalization
+  3. pipeline entry
+       request ID assigned              (x-request-id: set or forwarded)
+       server span begins               (http method, route)
+       onRequest middleware             (security headers, rate limit, CORS)
+  4. route manifest match               (generated model routes, controllers, server routes)
+  5. route rules apply                  (cache hit → serve + bypass pipeline)
+  6. context assembly
+       parse query / parse body         (json, form, multipart)
+       cookies decode, session load     (session store)
+       tenant resolution                (domain/path/header → ctx.tenant)
+       state / decorate / resolve       (typed app context)
+  7. onTransform                        → mutate parsed values
+  8. validation                         → body/query/params/headers/cookies
+  9. onBeforeHandle                     → guards: requireAuth, policy check
+ 10. handler
+       ├─ API route   → controller action (service → model query → response)
+       └─ page route  → SSR render (beforeLoad → loaders → stream)
+ 11. onAfterHandle                      → response shaping, cache tags
+ 12. error path (any throw)             → taxonomy mapping → error response or error page
+ 13. onResponse                         → final headers, span close, metrics
+ 14. engine writes response             → preset adapter
+```
+
+Steps 3 through 13 run inside `@kwiva/http`; steps 2 and 14 happen at the adapter boundary that normalizes the incoming request and writes the final response. Whatever runtime you deploy on — the local dev server, a Node or Bun host, an edge worker — the normalization contract is identical: a Web `Request` in, a Web `Response` out.
+
+Every numbered step is a trace span, so the waterfall carries one line per stage and a missed budget points at its stage.
+
+## The Lifecycle Hooks [#the-lifecycle-hooks]
+
+The ordered hook surface is `onRequest → onParse → onTransform → onBeforeHandle → onAfterHandle → onResponse → onError → onStop`. Each hook is a place you can attach behavior — middleware, guards, or custom processing:
+
+| Hook             | When it runs                                | What to do there                                                                                 |
+| ---------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `onRequest`      | Pipeline entry, before routing is finalized | Security headers, rate limiting, CORS, request ID, early rejects                                 |
+| `onParse`        | Context assembly, body and query parsing    | Customize or redirect parsing of json, form, and multipart bodies                                |
+| `onTransform`    | After parse, before validation              | Mutate or normalize parsed values before schemas run                                             |
+| `onBeforeHandle` | After validation                            | Guards: `requireAuth`, policy checks, tenant derivation, any check that needs the validated body |
+| `onAfterHandle`  | After the handler returns                   | Response shaping, cache tags, custom headers                                                     |
+| `onResponse`     | Just before the response is written         | Final headers, span and metric bookkeeping                                                       |
+| `onError`        | Any throw in the pipeline                   | Error taxonomy mapping, error pages, structured logging                                          |
+| `onStop`         | Server shutdown                             | Cleanup and post-response bookkeeping                                                            |
+
+The first six hooks run in order for every request. `onError` runs only when a stage throws or returns an error. `onStop` fires when the server shuts down, not per request — it is the hook that mirrors the boot sequence in reverse.
+
+## Hook Scoping: App, Controller, Route [#hook-scoping-app-controller-route]
+
+Every hook can be attached at three scopes, and the scopes compose:
+
+* **App scope** — runs for every request in the application. This is where framework middleware like request ID, tracing, cookies, session, and tenancy live.
+* **Controller scope** — runs for every route served by a controller, and is the right place for resource-wide guards or a shared input normalization step.
+* **Route scope** — runs only for one specific route.
+
+```ts title="src/app/http/controllers/posts.ts"
+// src/app/http/controllers/posts.ts
+import { defineController } from '@kwiva/http'
+
+export default defineController(
+  'posts',
+  (c) => ({
+    publish: c.post('/:id/publish', async ({ params, session }) => {
+      const post = await Post.findOrFail(params.id)
+      return post.update({ status: 'published', publishedAt: new Date() })
+    }, {
+      middleware: ['auth', 'tenant'],   // route-scoped middleware
+      permission: 'posts.publish',      // checked in onBeforeHandle
+    }),
+  }),
+  { prefix: '/posts', tags: ['posts'] },
+)
+```
+
+Ordering is strict: middleware runs in `src/config/app.ts > middleware[]` order and always before guards; a guard's `beforeHandle` runs after validation, so policy checks can read the validated body. Route and cache rules that short-circuit — like a public ISR page — do so before session load, which is how public pages skip authentication entirely.
+
+## Context Assembly [#context-assembly]
+
+By the time the handler runs, the request has already surrendered everything you need into a typed context:
+
+| Member                                | What it holds                                   |
+| ------------------------------------- | ----------------------------------------------- |
+| `ctx.body`, `ctx.params`, `ctx.query` | Validated, typed input                          |
+| `ctx.set.status`                      | Response status of the current request          |
+| `ctx.store`                           | The shared typed store                          |
+| `ctx.session`                         | The typed session from the auth layer           |
+| `ctx.can`                             | Ability checks against policies                 |
+| `ctx.file`                            | Multipart file access with size and type checks |
+| `ctx.tenant`                          | The resolved tenant for tenancy-aware requests  |
+| `ctx.waitUntil`                       | Schedule edge-safe work after the response      |
+
+Context assembly runs in a fixed order: parse query and body, decode cookies and load the session, resolve the tenant (subdomain, path, header, or fixed single-tenant strategy), then run `state`, `decorate`, and `resolve` for per-request derivation.
+
+```ts title="src/bootstrap/app.ts"
+// src/bootstrap/app.ts
+import { defineApp } from '@kwiva/core'
+
+const app = defineApp({ ... })
+
+// shared, typed state
+app.state({ locale: 'en', defaultPageSize: 20 })
+
+// decorate adds values to the context once
+app.decorate('slugs', () => slugs)
+
+// resolve derives a value per request — available to guards and handlers
+app.resolve('sessionUser', async (ctx) => {
+  return ctx.session?.user ?? null
+})
+```
+
+Because resolution happens per request, derived values respect tenancy and session state instead of leaking across requests. Assembly happens once, in step 6, so every later stage reads the same assembled result.
+
+## The Handler Branch [#the-handler-branch]
+
+The handler is one of two shapes depending on what the route matched:
+
+* An **API route** dispatches to a controller action — validation has already passed — which calls services and model queries and returns a response object.
+* A **page route** renders through SSR: `beforeLoad` guards, parallel loaders, then a streamed React tree.
+
+On page routes, loaders may defer data so the shell streams while slower queries finish in the background.
+
+### The model and RPC view of the same branch [#the-model-and-rpc-view-of-the-same-branch]
+
+A typed RPC request from the client resolves to an API route and crosses the pipeline exactly like any other request:
+
+```plaintext title="the-model-and-rpc-view-of-the-same-branch.txt"
+client.posts.get(id)
+  → POST /api/posts/:id            (typed client → route)
+  → route manifest match           (step 4)
+  → context assembly + validation  (steps 6–8)
+  → controller action onBeforeHandle → permission check (step 9)
+  → Post.findOrFail(params.id)     (handler → model query, step 10)
+  → JSON response                  (steps 13–14)
+```
+
+Because the client call, the route, and the model query all derive from the same IR, the RPC call is no separate protocol — it is the same pipeline, typed end to end.
+
+## The Error Path [#the-error-path]
+
+Any throw anywhere in the pipeline enters the error path. Errors are mapped to the framework's 8-code taxonomy and returned either as typed error responses for API calls or as error pages for page routes. This mapping is the only code that is allowed to run after `onResponse` — it records failure attributes on the already-open span and then closes the request. `onError` is where you add custom logging or error shaping before the mapped response goes out.
+
+Anything you attach to `onError` must tolerate a partially streamed SSR response and must never throw itself — an error in the error path would otherwise be unrecoverable.
+
+## Correlating with Distributed Tracing [#correlating-with-distributed-tracing]
+
+Every stage above is a span in the distributed trace tree, so a single request produces a readable waterfall:
+
+```plaintext title="correlating-with-distributed-tracing.txt"
+http GET /api/posts (server)
+ ├─ middleware.request-id
+ ├─ middleware.session
+ ├─ middleware.tenant
+ ├─ validation (route schema)
+ ├─ controller posts.list
+ │   └─ model posts.query (sql + params normalized)
+ ├─ cache.get posts:...
+ └─ http.response (status, size)
+```
+
+The request ID flows out in the `x-request-id` header and is stamped onto every log line in scope, alongside the trace and span IDs. In development, `kwiva dev` shows the span waterfall and cache decisions in its overlay, and `server-timing` headers expose stage timing to the browser.
+
+The timing budget shows why the stages matter — these are p50 targets on the example application:
+
+| Stage                         | Budget                         |
+| ----------------------------- | ------------------------------ |
+| Adapter to pipeline entry     | Under 1 ms                     |
+| Session and tenant resolution | Under 2 ms on a store hit      |
+| Validation                    | Under 0.5 ms (compiled schema) |
+| Handler (model list, 20 rows) | Under 5 ms                     |
+| Full API round-trip (local)   | Under 15 ms                    |
+| SSR shell (stream start)      | Under 50 ms                    |
+
+Each budget is a span by the same name, so a handler drifting from "under 5 ms" to "under 30 ms" shows in the trace before it reaches users.
+
+## Background Work After the Response [#background-work-after-the-response]
+
+Events and queue dispatches happen inside handlers transaction-aware and acknowledge in-band. Use `ctx.waitUntil(promise)` for cleanup, metrics flushing, and best-effort work that must outlive the response but stay bounded and edge-safe. Durable, retried work belongs in the queue layer — see [Background Work](/docs/background-work) — not in post-response promises.
+
+## What's Next [#whats-next]
+
+* [Middleware](/docs/http/middleware) — Where middleware attaches in the pipeline
+* [Guards](/docs/http/guards) — The `onBeforeHandle` checkpoints and `requireAuth`
+* [Context](/docs/core-concepts/context) — The typed context, state, decorators, and resolution
+* [Tracing](/docs/observability/tracing) — The span tree that descends from every stage
+* [HTTP Lifecycle](/docs/http/lifecycle) — The same sequence summarized for controller authors

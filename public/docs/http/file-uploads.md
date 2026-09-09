@@ -1,0 +1,147 @@
+# File Uploads (/docs/http/file-uploads)
+
+
+
+File uploads are a first-class part of the HTTP layer. A route with a multipart body receives a typed `file` accessor on its context. The pipeline parses the multipart stream, validates size and type before anything reaches your handler, and hands you the parsed file alongside a validated storage reference — never a raw filesystem handle.
+
+Uploads participate in the normal lifecycle, which is the source of their safety. Session and tenant resolution run before the file is read, constraints are enforced during parsing, and every rejected upload is tied to the request's ID for correlation.
+
+## Reading a File [#reading-a-file]
+
+Inside a handler, `file` is a function you call to resolve the uploaded file:
+
+```ts title="reading-a-file.ts"
+c.post('/avatar', async ({ file, session }) => {
+  const { filename, bytes, type } = await file()
+
+  return storage.put(`avatars/${session.user.id}`, bytes, {
+    contentType: type,
+  })
+}, {
+  file: { maxSize: '2mb', types: ['image/*'] },
+})
+```
+
+The route option `file` declares the constraints. `maxSize` caps the byte count; `types` restricts acceptable content types, supporting wildcards such as `image/*`. A file that violates either constraint fails validation before the handler runs and returns a `VALIDATION` error with a field-mapped issue.
+
+## Multipart Handling [#multipart-handling]
+
+Multipart bodies are parsed by the pipeline during the `onParse` stage, alongside JSON and form bodies. The parsed file exposes `filename`, `bytes`, and `type`, inferred from the stream. Routes that declare a `file` schema reject non-multipart requests that do not match the declaration.
+
+The same stage produces ordinary form fields, so a route can receive structured fields and an upload together and read both from the parsed context.
+
+## Size and Type Validation [#size-and-type-validation]
+
+| Option     | Effect                                                 |
+| ---------- | ------------------------------------------------------ |
+| `maxSize`  | Reject files larger than the limit, for example `2mb`  |
+| `types`    | Allow only listed content types, for example `image/*` |
+| `filename` | Validate the submitted file name when declared         |
+
+Constraints are checked during parsing against the actual stream, so oversized uploads fail fast rather than buffering into memory first. A `maxSize` violation aborts the parse — the handler never sees a truncated body and no partial file is ever written. See [Validation](/docs/http/validation) for how the `file` option sits inside the route's schema object.
+
+> \[!WARNING]
+> Client-side size checks are cosmetic. The route's `maxSize` and `types` constraints are the enforcement boundary — they run against the actual stream on the server, so a crafted request cannot bypass them.
+
+## Storage Integration [#storage-integration]
+
+Uploaded files persist through the storage API, not the filesystem or a raw stream:
+
+```ts title="storage-integration.ts"
+return storage.put(`avatars/${session.user.id}`, bytes, {
+  contentType: type,
+})
+
+const url = await storage.url(`avatars/${session.user.id}`)
+const signed = await storage.signedUrl(`avatars/${session.user.id}`, { expiresIn: 60 * 30 })
+```
+
+The storage API covers `put`, `get`, `url`, `delete`, and `signedUrl`, with a disk driver configured in `src/config/storage.ts` plus remote backends. The rule is explicit: files are written through the storage API so that disks, permissions, and signed URLs stay consistent across environments. See [Data: file storage](/docs/data/storage).
+
+## Streaming to Storage [#streaming-to-storage]
+
+The validated file is streamed through the storage driver rather than handed to application code as a handle. Large payloads are parsed incrementally, and the storage layer owns persistence semantics — buffering, backends, and error handling all live behind the storage API. Handlers never open file descriptors or write to paths themselves.
+
+Because parsing is incremental, a large upload does not exhaust memory before it is validated; the stream is read, checked, and written as it arrives.
+
+## Restricting Uploads [#restricting-uploads]
+
+Not every route should accept files. Only routes that declare a `file` schema accept multipart bodies; all other routes reject multipart input as a malformed request. Declaring `file` is the explicit opt-in:
+
+```ts title="restricting-uploads.ts"
+c.post('/documents', async ({ file }) => {
+  const { filename, bytes, type } = await file()
+  return storage.put(`documents/${crypto.randomUUID()}-${filename}`, bytes, {
+    contentType: type,
+  })
+}, {
+  file: { maxSize: '10mb', types: ['application/pdf'] },
+})
+```
+
+This server-side enforcement means an undeclared `multipart/form-data` body is rejected before any parsing work happens. If a route does not opt in, multipart never reaches a handler.
+
+## Uploads Where They Meet Validation [#uploads-where-they-meet-validation]
+
+The `file` option is part of the route's schema object, so upload constraints are validated in the same stage and by the same runtime as body, query, and params schemas. A file that exceeds `maxSize` or falls outside `types` produces a `VALIDATION` error with a field-mapped issue, identical in shape to any other validation failure. The client sees the same discriminated union it sees for a bad body:
+
+```ts title="uploads-where-they-meet-validation.ts"
+const res = await client.posts.create({ ... })
+
+if (res.error?.code === 'VALIDATION') {
+  // res.error.issues[0].path points at the rejected file field
+}
+```
+
+Because constraints are checked during the parse stage, oversized or wrong-type uploads fail before the handler — no wasted storage writes, no partial files.
+
+## Private Files and Signed URLs [#private-files-and-signed-urls]
+
+Not every upload is meant to be public. For private content, store the file and hand back a signed URL that expires:
+
+```ts title="private-files-and-signed-urls.ts"
+c.post('/documents/:id/attach', async ({ file, params }) => {
+  const { filename, bytes, type } = await file()
+  const path = `documents/${params.id}/${filename}`
+
+  await storage.put(path, bytes, { contentType: type })
+  return storage.signedUrl(path, { expiresIn: 60 * 30 })
+})
+```
+
+`signedUrl` issues a time-limited reference, so download access can be granted per request without making the file public. Public files — avatars, assets — can serve through the public disk configured for uploads. Storage disks, drivers, and serving are configured in `src/config/storage.ts`; see [Data: file storage](/docs/data/storage).
+
+## Uploads Alongside Other Fields [#uploads-alongside-other-fields]
+
+A multipart route can carry structured fields together with the file. The parse stage resolves both, so a handler receives the file accessor and ordinary `body` fields from the same request:
+
+```ts title="uploads-alongside-other-fields.ts"
+c.post('/reports/import', async ({ file, body }) => {
+  const { bytes, type } = await file()
+  return storage.put(`reports/${body.kind}/${crypto.randomUUID()}`, bytes, {
+    contentType: type,
+  })
+}, {
+  body: { kind: 'sales|inventory' },
+  file: { maxSize: '25mb', types: ['text/csv', 'application/json'] },
+})
+```
+
+The `body` schema and the `file` constraints validate together in the same stage, so a bad field and an oversized file surface in the same `issues` list.
+
+## Serving Uploaded Content [#serving-uploaded-content]
+
+Files stored through the storage API are served through the same API: a public disk returns direct URLs, and a private disk returns signed URLs. The rule that applies at write time — never raw filesystem paths in handlers — applies at read time too: `storage.get` or `storage.url` is how application code reaches a file. See [Data: file storage](/docs/data/storage).
+
+## Uploads in the Pipeline [#uploads-in-the-pipeline]
+
+Uploads participate in the same lifecycle as any other route. The body is parsed in the `onParse` stage, `file` constraints run with validation, and any controller middleware — session, tenant, rate limiting — applies before the handler reads the file. The request ID assigned at pipeline entry is attached to upload failures, so a rejected upload is fully correlatable in logs. See [Request Lifecycle](/docs/http/lifecycle).
+
+A practical consequence: a controller that mounts guard middleware receives the session on `ctx.session` before `file()` is ever called, so you can authorize the upload with the authenticated user's identity before persisting a byte.
+
+## What's Next [#whats-next]
+
+1. [Data: file storage](/docs/data/storage) — storage drivers, URLs, and signed URLs
+2. [Controllers](/docs/http/controllers) — declaring routes and route options
+3. [Validation](/docs/http/validation) — how `file` constraints fit the validation stage
+4. [Security: input validation](/docs/security/input-validation) — upload constraints as a security boundary

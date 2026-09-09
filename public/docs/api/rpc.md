@@ -1,0 +1,149 @@
+# Typed RPC (/docs/api/rpc)
+
+
+
+Kwiva's typed RPC client exposes the entire API as type-checked method calls. `client.posts.get(id)` knows the exact argument and response types of `GET /api/posts/:id`, because those types come from the controller and model definitions — not from a separately maintained SDK.
+
+Calling the API is indistinguishable from calling code. Args are validated against schemas at compile time, results arrive typed, and errors are discriminated. If the route is wrong, the call does not compile.
+
+## Zero Codegen, One Type Universe [#zero-codegen-one-type-universe]
+
+The client infers everything at the type level. The framework derives ambient types from your definitions into `src/.kwiva/types`, and `createClient()` picks them up. No code generation step runs, nothing is committed to the repo, and there is nothing to regenerate when the API changes.
+
+```plaintext title="zero-codegen-one-type-universe.txt"
+defineModel ──► defineController ──► route manifest ──► @kwiva/client types
+```
+
+### The contract in the editor [#the-contract-in-the-editor]
+
+Because the contract lives at the type level, the editor knows the full surface of your API the moment `createClient()` runs. Valid methods and their arguments are surfaced as you type, and a misspelled field is a compile error rather than a runtime surprise. This is the same guarantee the rest of the framework relies on: types flow from definition to call site with no intermediate artifact to keep fresh.
+
+## Reading [#reading]
+
+```ts title="reading.ts"
+import { createClient } from '@kwiva/client'
+
+export const client = createClient()
+
+const { data } = await client.posts.list({ page: 2 })              // GET /api/posts
+const post = await client.posts.get('pst_123')                     // GET /api/posts/pst_123
+const users = await client.users.list({ where: { role: 'admin' }, page: 1 })
+```
+
+`where`, `page`, `limit`, and friends are validated against the model — typo a field name and the call fails to compile.
+
+## Mutating [#mutating]
+
+```ts title="mutating.ts"
+const created = await client.posts.create({ title: 'Hello' })       // POST /api/posts
+const updated = await client.posts.update(id, { title: 'New title' }) // PATCH /api/posts/:id
+await client.posts.remove(id)                                       // DELETE /api/posts/:id
+```
+
+Write operations mirror the REST contract: `create` sends a validated body, `update` patches, `remove` deletes. Each method name maps one-to-one to the generated route it calls.
+
+## Custom Actions [#custom-actions]
+
+Controller actions appear on the same client object as first-class methods:
+
+```ts title="custom-actions.ts"
+await client.posts.publish('pst_123')     // POST /api/posts/pst_123/publish
+```
+
+Controller-managed resources mount under their prefix:
+
+```ts title="custom-actions-2.ts"
+const report = await client.reports.get('prj_9')
+```
+
+A custom action's option schema becomes the method's argument types, so an optional `body` becomes an optional argument and a required `permission` is enforced server-side while the call remains fully typed client-side.
+
+## Typed Errors [#typed-errors]
+
+Errors are discriminated on the result object — the client returns a union you can branch on without string matching. On success, `res.data` holds the fully typed payload of that route, so reads need no narrowing; on failure, `res.error` describes the problem with a typed `code` and `message`:
+
+```ts title="typed-errors.ts"
+const res = await client.posts.get(id)
+
+if (res.error) {
+  switch (res.error.code) {
+    case 'NOT_FOUND':
+      // handle the missing resource
+      break
+    case 'FORBIDDEN':
+      // handle policy denial
+      break
+  }
+}
+```
+
+`res.error` carries `code` and `message`, plus optional `issues` for validation failures. See [API Errors](/docs/api/errors) for the taxonomy behind the union.
+
+## Subscriptions [#subscriptions]
+
+Realtime endpoints stream through the same client:
+
+```ts title="subscriptions.ts"
+const stream = await client.chat.stream('general')
+```
+
+Channel subscriptions establish over WebSocket with an automatic SSE fallback when a WebSocket connection is unavailable. See [Realtime](/docs/realtime) for channels and client hooks.
+
+## SSR-Safe by Design [#ssr-safe-by-design]
+
+The same client instance works on the server and in the browser:
+
+* **Server** — calls execute in-process with no network round-trip.
+* **Browser** — calls become fetch requests authenticated by session cookies automatically.
+* **Deduplication** — identical calls during a render are coalesced.
+* **Hydration** — results deduped on the server dehydrate into data hooks on the client.
+
+The client targets the API prefix and version from configuration, so versioned routes such as `/api/v1/posts` are reached without hard-coded paths in application code. Loaders and data hooks reuse the same typed surface, so a single type universe runs from model through page render. See [Client SDK](/docs/api/client) for setup and usage.
+
+> \[!NOTE]
+> The server-side client path is the same code path as the browser — no separate server client, no serialization boundary. In-process calls hit the same handlers, validation, and policies as network calls, which is what makes integration tests and `createTestClient` faithful.
+
+## The Result Object [#the-result-object]
+
+Every call resolves to a result object, never a bare value:
+
+* `res.ok` — true on success; `res.data` holds the typed payload
+* `res.error` — the discriminated error with `code`, `message`, and optional `issues`
+
+Because the shape is uniform, an error path is always visible at the call site and never smuggled through a null. See [API Errors](/docs/api/errors).
+
+## In-Process Parity [#in-process-parity]
+
+On the server, a call hits the same controllers, validation, policies, and handlers as a browser call — there is no stub and no mock. That parity is what makes `createTestClient` faithful and what makes server-rendered loaders trustworthy. See [Client SDK](/docs/api/client).
+
+## Streaming and Large Results [#streaming-and-large-results]
+
+Streaming routes pass through the client unchanged, so an NDJSON export and an event stream work in-process and over the network. For large collections the ordinary list contract paginates, and the RPC client types `page`, `limit`, and `where` arguments to match. See [Streaming & SSE](/docs/http/streaming).
+
+## The Client Typed From the Manifest [#the-client-typed-from-the-manifest]
+
+The ambient types in `src/.kwiva/types` are the boundary: `createClient()` reads them and exposes the typed surface. Because these types derive from the same route manifest that feeds OpenAPI and MCP, a method, a spec path, and an agent tool can never disagree about the shape of a route. See [OpenAPI](/docs/api/openapi).
+
+## Failed Compilation Is the SDK [#failed-compilation-is-the-sdk]
+
+When the server changes, the client's type errors are the changelog: every call site that no longer compiles is a call site that must change. Renaming an action, adding a required field, or removing a route all surface at compile time rather than at runtime.
+
+## Arguments Are Schema-Shaped [#arguments-are-schema-shaped]
+
+Route options define the argument shape per action — params, body, and permissions — and the client's method signatures mirror them. If an action declares `body: { title, publishedAt }` and `permission: 'posts.publish'`, the client method requires exactly those fields at compile time and the result type reflects the route's success and error codes. Skipping a required input or handling an impossible code both fail type-checking. See [Generated Endpoints](/docs/api/generated-endpoints).
+
+## Why Not Plain Functions [#why-not-plain-functions]
+
+Plain function calls give you exceptions, not results; the RPC surface deliberately returns results so error handling is explicit at every call site. The result union also carries the route's documented codes, so a caller branches per code rather than catch-all. This matches the framework's contract that every resolution has an explicit shape. See [API Errors](/docs/api/errors).
+
+## RPC Over WebSockets [#rpc-over-websockets]
+
+Controllers can expose RPC-style actions over a socket channel with the same typed results crossing the socket. The server validates the invocation the same way it validates an HTTP call, and the client's typed send mirrors the method surface. See [Realtime: channels](/docs/realtime/channels).
+
+## What's Next [#whats-next]
+
+* [Client SDK](/docs/api/client) — `createClient`, SSR behavior, and testing
+* [Generated Endpoints](/docs/api/generated-endpoints) — the routes behind these calls
+* [Data Hooks](/docs/frontend/data-hooks) — `useResource`, `useList`, `useMutation`
+* [RPC Client in the Frontend](/docs/frontend/rpc-client) — client patterns on the page
+* [API Errors](/docs/api/errors) — the typed error contract

@@ -1,0 +1,212 @@
+# Your First Model (/docs/getting-started/first-model)
+
+
+
+A model in Kwiva is more than a database schema. It is the **single source of truth** for your data: from one `defineModel` definition the framework derives the database schema, migrations, seeders, a typed REST API, the typed RPC client, Kwiva Studio screens, an OpenAPI spec, and optionally MCP tools. There is no drift between your types, your API, and your database — they are all opinions of the same definition.
+
+## Create the Model [#create-the-model]
+
+<Steps>
+  <Step>
+    ### Write the model file [#write-the-model-file]
+
+    Models live one per file in `src/app/models/`. Create a new file there:
+
+    ```ts title="src/app/models/posts.ts"
+    // src/app/models/posts.ts
+    import { defineModel } from '@kwiva/data'
+
+    export default defineModel('posts', (f) => ({
+      id: f.id(),
+      title: f.string().validation((s) => s.min(1).max(200)),
+      body: f.text().optional(),
+      status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
+      publishedAt: f.timestamp().optional(),
+      authorId: f.uuid().indexed(),
+      author: f.belongsTo(() => User),
+      comments: f.hasMany(() => Comment),
+    }), {
+      timestamps: true,
+      permission: 'posts',
+    })
+    ```
+  </Step>
+
+  <Step>
+    ### Or use the generator [#or-use-the-generator]
+
+    The generator creates the model file plus a migration and factory stub:
+
+    ```bash title="terminal"
+    kwiva make:model post
+    ```
+  </Step>
+</Steps>
+
+### The Factory Signature [#the-factory-signature]
+
+```ts title="the-factory-signature.ts"
+defineModel(name, fields, options?)
+```
+
+* `name` — the table/resource name, lowercase plural (`'users'`, `'posts'`)
+* `fields` — a `(f) => ({ ... })` field factory describing columns and relations
+* `options` — model-level behavior: timestamps, permissions, tenancy, audit, and more
+
+## What This Generates [#what-this-generates]
+
+Register the model (no registration needed — it's discovered from `src/app/models/`), then run the migration:
+
+```bash title="terminal"
+kwiva db:migrate
+```
+
+From the single definition, Kwiva derives:
+
+| Artifact         | Location / surface                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| Database schema  | Managed by the framework's data engine                                                                     |
+| Migrations       | `src/database/migrations/` — generated, editable SQL-step files                                            |
+| REST API routes  | `GET /api/posts`, `GET /api/posts/:id`, `POST /api/posts`, `PATCH /api/posts/:id`, `DELETE /api/posts/:id` |
+| Typed RPC client | `client.posts.list()`, `client.posts.get(id)`, and friends                                                 |
+| Studio screens   | Generated list/create/edit operations at `/studio`                                                         |
+| OpenAPI spec     | Schema components served at `/openapi.json`                                                                |
+| Validation       | Field-level, from the DSL                                                                                  |
+| Permissions      | From the `permission` option, enforced on every generated route                                            |
+
+The derivation pipeline is the model IR: model files are scanned into `src/.kwiva/model-ir.json`, and every derived surface — REST routes, client types, Studio, OpenAPI, MCP tools — is generated from that shared representation.
+
+## Field Types [#field-types]
+
+Kwiva provides a rich field DSL (the `f` in the field factory):
+
+| Field                   | Description                                                              |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `f.id()`                | Primary key — UUID by default, `f.id('autoincrement')` for integers      |
+| `f.uuid()`              | UUID identifier column                                                   |
+| `f.ulid()`              | ULID column                                                              |
+| `f.string()`            | Short text (VARCHAR)                                                     |
+| `f.text()`              | Long text (TEXT)                                                         |
+| `f.integer()`           | Integer                                                                  |
+| `f.float()`             | Floating point                                                           |
+| `f.boolean()`           | Boolean                                                                  |
+| `f.timestamp()`         | Date and time                                                            |
+| `f.date()`              | Date only                                                                |
+| `f.json<Type>()`        | JSON column with a typed shape, e.g. `f.json<{ readingTime: number }>()` |
+| `f.enum('a', 'b', ...)` | Enumeration with fixed values                                            |
+
+## Field Modifiers [#field-modifiers]
+
+Chain modifiers after the type to express constraints and behavior:
+
+```ts title="field-modifiers.ts"
+f.string()
+  .optional()             // nullable
+  .default('draft')       // default value
+  .unique()               // unique constraint
+  .indexed()              // database index
+  .validation((s) => s.min(1).max(200))  // field-level validation
+```
+
+Multi-field constraints live in the model options — composite uniques and composite indexes:
+
+```ts title="field-modifiers-2.ts"
+}, {
+  uniques: [['authorId', 'title']],
+  indexes: [{ columns: ['status', 'publishedAt'] }],
+})
+```
+
+## Relations [#relations]
+
+Relations use lazy references (`() => Model`) so models never create circular imports:
+
+| Relation      | Definition                                  | Load                                          |
+| ------------- | ------------------------------------------- | --------------------------------------------- |
+| belongsTo     | `f.belongsTo(() => User)`                   | `.with('author')`                             |
+| hasMany       | `f.hasMany(() => Comment)`                  | `.with('comments')`, `.withCount('comments')` |
+| hasOne        | `f.hasOne(() => CoverImage)`                | `.with('coverImage')`                         |
+| belongsToMany | `f.belongsToMany(() => Tag, () => PostTag)` | `.with('tags')`                               |
+
+Eager loads nest: `.with('comments.author')`.
+
+## Options [#options]
+
+| Option                    | Description                                                                 |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `timestamps: true`        | Adds `createdAt` and `updatedAt` columns                                    |
+| `softDelete: true`        | Adds `deletedAt`; queries filter deleted rows, `restore()` brings them back |
+| `audit: true`             | Adds `createdBy` and `updatedBy` recorded from the session                  |
+| `tenantField: 'tenantId'` | Auto-scopes every query to the resolved tenant                              |
+| `permission: 'posts'`     | Gates all generated routes and Studio screens by this policy namespace      |
+| `uniques`                 | Composite unique constraints                                                |
+| `indexes`                 | Composite indexes                                                           |
+| `hooks`                   | `onCreating`, `onDeleting`, and friends — lifecycle logic on the model      |
+
+## Querying a Model [#querying-a-model]
+
+Each model exposes a typed query API, with find, create, update, delete, transactions, and raw escapes:
+
+```ts title="querying-a-model.ts"
+import { Post, User, db } from '@kwiva/data'
+
+// query builder — typed, paginated
+const posts = await Post.query()
+  .where('status', 'published')
+  .where('views', '>', 100)
+  .orderBy({ createdAt: 'desc' })
+  .with('author', 'comments')
+  .page(1, 20)              // { data, total, page, lastPage }
+
+// find
+const post = await Post.findOrFail(id)   // throws → 404 mapping
+const draft = await Post.first({ where: { status: 'draft' } })
+
+// write
+const created = await Post.create({ title: 'Hello', authorId })
+await post.update({ status: 'published' })
+await post.delete()                       // soft when enabled
+await Post.restore(id)
+
+// transactions (nested → savepoints)
+await db.transaction(async (tx) => {
+  const user = await User.create({ email }, { tx })
+  await Post.create({ title, authorId: user.id }, { tx })
+})
+```
+
+## Migrations, Seeders, and Factories [#migrations-seeders-and-factories]
+
+Models drive the database lifecycle through the CLI:
+
+```bash title="terminal"
+kwiva db:diff               # model vs DB → migration proposal
+kwiva db:migrate            # apply pending migrations
+kwiva db:rollback --steps=1 # revert
+kwiva db:seed               # run seeders
+```
+
+Seeders use model factories:
+
+```ts title="src/database/seeders/users.ts"
+// src/database/seeders/users.ts
+import { defineSeeder } from '@kwiva/data'
+
+export default defineSeeder('users', async ({ factory }) => {
+  await factory(User).count(10).create()
+  await factory(User).create({ email: 'admin@acme.dev', role: 'admin' })
+})
+```
+
+## Validation [#validation]
+
+Field-level `validation()` uses Standard Schema with Valibot as the default implementation (switchable in `src/config/app.ts`). Generated routes validate the request body *and* the query — filter shapes like `where` and `orderBy` are schema-checked against the model, so a client can't slip malformed queries past the API.
+
+## What to Read Next [#what-to-read-next]
+
+* [Models](/docs/data/models) — the complete model reference
+* [Fields & DSL](/docs/data/fields) — every field type and modifier
+* [Relations](/docs/data/relations) — belongsTo, hasMany, hasOne, belongsToMany
+* [Queries](/docs/data/queries) — the query builder and pagination
+* [Migrations](/docs/data/migrations) — generating and applying schema changes
+* [Your First API](/docs/getting-started/first-api) — build an API around your model

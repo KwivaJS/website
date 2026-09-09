@@ -1,0 +1,144 @@
+# Loaders & Data (/docs/frontend/loaders)
+
+
+
+Loaders are the bridge between the typed client and the page. A loader is an async function declared on `definePage`; it runs before the page renders — on the server during SSR, on the client during navigation — and its return value becomes the page's typed `loaderData`. Because loaders call the typed client, the data layer, the API layer, and the page share one type universe. A loader returns plain, serializable values; everything it produces is dehydrated into the page stream and rehydrated into the client cache. See [Hydration](/docs/rendering/hydration) for the serialization contract.
+
+## The Loader Signature [#the-loader-signature]
+
+```tsx title="the-loader-signature.tsx"
+loader: async ({ params, search, client }) => ({
+  post: await client.posts.get(params.id),
+  comments: stream(client.comments.list({ postId: params.id })),
+}),
+```
+
+The context argument is fully typed per route:
+
+| Field      | Provides                                               |
+| ---------- | ------------------------------------------------------ |
+| `params`   | Dynamic segments from the route file, e.g. `params.id` |
+| `search`   | Validated search state from `validateSearch`           |
+| `client`   | The typed RPC client, resolved from route context      |
+| `session`  | The current session (null when unauthenticated)        |
+| `config`   | Typed client-side configuration                        |
+| `location` | The URL being navigated to                             |
+
+Every field is derived from the actual route file and app composition — there is nothing to import or construct. Loaders run on the server with full authority: session, tenant, and config are the same objects the HTTP handlers see. During client-side navigation the same context is resolved from the client-side provider tree, which is what keeps the two execution paths identical.
+
+## Parallel Execution [#parallel-execution]
+
+Loaders run in parallel across every matched route — a layout loader and three nested page loaders all execute concurrently, and the router waits on the complete set before committing the render. Duplicate work is deduplicated: if two matched routes depend on the same resource, it is fetched once per request.
+
+```plaintext title="parallel-execution.txt"
+request → all matched loaders resolve in parallel
+  └─ layout loader       client.workspaces.list()
+  └─ page loader         client.post.get(id)
+  └─ page sub-loader     client.comments.list(...)
+```
+
+On the server, parallel execution is in-process — the typed client resolves calls without a network hop, and deduplication happens per request before any HTTP overhead. See [RPC Client](/docs/frontend/rpc-client) for the SSR-safe call surface.
+
+## Loader Dependencies [#loader-dependencies]
+
+By default a loader participates in every navigation to its route. When the loader depends on only a slice of the search state, `loaderDeps` scopes re-execution to an actual change — pagination that does not re-run on pure query-term edits:
+
+```tsx title="loader-dependencies.tsx"
+loader: async ({ client, search: { page } }) =>
+  client.posts.list({ page }),
+
+loaderDeps: ({ search: { page } }) => ({ page }),
+```
+
+When `page` is unchanged, the loader's existing result is reused and the route renders from the cache. `loaderDeps` is a derived selector, so any slice of `search` works — split pagination from filters and each gets its own re-execution trigger.
+
+The selector is optional. When a loader depends on every part of the search state (`q`, `page`, `sort`), omit it and the loader re-runs on any search change. The rule: declare `loaderDeps` only when you want to **narrow** re-execution to a slice. See [Pages](/docs/frontend/pages) for the full option surface.
+
+## Deferred Data with stream() [#deferred-data-with-stream]
+
+A loader can block on the data the first paint needs, and stream the rest. Wrap a promise with `stream()` to defer it:
+
+```tsx title="deferred-data-with-stream.tsx"
+loader: async ({ params, client }) => ({
+  post: await client.posts.get(params.id),
+  comments: stream(client.comments.list({ postId: params.id })),
+}),
+```
+
+The blocking value (`post`) holds back the shell; the deferred value (`comments`) is awaited inside a suspense boundary on the page. The page renders the moment the post arrives (rendered and data in parallel):
+
+```tsx title="deferred-data-with-stream-2.tsx"
+component: ({ loaderData: { post, comments } }) => (
+  <article>
+    <h1>{post.title}</h1>
+    <Suspense fallback={<p>Comments…</p>}>
+      <Comments stream={comments} />
+    </Suspense>
+  </article>
+),
+```
+
+On the server, each deferred segment streams in as it resolves, so the client can render comments the instant they are ready. On the client, streamed values behave like any suspense boundary — the chunk hydrates when it arrives and the router stays put. See [Streaming SSR](/docs/rendering/streaming).
+
+### Block vs Stream [#block-vs-stream]
+
+Decide per value in the loader:
+
+* **Block** anything the page frame needs — the record an article repeats in its heading, the layout's navigation.
+* **Stream** everything below the fold or naturally asynchronous — comments, related lists, aggregated panels.
+
+If a missing value would leave the shell useless, block it. Otherwise defer it and let the user watch the page fill in.
+
+## beforeLoad Guards [#beforeload-guards]
+
+Guards run before loaders, so a thrown guard prevents every loader in the chain from executing:
+
+```tsx title="beforeload-guards.tsx"
+beforeLoad: ({ session, location }) => {
+  if (!session.user) throw redirect({ to: '/login', search: { back: location.href } })
+},
+```
+
+Use guards for auth and permission checks; use loaders strictly for data. The division keeps redirect logic out of data code and keeps loaders cheap to cache and reason about. A guard can also throw the typed `notFound()` for resource-level 404s, which lands in the nearest `notFoundComponent`. See [Pages](/docs/frontend/pages) and [Protecting Routes](/docs/auth/protecting-routes).
+
+## Typed Loader Data [#typed-loader-data]
+
+Loader return types flow into the component and into route hooks. Read them either from the component argument or imperatively:
+
+```tsx title="typed-loader-data.tsx"
+component: ({ loaderData }) => ...
+
+const loaderData = Route.useLoaderData()   // typed by the loader
+```
+
+If the loader's return shape changes, every consumer re-checks. There is no manual annotation and no duplication — the loader is the single source of truth for the route's data shape, and the hooks and the component both derive from it.
+
+## Hydration into Data Hooks [#hydration-into-data-hooks]
+
+Loader results are **dehydrated** into the page stream on the server and **rehydrated** into the data-hook cache on the client under identical keys. Client navigation afterwards reads that cache directly — the loader's data and the hooks' data are one and the same:
+
+```plaintext title="hydration-into-data-hooks.txt"
+server: loader runs → results dehydrated into the HTML stream
+client: hydrated into the data-hook cache → useResource/useList consume it without refetch
+```
+
+This is why a page that renders from a loader and then mutates via `useMutation` stays in sync: both read the same cache, and invalidation after a mutation refreshes everything that derived from the same keys. See [Data Hooks](/docs/frontend/data-hooks).
+
+## Preloading Loaders [#preloading-loaders]
+
+The same loader contract powers prefetching. A link with `preload="intent"` runs the target route's loader on hover or focus, populating the shared cache under loader-identical keys — the eventual navigate finds the data already present and renders instantly. Route preloading is programmatic via `router.preloadRoute()`. See [Navigation & Link](/docs/frontend/navigation).
+
+## Rules [#rules]
+
+* Loaders call the typed client — never raw `fetch` (enforced by the `no-raw-fetch-in-loaders` gates)
+* Loaders are pure functions of their context; keep side effects in middleware, jobs, or events
+* Defer anything not needed for the first paint so the shell never waits on it
+* Return serializable values — Dates and model rows are supported by the typed reviver; functions and runtime handles are not
+
+## What's Next [#whats-next]
+
+* [Data Hooks](/docs/frontend/data-hooks) — consuming loader data and mutating on the client
+* [Streaming SSR](/docs/rendering/streaming) — deferred data on the wire
+* [RPC Client](/docs/frontend/rpc-client) — the typed client loaders call
+* [Pages](/docs/frontend/pages) — the full `definePage` contract
+* [Nested Layouts](/docs/frontend/layouts) — layout-level loaders in the chain

@@ -1,0 +1,160 @@
+# WebSockets (/docs/http/websockets)
+
+
+
+WebSockets give you full-duplex routes inside the same typed pipeline as REST. A `c.ws` route declares open, message, and close callbacks, composes with guards and middleware like any other route, and is exposed to the client through the typed realtime layer.
+
+A WebSocket route is not a separate subsystem. It lives in a controller, contributes a manifest entry, and runs its handshake through the same pipeline as every other request — which is precisely why session and tenant state are available during authorization.
+
+## Declaring a WebSocket Route [#declaring-a-websocket-route]
+
+WebSocket endpoints are declared with `c.ws` inside a controller:
+
+```ts title="declaring-a-websocket-route.ts"
+c.ws('/feed', {
+  open: (ws) => posts.subscribe(ws),
+  message: (ws, { data }) => {
+    ws.send({ ok: true, data })
+  },
+  close: (ws) => posts.unsubscribe(ws),
+})
+```
+
+The three callbacks cover the connection lifecycle:
+
+| Callback  | Runs                       |
+| --------- | -------------------------- |
+| `open`    | After the upgrade succeeds |
+| `message` | For each inbound message   |
+| `close`   | When the connection closes |
+
+The `ws` handle exposes `send` to push messages to that client and `subscribe`/`unsubscribe` for channel wiring.
+
+## Route Integration [#route-integration]
+
+A WebSocket route is a route like any other: it lives under the controller prefix, inherits controller middleware and guards, and participates in the route manifest.
+
+```ts title="route-integration.ts"
+defineController('chat', (c) => c.guard({
+  beforeHandle: ({ session, error }) => {
+    if (!session.user) return error('UNAUTHORIZED')
+  },
+}, (g) => ({
+  stream: g.ws('/stream', {
+    open: (ws) => channels.subscribe(ws),
+    message: (ws, { data }) => channels.publish(data),
+    close: (ws) => channels.unsubscribe(ws),
+  }),
+})))
+```
+
+A mounted guard runs its checks on the connection before the upgrade completes, so unauthenticated clients are rejected at the handshake rather than when they send their first message. See [Guards](/docs/http/guards) and [Request Lifecycle](/docs/http/lifecycle).
+
+## Channels [#channels]
+
+For application messaging, the channels API is the recommended surface. Channels are named, policy-checked, and broadcast to subscribed clients:
+
+```ts title="channels.ts"
+import { channel } from '@kwiva/http'
+
+const posts = channel('posts')
+  .policy(({ session }) => session.user !== null)
+  .on('message', (msg, ws) => broadcast(msg))
+```
+
+A channel subscription is authorized by its policy — subscribing through a rejected policy is denied at the point of subscription. See [Realtime: channels](/docs/realtime/channels).
+
+### Model-driven channels [#model-driven-channels]
+
+Channels integrate with the model lifecycle: a model that broadcasts on create publishes into a named channel, and clients subscribed to that channel receive the event. See [Realtime: events](/docs/realtime/events).
+
+## Authentication on Upgrade [#authentication-on-upgrade]
+
+Authentication for WebSocket routes follows the same rules as any other route:
+
+* The session middleware resolves the session from cookies before the upgrade.
+* A mounted guard or `requireAuth` middleware rejects the connection if there is no session.
+* Channel subscriptions enforce their own policies independent of the route guard.
+
+Because the pipeline assembles the context before the upgrade, handlers and channel policies see `ctx.session` and `ctx.tenant` just as REST handlers do.
+
+## Connection Context [#connection-context]
+
+A WebSocket connection is not an anonymous socket. The handshake runs through the pipeline: request ID assignment, session resolution, tenant resolution, middleware, and guard checks all complete before the upgrade succeeds. That means:
+
+* `ctx.session` and `ctx.tenant` are resolved during the handshake and available for authorization.
+* `ctx.store.requestId` ties the connection and everything it does to a correlatable request ID.
+* Controller middleware such as `rate-limit` applies to the upgrade, giving you a lever on connection floods.
+
+One `ws` handle corresponds to one client; state you need per connection belongs in the scope of the `open`, `message`, and `close` callbacks.
+
+## Client Side [#client-side]
+
+The client subscribes to channels or opens a route connection through the typed realtime layer:
+
+```ts title="client-side.ts"
+const feed = useChannel('posts')
+```
+
+The hook returns the live subscription, typed by the channel's message schemas. When WebSockets are unavailable, the client falls back to a streaming transport automatically. See [Realtime: client usage](/docs/realtime/client-usage).
+
+## Message Schemas and Validation [#message-schemas-and-validation]
+
+Real-time messages are validated by the same schema-driven runtime as HTTP input — validation is a guarantee that spans models, controllers, jobs, and channels. A channel declares the shape of the messages it carries, and handlers receive parsed, validated payloads with inferred types rather than raw strings. Rejecting malformed messages is a property of the channel, not a per-handler concern. See [Validation](/docs/http/validation) and [Realtime: channels](/docs/realtime/channels).
+
+## REST and WebSockets in One Controller [#rest-and-websockets-in-one-controller]
+
+A controller can serve REST routes and a WebSocket route under the same prefix, sharing the same guards:
+
+```ts title="rest-and-websockets-in-one-controller.ts"
+defineController('chat', (c) => c.guard({
+  middleware: ['auth'],
+}, (g) => ({
+  history: g.get('/history', historyHandler),
+  stream:  g.ws('/stream', {
+    open: (ws) => chat.subscribe(ws),
+    message: (ws, { data }) => chat.publish(data),
+    close: (ws) => chat.unsubscribe(ws),
+  }),
+})))
+```
+
+The guard covers both surfaces, so an authenticated REST client and an authenticated socket reach the same room with the same session checks. The REST handler fetches history; the socket delivers live messages — one controller, one authorization story.
+
+## Scale-Out Considerations [#scale-out-considerations]
+
+Applications scale horizontally by construction — instances are stateless and shared state is externalized. WebSockets follow the same rule:
+
+* Connection state lives in the channel backend, not the process, so a reconnect after a connection drops goes to any instance.
+* Broadcasting flows through the channel backend, so every subscriber receives events regardless of which instance holds the socket.
+* Session and tenant resolution apply per connection, and per-tenant connection cleanup is scoped the same way as per-tenant data.
+
+The guide on [Realtime: scaling](/docs/realtime/scaling) covers deployment shapes and connection affinity in detail.
+
+## Rooms and Channels [#rooms-and-channels]
+
+Channels are the room primitive. Subscribing a client to a channel and publishing to it are separate operations, so membership is explicit: `open` subscribes, handlers publish, and `close` typically unsubscribes — intermediate code can move a connection between channels without a reconnect. See [Realtime: channels](/docs/realtime/channels).
+
+## Heartbeats and Dead Connections [#heartbeats-and-dead-connections]
+
+Long-lived sockets die silently. Connection monitoring on the client reconnects on interruption, and channel cleanup runs in `close`. Dead peers are pruned across cluster members through the shared pub/sub layer, so a socket lost in flight does not leak membership. See [Realtime: scaling](/docs/realtime/scaling).
+
+## WebSockets and the Route Manifest [#websockets-and-the-route-manifest]
+
+Because `c.ws` routes contribute manifest entries, WebSocket endpoints appear in OpenAPI and are reachable from the typed client's streaming methods. The route's path, prefix, and tags document the endpoint the same way REST paths do, and guards attach at the handshake declaration rather than anywhere else. See [OpenAPI](/docs/api/openapi).
+
+## Rate Limiting and Upgrade Denial [#rate-limiting-and-upgrade-denial]
+
+A flood of messages can starve a single connection. The built-in `rate-limit` middleware applies per socket as well as per request, so a chat bot cannot saturate the server through one socket. A rejected send returns an error frame rather than silent recursion, and the client's typed send surfaces it. Aggressive misbehavior can close the connection with a status code the client can observe.
+
+## Message Validation [#message-validation]
+
+Messages cross the schema boundary the same way requests do. Declaring the message schema at `c.ws` validates inbound frames in the handshake declaration's scope; invalid messages receive an error frame and never reach your handler's logic. The pattern is identical to route body validation — see [Validation](/docs/http/validation).
+
+## What's Next [#whats-next]
+
+1. [Realtime: channels](/docs/realtime/channels) — named, policy-checked broadcast channels
+2. [Realtime: events](/docs/realtime/events) — broadcasting model-lifecycle events
+3. [Realtime: client usage](/docs/realtime/client-usage) — `useChannel` and typed subscriptions
+4. [Realtime: scaling](/docs/realtime/scaling) — connection lifecycle across instances
+5. [Guards](/docs/http/guards) — protecting routes, including upgrades

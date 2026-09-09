@@ -1,0 +1,159 @@
+# Modules (/docs/core-concepts/modules)
+
+
+
+## What is a Module? [#what-is-a-module]
+
+A module is a self-contained feature package. It bundles related constructs — models, controllers, pages, jobs, events, tasks, policies, migrations, config, and channels — and composes them into an application with one declaration. A blog, an analytics panel, or an admin console are all natural modules: each is a vertical slice that owns its models, its API, its UI, and its background work.
+
+Modules are how Kwiva scales beyond a single app folder. Everything a module contributes is namespaced and versioned, so any number of modules can coexist in an application without colliding, and each can evolve independently. See [Defining Modules](/docs/modules-plugins/defining-modules) for the full authoring reference.
+
+## The `defineModule` Factory [#the-definemodule-factory]
+
+A module is defined like every other construct — declaratively, as a `defineX` factory:
+
+```ts title="modules/blog/index.ts"
+// modules/blog/index.ts
+import { defineModule } from '@kwiva/core'
+
+export default defineModule({
+  name: '@acme/blog',
+  version: '1.0.0',
+
+  models:      () => import.meta.glob('./models/**/*.ts'),
+  controllers: () => import.meta.glob('./controllers/**/*.ts'),
+  pages:       () => import.meta.glob('./pages/**/*.tsx'),
+  jobs:        () => import.meta.glob('./jobs/**/*.ts'),
+  events:      () => import.meta.glob('./events/**/*.ts'),
+  tasks:       () => import.meta.glob('./tasks/**/*.ts'),
+  policies:    () => import.meta.glob('./policies/**/*.ts'),
+  migrations:  './database/migrations',
+
+  config: {
+    blog: { postsPerPage: 10 },
+  },
+
+  boot: async ({ config, models }) => { /* ... */ },
+  shutdown: async () => { /* ... */ },
+})
+```
+
+`name` and `version` identify the module; every contribution is optional. A module that ships only pages is as valid as one that ships the full vertical stack.
+
+## Contribution Points [#contribution-points]
+
+A module can contribute any construct an application can:
+
+| Construct           | Contribution                                                         |
+| ------------------- | -------------------------------------------------------------------- |
+| `models`            | `defineModel` files that derive routes, client types, Studio screens |
+| `controllers`       | API surface under the module's scope                                 |
+| `middleware`        | Pipeline stages available to the app                                 |
+| `pages`             | Frontend routes registered under the module's route scope            |
+| `jobs` `events`     | Background work and domain events                                    |
+| `tasks`             | Scheduled work                                                       |
+| `policies`          | Authorization rules in the module's permission namespace             |
+| `migrations`        | Schema steps applied with the app's migrations                       |
+| `config`            | Typed, namespaced defaults the app can override                      |
+| `channels`          | Realtime channels plus their policies                                |
+| `boot` / `shutdown` | Module lifecycle join and teardown                                   |
+| `requires`          | Declared peer ranges for `@kwiva/*` dependencies                     |
+
+Contribution points are referenced as lazy globs relative to the module entry, so everything a module ships stays co-located in one folder. Adding a file to a module folder is adding a capability — no registry edits inside the module.
+
+## A Local Module Layout [#a-local-module-layout]
+
+A module is a folder, and its internal tree mirrors the app tree it will join. A representative chat module:
+
+```text title="a-local-module-layout.txt"
+modules/chat/
+├─ index.ts                  # defineModule entry
+├─ models/
+│  ├─ rooms.ts
+│  └─ messages.ts
+├─ controllers/chat.ts
+├─ middleware/chat-auth.ts
+├─ policies/chat.ts
+├─ pages/
+│  └─ index.tsx
+├─ jobs/send-message-notification.ts
+├─ events/message-posted.ts
+├─ tasks/archive-old-rooms.ts
+└─ migrations/
+   ├─ 0001_create_rooms.ts
+   └─ 0002_create_messages.ts
+```
+
+Each subfolder uses the same [defineX](/docs/core-concepts/definex) conventions as the app — which is why the kernel can mount a module's contributions with the exact same pipeline it uses for app files. The globs in the `defineModule` declaration are the only wiring; everything else is convention.
+
+## Module Registry [#module-registry]
+
+Modules are registered in the application configuration:
+
+```ts title="kwiva.config.ts"
+// kwiva.config.ts
+import { defineConfig } from '@kwiva/config'
+
+export default defineConfig({
+  modules: ['@kwiva/blog', './modules/analytics', '@acme/admin'],
+})
+```
+
+First-party modules, local modules, and published packages share one registry. `kwiva add <addon>` installs and registers in a single step — see [Addons](/docs/modules-plugins/addons).
+
+## Composing with the Kernel [#composing-with-the-kernel]
+
+Modules join the kernel before model scan and route registration (see [Applications](/docs/core-concepts/applications) and [Application Composition](/docs/modules-plugins/composition)):
+
+1. The kernel resolves the `modules[]` registry and loads each module's definition.
+2. Module contributions merge with app constructs — namespacing keeps them distinct.
+3. Module config defaults merge under their namespaces, overridable by the app.
+4. Module migrations order before app migrations.
+5. Generated routes, client types, and Studio screens include module-owned resources.
+
+The result behaves exactly like app-authored code: a module's model has generated endpoints and client types; a module's page participates in routing and hydration. By [composition](/docs/core-concepts/applications), modules are not a separate tier your features graduate into — they are packaging.
+
+## Namespacing and Boundaries [#namespacing-and-boundaries]
+
+Modules interoperate under hard contracts rather than imports:
+
+* **Model namespacing** — model and resource names are prefixed by the module scope (`chat.rooms`, never bare `rooms`).
+* **Route prefixing** — page and API paths mount under the module's declared prefix; no two modules claim the same namespace.
+* **Config namespacing** — module defaults register under their namespaces and are overridable by the app through the standard precedence (defaults, config folder, inline — inline wins).
+* **Policy namespacing** — policies live in the module's permission namespace (`chat.member`, not `member`).
+* **Isolation** — modules never import each other's internals; they interoperate only through published contribution points.
+* **Migration ordering** — module migrations apply before application migrations and are versioned by module version.
+
+These rules are what let third-party modules be composed safely: a module cannot silently shadow your models, routes, or config keys.
+
+## Lifecycle and Peer Requirements [#lifecycle-and-peer-requirements]
+
+* `boot` runs when the module joins the app, with typed access to config, models, and providers.
+* `shutdown` runs during app teardown, inverting boot order with the rest of the kernel.
+* `requires` declares compatible versions of `@kwiva/*` packages; addon tooling respects these ranges when resolving upgrades.
+
+The kernel merges module contributions during boot, before model scan and route registration — see [Applications](/docs/core-concepts/applications).
+
+## Publishing a Module [#publishing-a-module]
+
+`kwiva module:build` packages a module: the contribution manifest plus a compiled distribution with isolated type declarations. The registry contract is a published package that exports the `defineModule` result as its default export, is tagged with the `kwiva-addon` keyword, and declares `requires` so apps resolve compatible versions. See [Addons & Distribution](/docs/modules-plugins/addons) for the full workflow.
+
+## Modules vs Plugins [#modules-vs-plugins]
+
+|                  | Module (`defineModule`)                            | Plugin (`definePlugin`)                         |
+| ---------------- | -------------------------------------------------- | ----------------------------------------------- |
+| Scope            | Application feature                                | Framework behavior                              |
+| Contributes      | Models, controllers, pages, jobs, config, channels | Middleware, services, hooks, context extensions |
+| Contribute shape | Declarative globs and options                      | Programmatic setup and boot functions           |
+| Distribution     | Addon packages                                     | Addon packages                                  |
+| Example          | Blog, analytics, admin                             | Request timing, legacy compatibility            |
+
+Choose a module to add a feature, a plugin to change how the framework behaves. The comparison is detailed on [Plugins](/docs/core-concepts/plugins).
+
+## What's Next [#whats-next]
+
+1. [Defining Modules](/docs/modules-plugins/defining-modules) — contribution points in detail
+2. [Application Composition](/docs/modules-plugins/composition) — how modules join the kernel at boot
+3. [Addons](/docs/modules-plugins/addons) — installing and distributing modules
+4. [Applications](/docs/core-concepts/applications) — the kernel that merges module contributions
+5. [Plugins](/docs/core-concepts/plugins) — programmatic extension for comparison

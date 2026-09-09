@@ -1,0 +1,102 @@
+# MCP (/api/mcp)
+
+
+
+`@kwiva/mcp` exposes your application to AI agents as Model Context Protocol (MCP) tools. Tools are generated from the same model IR that drives your REST API, typed client, and Studio — so agents get exactly the surface your app already has, with the same validation, policies, and tenant scoping.
+
+## Enable [#enable]
+
+Configured through `src/config/mcp.ts`:
+
+```ts title="src/config/mcp.ts"
+// src/config/mcp.ts
+import { defineConfig } from '@kwiva/config'
+
+export default defineConfig('mcp', {
+  defaults: {
+    enabled: true,
+    route: '/mcp',
+    transport: 'http',                    // 'http' (streamable) | 'stdio'
+    auth: 'bearer',                       // token strategy; session cookies also supported
+    models: ['invoices', 'customers'],    // generate tools for these models
+    controllers: ['reports'],             // expose custom actions as tools
+    readOnly: false,                      // true → list/get only
+  },
+})
+```
+
+## Generated Tools [#generated-tools]
+
+Per opted-in model (respecting `readOnly`):
+
+| Tool              | Maps to                                                  |
+| ----------------- | -------------------------------------------------------- |
+| `invoices_list`   | List route (`where`/`page`/`orderBy` params)             |
+| `invoices_get`    | Get route                                                |
+| `invoices_create` | Create route (validated body schema → tool input schema) |
+| `invoices_update` | Update route                                             |
+| `invoices_delete` | Delete route                                             |
+
+Controller actions become tools with their exact input and output types — for example, `reports_summary` for `client.reports.summary()`.
+
+## Semantics [#semantics]
+
+* **Policy enforcement** — tools run through the same policies. The MCP bearer token identifies a user (or service principal) whose abilities apply.
+* **Tenant scoping** — tools are token-bound to a tenant; cross-tenant access is impossible.
+* **Validation** — tool input schemas are the route schemas (Standard Schema → JSON Schema for MCP).
+* **Auditability** — every tool call is a tracing span and a structured log (`mcp.tool`).
+
+## Auth Strategies [#auth-strategies]
+
+| Strategy           | Use                                                            |
+| ------------------ | -------------------------------------------------------------- |
+| `bearer` (default) | Service tokens with scoped abilities — minted in Studio (v1.x) |
+| `session`          | Human-agent hybrid: browser session flows through MCP          |
+| `none`             | Local development via `stdio` transport                        |
+
+## Client Configuration [#client-configuration]
+
+From the agent side, point the client at the MCP endpoint:
+
+```json title="client-configuration.json"
+{
+  "mcpServers": {
+    "acme": {
+      "url": "https://acme.dev/mcp",
+      "headers": { "authorization": "Bearer acme_token" }
+    }
+  }
+}
+```
+
+## Custom Tools [#custom-tools]
+
+Define your own tools with `defineMcpTool`:
+
+```ts title="src/app/mcp/tools.ts"
+// src/app/mcp/tools.ts
+import { defineMcpTool } from '@kwiva/mcp'
+
+export const draftInvoiceEmail = defineMcpTool('draft_invoice_email', {
+  description: 'Draft a collection email for an overdue invoice',
+  input: { invoiceId: 'uuid' },
+  handler: async ({ invoiceId, session }) => {
+    const invoice = await Invoice.findOrFail(invoiceId)
+    return draftEmail(invoice)          // agent gets structured data, composes the text
+  },
+  ability: 'invoices.read',
+})
+```
+
+## Beyond MCP [#beyond-mcp]
+
+Structured tool responses are optimized for LLM consumption — field descriptions flow through from the model DSL. Rate limits and per-token cost accounting are planned telemetry.
+
+Out of scope: in-app LLM features. Kwiva exposes the data plane; applications bring their own models.
+
+## What to Read Next [#what-to-read-next]
+
+* [AI & MCP Overview](/docs/ai-mcp) — The AI architecture and integration
+* [MCP Server](/docs/ai-mcp/mcp-server) — Transports, authentication, and routing
+* [Tool Generation](/docs/ai-mcp/tool-generation) — Models and controllers as tools
+* [Agent Integration](/docs/ai-mcp/agent-integration) — AI-safe data access and audit

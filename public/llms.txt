@@ -1,0 +1,209 @@
+# Docs
+
+- API Reference
+  - [API Reference](/api): Complete API reference for all Kwiva packages — types, signatures, parameters, and examples.
+  - [@kwiva/core](/api/core): @kwiva/core — the application kernel: defineApp, the typed context, dependency injection, config() and env() accessors, the 8-code error taxonomy, definePolicy, definePlugin, and defineModule.
+  - [@kwiva/config](/api/config): @kwiva/config — defineConfig, the config folder, layer precedence, the kwiva.config.ts entry file, typed environment access, and config caching.
+  - [@kwiva/data](/api/data): Complete reference for @kwiva/data — defineModel, the field DSL, relations, the query builder, transactions, migrations, seeders, factories, database configuration, and file storage.
+  - [@kwiva/http](/api/http): Controllers, middleware, server routes, lifecycle, guards, validation, errors, files, streaming, WebSockets, and response caching.
+  - [@kwiva/router](/api/router): Typed file-based router — route conventions, matching, loaders, guards, typed navigation, preloading, history modes, not-found handling.
+  - [@kwiva/react](/api/react): React bindings — definePage contract, SSR orchestration and streaming, hydration, Providers, data hooks, client hooks, realtime hooks, Preact compat.
+  - [@kwiva/client](/api/client): Typed RPC client — createClient, model endpoints, controller actions, typed errors, subscriptions, SSR safety, sessions, createTestClient.
+  - [Auth](/api/auth): @kwiva/auth — defineAuth, providers, sessions, route protection, hooks.
+  - [Queue](/api/queue): @kwiva/queue — defineJob, dispatch, workers, retries, transports.
+  - [Events](/api/events): @kwiva/events — defineEvent, listeners, broadcasting, transactional outbox.
+  - [@kwiva/services](/api/services): @kwiva/services — defineService, typed dependency injection, service composition, and using services from controllers, jobs, and page loaders.
+  - [CLI](/api/cli): @kwiva/cli — the kwiva binary. One command surface for scaffolding, development, testing, building, deploying, and operating a Kwiva application.
+  - [Studio](/api/studio): @kwiva/studio — the generated operations UI. Schema-derived CRUD screens for every model, policy- and tenant-aware, with no drift from your models.
+  - [MCP](/api/mcp): @kwiva/mcp — expose your application to AI agents as MCP tools, derived from the same model IR as everything else, policy- and tenant-aware.
+- Architecture
+  - [Architecture](/architecture): Deep dive into Kwiva's architecture — layer design, framework-owned engines, request lifecycle, and model derivation.
+  - [Design Principles](/architecture/design-principles): The four pillars and decision rules behind Kwiva's architecture — ownership, derivation, portability, and one grammar.
+  - [Request Lifecycle](/architecture/request-lifecycle): One request, end to end — the ordered 14-step contract that middleware, guards, validation, and handlers rely on.
+  - [Model Derivation](/architecture/model-derivation): One model declaration drives the database, REST API, typed RPC client, Studio, OpenAPI, and MCP tools through a single IR pipeline.
+  - [Frontend Architecture](/architecture/frontend-architecture): How pages, routing, loaders, streaming SSR, hydration, and data hooks fit together — from request to interactive page.
+  - [Deployment Architecture](/architecture/deployment-architecture): One codebase, many targets — mode presets, deploy presets, the edge-safe constraint set, and the adapter decision flow.
+  - [Package Boundaries](/architecture/package-boundaries): The 17 @kwiva packages, their dependency graph, the ownership map, and the boundary rules that keep the framework coherent.
+- Blog
+  - [Welcome to Kwiva](/blog/welcome-to-kwiva): Kwiva v0.3 is here — the batteries-included TypeScript framework that replaces the stitched-together stack.
+  - [Why one defineX grammar](/blog/why-definex): The defineX convention isn't a stylistic choice — it's the mechanism that keeps a full-stack framework coherent. Here's the reasoning.
+- Documentation
+  - [What is Kwiva?](/docs): Kwiva is the batteries-included TypeScript framework that replaces the stitched-together stack — data, APIs, auth, frontend, jobs, realtime and deploy in one framework, one CLI, one defineX language.
+  - Getting Started
+    - [Installation](/docs/getting-started): Install Bun, scaffold a Kwiva project, and start the development server in minutes — one framework for data, APIs, auth, frontend, jobs, realtime and deploy.
+    - [Create a Project](/docs/getting-started/create-project): Scaffold a new Kwiva project with a single command, choose the right mode for your use case, and understand what gets created.
+    - [Project Structure](/docs/getting-started/project-structure): Understand how a Kwiva project is organized — a predictable, lowercase filesystem where one directory maps to one construct and one file to one defineX factory.
+    - [Configuration](/docs/getting-started/configuration): Configure your Kwiva application through one typed config system — a config folder, environment-variable binding, inline defineX overrides, and a strict precedence model.
+    - [Development Server](/docs/getting-started/development-server): Run the Kwiva development server with native TypeScript execution, hot module replacement, and boot-time validation of your config and environment.
+    - [Your First Model](/docs/getting-started/first-model): Create a data model with defineModel — the single source of truth that derives your database, migrations, API, typed client, Studio, OpenAPI, and MCP tools.
+    - [Your First API](/docs/getting-started/first-api): Create an HTTP controller with defineController — typed context, per-route validation, guards, and automatic route registration.
+    - [Your First Page](/docs/getting-started/first-page): Create a frontend page with definePage — file-based routing, typed loaders, search validation, streaming SSR, and full-stack type safety from model to markup.
+    - [Your First Deployment](/docs/getting-started/first-deployment): Build your Kwiva application once and deploy anywhere — zero-config provider detection, explicit presets, single-binary output, edge constraints, and a production checklist.
+  - Core Concepts
+    - [Core Concepts](/docs/core-concepts): The foundational ideas behind Kwiva — the defineX convention, one config source, file-based discovery, a single type universe, and the two lifecycles every app runs.
+    - [The defineX Convention](/docs/core-concepts/definex): Every app-facing construct in Kwiva is a defineX factory — one grammar, one mental model, and one file per construct across all 17 core factories.
+    - [Applications](/docs/core-concepts/applications): defineApp is the application kernel — how config, models, HTTP, modules, and providers are composed into one runnable application.
+    - [Configuration](/docs/core-concepts/configuration): One config folder, one precedence chain, typed access everywhere — how Kwiva handles configuration, environment binding, and inline overrides.
+    - [Auto-Discovery](/docs/core-concepts/auto-discovery): Kwiva scans the standard directory tree at boot and registers every defineX file it finds — adding a capability means adding a file, never editing a registry.
+    - [Lifecycle](/docs/core-concepts/lifecycle): Every Kwiva application runs two lifecycles — a boot sequence that composes the kernel and a request pipeline that processes each call from entry to response.
+    - [Context](/docs/core-concepts/context): The typed request context — request data, session, tenant, store, and response controls — available in every middleware, guard, and handler.
+    - [Services](/docs/core-concepts/services): defineService — typed, injectable objects for business logic that does not belong in a controller or a model.
+    - [Modules](/docs/core-concepts/modules): defineModule — self-contained feature packages that compose models, controllers, pages, jobs, and config into an application with one declaration.
+    - [Plugins](/docs/core-concepts/plugins): definePlugin — extend the framework itself. Plugin lifecycle, hooks, and when to reach for a plugin instead of a module.
+    - [Error Handling](/docs/core-concepts/error-handling): One error taxonomy, two renderers — the eight-code model, the error helper, typed exceptions, and client-side handling.
+    - [Type Inference](/docs/core-concepts/type-inference): How types flow end-to-end from models through the route manifest to the client and pages — zero codegen, one type universe.
+  - Data
+    - [Data](/docs/data): The data layer — defineModel, derived artifacts, the model IR, and a tenancy-first runtime.
+    - [Models](/docs/data/models): defineModel is the single source of truth — one file derives schema, migrations, API, client, Studio, OpenAPI, and MCP tools.
+    - [Fields & DSL](/docs/data/fields): Field types, the modifier chain, defaults, validation integration, and how each field maps to a database column.
+    - [Relations](/docs/data/relations): belongsTo, hasMany, hasOne, belongsToMany, polymorphic relations, eager loading, and pivot tables.
+    - [Validation](/docs/data/validation): Field-level rules, request-layer schemas, Standard Schema, custom rules, and the validation error shape.
+    - [Queries](/docs/data/queries): The full query builder — where clauses, joins, selects, aggregates, grouping, raw SQL, and locks.
+    - [Pagination](/docs/data/pagination): Offset and cursor pagination — envelopes, configuration, trade-offs, and client hooks.
+    - [Transactions](/docs/data/transactions): ACID transactions, nested savepoints, isolation and retry options, and the outbox pattern for transactional events.
+    - [Migrations](/docs/data/migrations): Typed SQL-step files generated from model diffs — apply, rollback, backfill, and deploy-time strategy.
+    - [Seeders](/docs/data/seeders): Ordered, idempotent seed data — defineSeeder, factory-based seeding, CLI selectors, and fresh databases.
+    - [Factories](/docs/data/factories): Model-aware factories — attribute definitions, runtime API, overrides, states, and test/seed usage.
+    - [Soft Deletes](/docs/data/soft-deletes): The deletedAt column — automatic filtering, withTrashed, onlyTrashed, restore, forceDelete, and how relations behave.
+    - [Database Configuration](/docs/data/database-config): Connections, pooling, drivers, logging, and the read-replica path — everything in src/config/database.ts.
+    - [File Storage](/docs/data/storage): The storage abstraction — disks, uploads, signed URLs, tenant-scoped paths, and test fakes.
+  - HTTP
+    - [HTTP](/docs/http): The complete HTTP layer — controllers, routes, middleware, guards, validation, errors, uploads, streaming, WebSockets, CORS, and response caching.
+    - [Controllers](/docs/http/controllers): defineController — typed handlers, per-route options, custom actions, guards, macros, and controller mounting.
+    - [Routes & Routing](/docs/http/routes): URL conventions, route handlers, params, schema options, the route manifest, server routes, and versioning.
+    - [Middleware](/docs/http/middleware): defineMiddleware — the global stack, scoping, short-circuiting, lifecycle events, and built-ins.
+    - [Request Lifecycle](/docs/http/lifecycle): The complete 14-step request pipeline — adapter entry through response write, lifecycle events, scoping, ordering guarantees, and timing budgets.
+    - [Guards](/docs/http/guards): c.guard — nestable, composable checks that scope schema, middleware, and beforeHandle to groups of routes.
+    - [Validation](/docs/http/validation): Schema-driven input validation — body, query, params, headers, cookies — with friendly field-mapped errors.
+    - [Error Handling](/docs/http/errors): The eight-code taxonomy, two renderers, typed helpers, custom codes, and client-side handling.
+    - [File Uploads](/docs/http/file-uploads): ctx.file() — multipart uploads with size and type validation on the parse stage, backed by the storage API.
+    - [Streaming & SSE](/docs/http/streaming): Response streaming across the pipeline — new Response(stream) passthrough, the SSE helper, and client consumption.
+    - [WebSockets](/docs/http/websockets): c.ws() endpoints, channel integration, authentication on upgrade, message validation, and scale-out considerations.
+    - [CORS & Security Headers](/docs/http/cors): CORS presets from src/config/cors.ts, per-route overrides, and default security headers with CSP.
+    - [Response Caching](/docs/http/caching): Route rules for cache, SWR, ISR, static, and prerender — plus model caches, the cache API, and invalidation.
+  - API
+    - [API](/docs/api): Complete API layer — REST, generated endpoints, typed RPC, client SDK, OpenAPI, authentication, and errors.
+    - [REST Conventions](/docs/api/rest): URL patterns, method mapping, status codes, response envelopes, pagination, naming, and versioning.
+    - [Generated Endpoints](/docs/api/generated-endpoints): The deterministic 5 routes per model, query contracts, custom actions, and permission gating.
+    - [Typed RPC](/docs/api/rpc): Typed end-to-end RPC — the entire API as type-checked calls, zero codegen.
+    - [Client SDK](/docs/api/client): createClient({ baseUrl }) — setup, typed end-to-end usage, SSR-safe behavior, prefetching, and testing.
+    - [OpenAPI](/docs/api/openapi): Auto-generation from the route manifest, endpoints, spec shaping, and build artifacts.
+    - [API Authentication](/docs/api/authentication): Session cookies, token sessions, the generated auth surface, guards, permissions, CSRF, and enumeration safety.
+    - [API Errors](/docs/api/errors): The error taxonomy, envelope shape, validation issues, custom codes, and client-side typed handling.
+  - Frontend
+    - [Frontend](/docs/frontend): The complete frontend — pages, routing, layouts, loaders, data hooks, RPC client, and UI kit.
+    - [Pages](/docs/frontend/pages): definePage — the factory for every page: validation, loader, guards, UI states, head, component.
+    - [File-Based Routing](/docs/frontend/routing): dotted paths, $param segments, splat, nested layouts, matching rules, and route context.
+    - [Nested Layouts](/docs/frontend/layouts): __root.tsx, folder layouts, layout composition, layout loaders and guards.
+    - [Loaders & Data](/docs/frontend/loaders): The loader pattern, parallel execution, loaderDeps, deferred data, and hydration into hooks.
+    - [Navigation & Link](/docs/frontend/navigation): Typed Link, useNavigate, route hooks, intent preloading, and scroll restoration.
+    - [Data Hooks](/docs/frontend/data-hooks): useResource, useList, useMutation, useInfiniteList, useApi, and cache invalidation.
+    - [RPC Client](/docs/frontend/rpc-client): createClient — typed model and controller calls, SSR-safe dedupe, subscriptions, and testing.
+    - [UI Components](/docs/frontend/ui-components): The built-in UI kit — tokens, primitives, components, patterns, DataTable, forms, and theming.
+  - Rendering
+    - [Rendering](/docs/rendering): SSR, streaming, hydration, caching, static generation — the full rendering pipeline.
+    - [Server-Side Rendering](/docs/rendering/ssr): Kwiva-owned SSR orchestration, the render pipeline, streaming-first, and route rules.
+    - [Streaming SSR](/docs/rendering/streaming): Suspense-aware HTML streaming, deferred data with stream(), shell-first rendering.
+    - [Hydration](/docs/rendering/hydration): Island-free full hydration, the typed reviver, and cache transfer from server to client.
+    - [Caching Strategies](/docs/rendering/caching): Route rules for cache, SWR, ISR, static, prerender — plus model cache and client cache layers.
+    - [Static Generation](/docs/rendering/prerendering): Build-time prerendering — kwiva build output, static routes, ISR, and the SPA fallback.
+  - Authentication
+    - [Authentication](/docs/auth): Sign-up, sign-in, sessions, OAuth, passkeys and magic links through one defineAuth surface backed by a hidden auth engine.
+    - [Auth Configuration](/docs/auth/configuration): The complete defineAuth reference — providers, session strategy and cookies, the user model contract, and lifecycle hooks.
+    - [Sessions](/docs/auth/sessions): Typed ctx.session on the server, useSession() on the client, session lifetime, cookie policy, store backends, and revocation.
+    - [Auth Providers](/docs/auth/providers): Password, OAuth, passkeys, and magic links — enabling providers, comparing their behavior, and rendering sign-in screens.
+    - [Protecting Routes](/docs/auth/protecting-routes): requireAuth middleware, page-level beforeLoad guards, controller scoping, redirects, and layering permission checks.
+    - [Client-Side Auth](/docs/auth/client-usage): useSession() in the browser, sign-in and sign-out flows, session-aware data hooks, and SSR-safe rendering.
+  - Authorization
+    - [Authorization](/docs/authorization): definePolicy, permission strings, roles, and the enforcement points that gate every route, Studio screen, channel, and MCP tool.
+    - [Policies](/docs/authorization/policies): definePolicy and defineGate — writing per-resource ability logic once, and running it on every surface that touches the resource.
+    - [Permissions](/docs/authorization/permissions): The {resource}.{action} permission grammar, model and route gating, and the ctx.can, authorize, useCan, and whereCan helpers.
+    - [RBAC](/docs/authorization/roles): Role and permission fields on User, assigning and defaulting roles, seeding strategy, and how policies — not app code — interpret roles.
+    - [Enforcement Points](/docs/authorization/enforcement): Every surface that runs your policies — routes, Studio, channels, MCP, seeders, tasks — and the defense-in-depth ordering that connects them.
+  - Multi-Tenancy
+    - [Multi-Tenancy](/docs/tenancy): Tenancy-first data access — tenant resolution, automatic query scoping, and per-tenant isolation, on by design and invisible in app code.
+    - [Tenancy Configuration](/docs/tenancy/configuration): Configure tenancy in src/config/tenancy.ts — resolution strategy, tenantField, scoped models, and per-tenant config overrides.
+    - [Tenant Resolution](/docs/tenancy/resolution): Resolve the tenant per request from domain, path, or header through the tenant middleware, which injects tenant context and storage keys.
+    - [Tenant Scoping](/docs/tenancy/scoping): Every query is auto-scoped through tenantField — cross-tenant reads and writes are prevented by construction, with a policy-only escape hatch.
+    - [Tenant Isolation](/docs/tenancy/isolation): Isolate tenant state across storage, cache, queue, sessions, and broadcast — and keep every instance interchangeable in multi-instance deployments.
+  - Realtime
+    - [Realtime](/docs/realtime): Channels, domain events, broadcasting, and typed client hooks — realtime behavior built into every Kwiva application.
+    - [Channels](/docs/realtime/channels): Subscribe to named channels with dynamic segments, enforce access at the handshake, and broadcast to connected clients.
+    - [Events & Broadcasting](/docs/realtime/events): Define typed domain events, attach queued or synchronous listeners, and broadcast them to realtime channels.
+    - [Client-Side Realtime](/docs/realtime/client-usage): Subscribe from React with typed hooks, stream over WebSockets, and fall back to SSE when they are unavailable.
+    - [Scaling Realtime](/docs/realtime/scaling): How channels, broadcasts, and presence behave when your application runs on many instances.
+  - Background Work
+    - [Background Work](/docs/background-work): Jobs, queues, scheduled tasks, and job observability — the work Kwiva runs reliably, off the request path.
+    - [Jobs](/docs/background-work/jobs): defineJob — defining work, payload typing from the model IR, dispatch, retries, backoff, delays, priority, idempotency, and progress.
+    - [Queues & Workers](/docs/background-work/queues): Queue transport, worker processes, concurrency control, the dead-letter queue, rate limiting, and running workers in production.
+    - [Scheduled Tasks](/docs/background-work/scheduling): defineTask, the cron table in src/config/schedule.ts, overlap control, timezone handling, manual runs, and external cron triggers.
+    - [Job Observability](/docs/background-work/observability): Queue depth, failed jobs, job progress, structured logs, and correlation IDs for the background layer.
+  - Studio
+    - [Studio](/docs/studio): Kwiva Studio — the schema-derived operations UI generated from your models, policy-aware and tenant-scoped by default.
+    - [Studio Configuration](/docs/studio/configuration): Enable Studio, choose the mount route and access guard, control which models appear, and configure audit visibility and branding.
+    - [Generated UI](/docs/studio/generated-ui): List, detail, create, and edit screens derived from the model IR — columns, filters, forms, and actions with no Studio-side schema.
+    - [Customization](/docs/studio/customization): Override Studio screens per model, use per-field and per-action hooks, extend the UI kit, add bulk actions, and know when to keep generated UI versus build custom.
+  - AI & MCP
+    - [AI & MCP](/docs/ai-mcp): Expose your Kwiva application to AI agents as callable MCP tools, derived from the same model and controller IR as the rest of the stack.
+    - [MCP Server](/docs/ai-mcp/mcp-server): Running the generated MCP server — enable config, stdio and streamable HTTP transports, auth strategies, and connecting a client or agent.
+    - [Tool Generation](/docs/ai-mcp/tool-generation): How models generate list, get, create, update, and delete tools; how controller actions become tools; custom tools; and how model IR shapes their schemas.
+    - [Agent Integration](/docs/ai-mcp/agent-integration): Wiring agents to Kwiva MCP tools — policy enforcement, per-tool permissions, tenant scoping, validation, and the error shapes an agent sees.
+  - Modules & Plugins
+    - [Modules & Plugins](/docs/modules-plugins): Package-level composition for Kwiva apps — defineModule caps into reusable capability packages, and the addon workflow installs and registers modules, plugins, and themes.
+    - [Defining Modules](/docs/modules-plugins/defining-modules): Define reusable capability packages with defineModule — models, controllers, pages, jobs, migrations, config, and channel policies, namespaced and versioned so they drop into any app.
+    - [Addons & Distribution](/docs/modules-plugins/addons): Install, search, version, and publish Kwiva addons — modules, plugins, and themes — through a single workflow built on kwiva add and the addon registry.
+    - [Application Composition](/docs/modules-plugins/composition): How defineApp assembles the kernel — config, models, middleware, providers, and modules — and how the module registry in kwiva.config.ts resolves and merges contributions.
+  - CLI
+    - [CLI](/docs/cli): The kwiva binary — project scaffolding, generators, database, queue, schedule, and addon commands in one tool.
+    - [Project & Lifecycle Commands](/docs/cli/project-commands): Scaffolding, the dev server, the exec/lint/format gate, tests, builds, preview, deploy, the REPL, key generation, upgrade codemods, and config caching.
+    - [Generators](/docs/cli/generators): kwiva make:* — model, controller, middleware, auth, service, job, event, policy, task, command, page, seeder, module, and test stubs.
+    - [Database Commands](/docs/cli/database-commands): kwiva db:migrate, db:rollback, db:seed, db:reset, db:studio, db:status, db:diff, and db:push — the database lifecycle from the CLI.
+    - [Addon Commands](/docs/cli/addon-commands): kwiva add and kwiva addons — installing, searching, listing, inspecting, removing, updating, and auditing capabilities.
+  - Testing
+    - [Testing](/docs/testing): A layered test stack — unit, integration, API, and E2E — powered by the @kwiva/testing harness, in-process client, and model-aware fakes.
+    - [Unit Testing](/docs/testing/unit-testing): Test services, policies, jobs, and helpers in isolation — pure logic, model factories, and millisecond feedback.
+    - [Integration Testing](/docs/testing/integration-testing): Boot the real application with the withApp harness, use database traits and model-aware fakes, and assert behavior across real routes.
+    - [API Testing](/docs/testing/api-testing): Drive the real app through the typed in-process client — assert responses, errors, permissions, tenant behavior, and auth state without a network hop.
+    - [E2E Testing](/docs/testing/e2e-testing): Browser-level tests through real UI and a real API — projects per app mode, harness-seeded fixtures, and where E2E belongs in CI.
+  - Observability
+    - [Observability](/docs/observability): Distributed tracing, structured logs, and metrics that light up from the framework surface — zero-config defaults in every Kwiva application.
+    - [Logging](/docs/observability/logging): Structured JSON logs with request, tenant, and trace correlation across every layer of the stack.
+    - [Tracing](/docs/observability/tracing): A span tree for every request, model query, job, task, and event — correlated with logs and exported to a collector.
+    - [Metrics](/docs/observability/metrics): Counters and duration series for HTTP traffic, model queries, queue depth, cache hit rate, tasks, and SSR — sampled and exported on an interval.
+    - [Dev Overlay](/docs/observability/dev-overlay): Requests, latency, errors, server timing, and the query list — live telemetry visible while you develop.
+  - Security
+    - [Security](/docs/security): Defense in depth across request, session, and tenant boundaries — protective defaults that hold at the framework boundary.
+    - [Default Protections](/docs/security/default-protections): CSP, CSRF, typed validation, cookie hardening, rate limits, and tenant isolation — what a fresh Kwiva app blocks out of the box.
+    - [Input Validation](/docs/security/input-validation): Typed validation at every boundary — models, controllers, jobs, events, channels, MCP tools, uploads, and search params.
+    - [Headers](/docs/security/headers): The security headers a fresh Kwiva app sends by default — CSP with nonces, framing, MIME, and privacy headers — plus per-route overrides.
+    - [Production](/docs/security/production): Environment-gated config, secret rotation, typed environment access, and the hardening checklist before every deploy.
+  - Deployment
+    - [Deployment](/docs/deployment): Deploy one codebase to any target — a Node or Bun runtime, serverless or edge platforms, containers, or a single binary — with build-time-only adapters and zero app-code changes.
+    - [Runtime Adapters](/docs/deployment/adapters): Runtime adapters package the built application into the exact shape a target expects — Node, Bun, serverless, edge, static, or single binary — without any application-code changes.
+    - [Node/Bun Deployment](/docs/deployment/node-bun): Run Kwiva on a Node or Bun runtime — build, start, configure environment variables, manage processes, and compile a single binary with kwiva build --binary.
+    - [Serverless Deployment](/docs/deployment/serverless): Ship Kwiva to function-based serverless platforms — platform-agnostic output, stateless constraints, externalized state, cold-start notes, and the kwiva deploy provider flow.
+    - [Container Deployment](/docs/deployment/containers): Run Kwiva in container images — build the artifact, assemble a minimal runtime image, set the startup command, run migrations on boot safely, and scale with shared session, cache, and storage stores.
+    - [Production Checklist](/docs/deployment/production-checklist): Run every pre-deploy and operational check — stateless multi-instance rules, externalized sessions, cache and storage, migration ordering, secrets, readiness and liveness, queue workers, the scheduler, and observability.
+  - Advanced
+    - [Advanced](/docs/advanced): Architecture internals, the request lifecycle, the model IR, package boundaries, and performance — what happens under the hood of a Kwiva application.
+    - [Architecture Internals](/docs/advanced/architecture-internals): The layered architecture — application, @kwiva/* framework APIs, sealed internal engines, toolchain, runtime — plus auto-discovery and module boundaries.
+    - [Request Lifecycle](/docs/advanced/request-lifecycle): The full request pipeline from onRequest to onStop, hook scoping, context assembly, error mapping, and correlation with distributed tracing.
+    - [Model IR](/docs/advanced/model-ir): The single intermediate representation derived from defineModel — one IR feeds database schema, REST API, typed RPC client, Studio, OpenAPI, and MCP tools with no drift.
+    - [Package Boundaries](/docs/advanced/package-boundaries): The strict acyclic dependency graph among @kwiva/* packages, what each package owns, engine sealing, and where application code can and cannot import.
+    - [Performance](/docs/advanced/performance): Rust-speed static machinery, a native TypeScript runtime, streaming-first SSR, layered caching, and type-level inference with zero runtime codegen.
+- Guides
+  - [Guides](/guides): Focused how-to guides for common Kwiva tasks — narrow in scope, practical in approach.
+  - [How do I create a model?](/guides/create-model): Scaffold a model with kwiva make:model, define its fields and relations with defineModel, and migrate the schema.
+  - [How do I create a controller?](/guides/create-controller): Scaffold a controller with kwiva make:controller, define typed handlers with defineController, and verify your routes with curl.
+  - [How do I validate input?](/guides/validate-input): Validate at the field level with the field DSL and at the route level with Standard Schema body, query, and params schemas.
+  - [How do I paginate results?](/guides/pagination): Paginate query results with offset .page() or cursor .cursor(), and read page params in a controller.
+  - [How do I protect a route?](/guides/protect-routes): Require a signed-in user with requireAuth guards, middleware, and beforeLoad page redirects.
+  - [How do I add authentication?](/guides/authentication): Set up sign-up and sign-in with defineAuth, manage sessions, and read session state on the client.
+  - [How do I add a policy?](/guides/policies): Authorize access with definePolicy, wire permissions onto routes, and check abilities with ctx.can and useCan.
+  - [How do I handle file uploads?](/guides/file-uploads): Accept multipart uploads with ctx.file(), validate size and type, and store bytes with the storage API.
+  - [How do I create a background job?](/guides/background-jobs): Offload slow work with defineJob — scaffold, dispatch, run a worker, and handle failures.
+  - [How do I schedule a task?](/guides/schedule-tasks): Run recurring work on cron with defineTask and src/config/schedule.ts.
+  - [How do I enable realtime?](/guides/realtime): Add realtime with channel(), policy-checked subscriptions, event broadcasting, and the client hooks.
+  - [How do I configure tenancy?](/guides/tenancy): Turn on tenant scoping with src/config/tenancy.ts — resolution modes, scoped models, and cross-tenant isolation.
+  - [How do I generate OpenAPI docs?](/guides/openapi): Auto-generate an OpenAPI spec from the route manifest and document your API with tags, summaries, and field descriptions.
+  - [How do I deploy?](/guides/deploy): Build once and deploy to a Node or Bun server, a serverless platform, containers, or a single binary with deploy-anywhere presets.

@@ -1,0 +1,161 @@
+# Frontend Architecture (/architecture/frontend-architecture)
+
+
+
+Kwiva's frontend is an owned stack: a typed file-based router, framework-owned SSR orchestration, a typed RPC client, and data hooks over a client-side cache. From request to interactive page, the pipeline is: route match → guards → loaders → streamed React → hydration.
+
+## The Request → Render Pipeline [#the-request--render-pipeline]
+
+```plaintext title="the-request-render-pipeline.txt"
+request (page route)
+  → router match (owned router)
+  → beforeLoad guards (session → login redirects)
+  → loaders execute in parallel (server-side, via the typed client, in-process)
+  → React tree renders to a readable stream
+      ├─ Suspense boundaries stream as they resolve (deferred data)
+      └─ loader state dehydrates into the page at the stream tail
+  → response stream (http status, headers, set-cookies)
+hydration (client)
+  → state rehydrates into the data-hook cache (no refetch of loader data)
+  → the router resumes at the same route with the same search state
+```
+
+The engine serves; the framework renders. Kwiva owns SSR orchestration rather than delegating it, so streaming, dehydration, and hydration stay under one contract.
+
+## File-Based Routing [#file-based-routing]
+
+Routes come from files under `src/ui/pages/`:
+
+```plaintext title="file-based-routing.txt"
+src/ui/pages/
+├─ __root.tsx              # root layout + providers + outlet
+├─ index.tsx               # /
+├─ posts.index.tsx         # /posts
+├─ posts.$id.tsx           # /posts/:id
+├─ posts.$id.edit.tsx      # /posts/:id/edit
+├─ settings/
+│  ├─ profile.tsx          # /settings/profile
+│  └─ security.tsx         # /settings/security
+└─ files.$.tsx             # splat: /files/*
+```
+
+Conventions: flat plus dotted paths, `$param` segments, `$` splats, `__root` for the root layout, and folder layouts for nesting. The route tree is generated into `src/.kwiva/types`, so `to`/`params`/`search` values are compile-checked.
+
+## definePage — The Full Contract [#definepage--the-full-contract]
+
+```tsx title="definepage-the-full-contract.tsx"
+import { definePage, Link, stream } from '@kwiva/react'
+
+export default definePage({
+  validateSearch: (s) => s.object({ tab: s.optional(s.string()) }),
+  loader: async ({ params, client }) => ({
+    post: await client.posts.get(params.id),                          // blocking
+    comments: stream(client.comments.list({ postId: params.id })),    // deferred
+  }),
+  beforeLoad: ({ session, location }) => {
+    if (!session.user) throw redirect({ to: '/login', search: { back: location.href } })
+  },
+  pendingComponent: () => <p>Loading…</p>,
+  errorComponent: ({ error }) => <p>{error.message}</p>,
+  component: ({ loaderData }) => (
+    <article>
+      <h1>{loaderData.post.title}</h1>
+      <Suspense fallback={<p>Comments…</p>}>
+        <Comments stream={loaderData.comments} />
+      </Suspense>
+      <Link to="/posts" preload="intent">All posts</Link>
+    </article>
+  ),
+})
+```
+
+The loader is the only data-fetching surface for a page. It runs server-side, executes in parallel across matched routes, and its results are shared with the data hooks — navigation and render never double-fetch.
+
+## Streaming SSR & Deferred Data [#streaming-ssr--deferred-data]
+
+* The blocking shell renders immediately; deferred promises stream into Suspense boundaries as they resolve.
+* Route rules apply to the whole stream: `isr` caches the full stream, `swr` serves stale-while-revalidate, `static` builds once.
+
+```tsx title="streaming-ssr-deferred-data.tsx"
+loader: async ({ params, client }) => ({
+  post: await client.posts.get(params.id),
+  comments: stream(client.comments.list({ postId: params.id })),
+})
+```
+
+## Hydration [#hydration]
+
+Loader data and deferred promises serialize with a typed reviver — dates and model rows survive the wire. The client cache is keyed identically on server and client, so hydration is a **cache transfer**, not a refetch.
+
+## The Data Layer [#the-data-layer]
+
+### Typed RPC client [#typed-rpc-client]
+
+```ts title="typed-rpc-client.ts"
+import { createClient } from '@kwiva/client'
+export const client = createClient()   // typed against this app's controllers + models
+
+const { data, total } = await client.users.list({ where: { role: 'admin' }, page: 1 })
+await client.posts.publish(id)         // custom controller action
+```
+
+Types flow from controllers and models at the type level — zero codegen. The client is SSR-safe (in-process on the server, deduped) and session-aware.
+
+### Data hooks [#data-hooks]
+
+```tsx title="data-hooks.tsx"
+import { useResource, useList, useMutation, useInfiniteList, invalidate } from '@kwiva/react'
+import { Post } from '@kwiva/data'
+
+const { data: post } = useResource(Post, id)
+const { data: posts } = useList(Post, { where: { status: 'published' }, staleTime: 30_000 })
+const save = useMutation(Post.update, {
+  optimistic: (input, current) => ({ ...current, ...input }),
+  onSuccess: () => invalidate(Post),
+})
+const feed = useInfiniteList(Post, { cursor: 'createdAt', limit: 20 })
+```
+
+Keys derive from model identity plus parameters, so `invalidate(Post)` clears every derived key touching the model — lists, details, and custom queries. The full client-cache option surface is passed through (`staleTime`, `gcTime`, `suspense`, `refetchOnWindowFocus`, `select`, `placeholderData`, …).
+
+## Providers & Context [#providers--context]
+
+```tsx title="__root.tsx"
+// __root.tsx
+import { Providers } from '@kwiva/react'
+
+<Providers theme="kwiva" i18n={catalog}>
+  <App />
+</Providers>
+```
+
+The framework injects session, the typed client, the data cache, config, and theme into context. Loaders and hooks consume them without wiring. Hooks exposed by the provider include `useSession()`, `useConfig('ui.theme')`, `useCan('posts.publish')`, and `useT()` for i18n (v1.x).
+
+## Caching & Route Rules [#caching--route-rules]
+
+| Rule              | Behavior                                         |
+| ----------------- | ------------------------------------------------ |
+| (default)         | dynamic SSR each request                         |
+| `cache: n`        | full response cached n seconds                   |
+| `swr: n`          | stale-while-revalidate                           |
+| `isr: n`          | static page regenerated on interval or on-demand |
+| `static`          | built once at `kwiva build`                      |
+| `prerender: true` | crawled/prerendered at build                     |
+
+```ts title="src/routes/rules.ts"
+// src/routes/rules.ts
+defineServerRoute('/products/**', { isr: 300, cache: { tags: ['catalog'] } })
+```
+
+On-demand invalidation (`invalidateTags(['catalog'])`) works from any job, task, or event handler.
+
+## SPA Mode [#spa-mode]
+
+In `api+spa` mode the same `definePage` files render client-only; the server serves the shell plus the API. Route rules still apply to the API surface.
+
+## What to Read Next [#what-to-read-next]
+
+* [Frontend](/docs/frontend) — Pages, routing, loaders, and hooks
+* [Rendering](/docs/rendering) — SSR, streaming, hydration, and caching
+* [Typed RPC](/docs/api/rpc) — The client contract end to end
+* [Frontend Architecture concepts](/docs/frontend/routing) — Route file conventions

@@ -1,0 +1,127 @@
+# Protecting Routes (/docs/auth/protecting-routes)
+
+
+
+Authentication tells you who the user is; protecting a route is the act of refusing to serve it to someone who is not signed in. Kwiva gives you two primary mechanisms — `requireAuth` middleware for the API side and `beforeLoad` guards for the page side — plus the ability to layer on permission checks once identity is established. Both mechanisms read the same typed `ctx.session`, so the guard code you write is a small, predictable branch on identity rather than bespoke cookie parsing.
+
+Route protection composes. The auth machinery mounts as middleware in the owned HTTP pipeline and runs at a defined stage — after session load and validation, before the handler — which means every protected surface in the framework shares the same timing, the same error types, and the same ordering guarantees.
+
+## requireAuth Middleware [#requireauth-middleware]
+
+The `auth` middleware implements `requireAuth` semantics: when no session user exists, the request is rejected in the pipeline before any handler runs.
+
+```ts title="requireauth-middleware.ts"
+defineMiddleware('auth', async (ctx, next) => {
+  if (!ctx.session.user) return error('UNAUTHORIZED')
+  return next()
+})
+```
+
+This is the correct shape for every authenticated route: read the typed session, short-circuit with a `401` when it is absent, and otherwise continue. Because middleware composes by name, the same `auth` stage can be applied globally, to a controller, or to a single route using the middleware list.
+
+> \[!NOTE]
+> The middleware reads `ctx.session.user`. An authenticated but anonymous visitor has no user, so the check correctly rejects them too — a session without an identity is not an authenticated request.
+
+## Scoping, Not Just Wiring [#scoping-not-just-wiring]
+
+Beside the auth middleware there is the `requireAuth` guard you can attach directly to route groups, controllers, and individual handlers through middleware scoping:
+
+* **Global** — the ordered middleware stack in `src/config/app.ts` applies the check to every request. This is the right default for applications with no public surface.
+* **Controller-wide** — the middleware list on a `defineController` protects everything the controller owns. Use this when the controller is entirely authenticated.
+* **Route-level** — individual handlers can add the check, the pattern used for a single admin endpoint inside an otherwise public controller.
+
+Controllers reuse the same middleware:
+
+```ts title="scoping-not-just-wiring.ts"
+export default defineController('posts', (c) => c.guard({
+  middleware: ['auth', 'tenant'],
+}, (g) => ({
+  create: g.post('/', createHandler, { body: CreateBody }),
+  publish: g.post('/:id/publish', publishHandler, { permission: 'posts.publish' }),
+})))
+```
+
+Here `guard` applies `auth` (a signed-in user) and `tenant` (a resolved tenant) to every nested route, and the `publish` action additionally demands the `posts.publish` permission — identity and authorization enforced together, in the right order. Guards nest and compose, and the guarded builder only exposes protected routes.
+
+### The auth macro [#the-auth-macro]
+
+For route-level toggling, the `auth` macro gives a one-word switch:
+
+```ts title="the-auth-macro.ts"
+defineApp({
+  macros: {
+    auth: (required: boolean, { beforeHandle }) => {
+      if (required) beforeHandle.push(requireAuth)
+    },
+  },
+})
+
+// per route
+c.get('/:id', handler, { auth: true })
+```
+
+The macro installs the same `requireAuth` stage into the route's `beforeHandle` bucket, so `{ auth: true }` on a route is exactly equivalent to listing the middleware — just more legible when most routes in a controller are public.
+
+## Page-Level beforeLoad Guards [#page-level-beforeload-guards]
+
+Frontend pages are protected before they render. A `definePage` accepts a `beforeLoad` hook that runs in the load cycle; throwing a redirect there sends the visitor somewhere else without ever rendering the protected content:
+
+```tsx title="page-level-beforeload-guards.tsx"
+export default definePage({
+  beforeLoad: ({ session }) => {
+    if (!session.user) throw redirect({ to: '/login' })
+  },
+})
+```
+
+`beforeLoad` runs before the page loader, so protected data is never fetched for unauthenticated visitors — there is no wasted query and no flashed content. The same hook also handles permission redirects, giving you a single, predictable enforcement point for page access. Error and pending UI components still apply normally, so an unauthenticated visitor never sees a partial shell.
+
+The decision runs server-side: the session is read from the cookie during server render, the guard fires if the identity is missing, and only the redirect — never the protected markup — is what streams. The client hydrates the already-correct view rather than correcting it after the fact.
+
+## Server Routes and Infra Endpoints [#server-routes-and-infra-endpoints]
+
+Auth route protection composes across the whole toolchain: `defineServerRoute` infrastructure routes, WebSocket channels, and generated model routes all flow through the same middleware pipeline. A channel subscription can be policy-checked, and a generated API route inherits whatever middleware its controller or the global stack applies.
+
+The coverage is the point. A route that bypasses the auth stage would be an exception, not a rule, and the framework makes the common case — everything goes through the pipeline — the path of least resistance.
+
+## Redirect Behavior [#redirect-behavior]
+
+The two layers behave differently by design:
+
+| Surface           | Unauthenticated behavior                                  |
+| ----------------- | --------------------------------------------------------- |
+| API / middleware  | `401` with a typed error body                             |
+| Page `beforeLoad` | Redirect to the target of your choice (commonly `/login`) |
+
+For API callers, the `401` is the contract — a typed error body your client code can branch on. For browsers, the redirect keeps the experience smooth and leaves a landing page with a sign-in form. Choose the layer by the surface: browsers get navigated, clients get status codes.
+
+## Layering Order Matters [#layering-order-matters]
+
+Protection should be layered, never a single mechanism:
+
+1. **Auth middleware** — rejects unauthenticated requests early.
+2. **Permission checks** — what an authenticated user may do, via the `permission` route option, `ctx.can`, or explicit `authorize`.
+3. **Data-level scoping** — models with a tenant field auto-scope queries so even a valid session cannot reach records outside its tenant.
+
+The order is deliberate. Identity first, then capability, then scope. Skipping a layer still "works" for the happy path but leaves a hole — the framework encourages the full stack through `guard`, global middleware, and policy enforcement.
+
+Each layer assumes the ones before it ran. The auth stage fails fast and cheaply for strangers; the policy stage then applies to the small set of authenticated requests; and tenant scoping finally constrains even a fully authorized request to the data it is allowed to see. Because every layer reads from the same typed context and the same policy source, the layers reinforce rather than contradict each other.
+
+## Readiness Checklist [#readiness-checklist]
+
+Before exposing a new route, run through the list:
+
+* Is the route behind `auth` middleware, a `guard`, or the `auth` macro?
+* Does it need a `permission` option naming the exact ability?
+* If the route touches scoped models, is the tenant middleware on the stack?
+* For pages, does `beforeLoad` redirect unauthenticated visitors before the loader runs?
+
+If each answer is yes, the route is protected at the identity, capability, and scope layers.
+
+## What's Next [#whats-next]
+
+* [Authorization](/docs/authorization) — what an authenticated user is allowed to do
+* [Sessions](/docs/auth/sessions) — the typed `ctx.session` the guards read
+* [Middleware](/docs/http/middleware) — building and scoping your own pipeline stages
+* [Guards](/docs/http/guards) — route-group guards and `beforeHandle`
+* [Tenancy](/docs/tenancy/scoping) — enforcing tenant scope after authentication

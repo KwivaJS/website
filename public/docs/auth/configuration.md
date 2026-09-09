@@ -1,0 +1,139 @@
+# Auth Configuration (/docs/auth/configuration)
+
+
+
+`defineAuth` is the single configuration point for authentication in Kwiva. Every option described below is optional — the smallest valid definition enables the password provider, and every other section fills in sensible defaults. When your definition is missing, the framework-generated surface shrinks to match: no OAuth routes without an OAuth provider, no passkey endpoints without passkeys enabled. What remains is a small, stable decision surface backed by a sealed, framework-owned auth engine that handles the protocol details you never want to hand-roll.
+
+The factory lives in `src/app/http/auth.ts` and is discovered by convention — the file's presence is what mounts the auth handler behind the owned HTTP pipeline. The shape mirrors other `defineX` factories: options can be supplied inline (which win), defaults fill gaps, and the inferred types flow into the rest of the application.
+
+## The Full Surface [#the-full-surface]
+
+```ts title="src/app/http/auth.ts"
+// src/app/http/auth.ts
+import { defineAuth } from '@kwiva/auth'
+
+export default defineAuth({
+  providers: {
+    password: { enabled: true, minLength: 10 },
+    oauth: {
+      google: { clientId: env('GOOGLE_CLIENT_ID'), secret: env('GOOGLE_SECRET') },
+      github: true,
+    },
+    passkeys: { enabled: true },           // v1.x
+    magicLink: { enabled: true },          // v1.x (needs mail)
+  },
+  session: {
+    strategy: 'database',                  // database | cookie | jwt
+    expiresIn: 60 * 60 * 24 * 7,
+    cookie: { httpOnly: true, sameSite: 'lax', secure: true },
+  },
+  user: {
+    model: 'users',                        // model must define auth fields
+    fields: { email: 'email', name: 'name', role: 'role' },
+    verifyEmail: true,                     // v1.x (needs mail)
+  },
+  hooks: {
+    onSignUp: async ({ user }) => SendWelcome.dispatch({ userId: user.id }),
+    onSignIn: async ({ user }) => SignedIn.emit({ userId: user.id }),
+    onDeleteUser: async ({ user }) => { ... },
+  },
+})
+```
+
+Each block controls a different part of the identity lifecycle: `providers` starts the sign-in methods, `session` decides how identity persists between requests, `user` binds accounts to a model, and `hooks` lets you run application logic at the seams of that lifecycle.
+
+## Providers [#providers]
+
+The `providers` map is where sign-in methods are enabled and tuned. Like every `defineX` definition, it accepts full inline configuration, and inline values win over anything set in the config folder.
+
+* **password** — `enabled` turns the credential flow on; `minLength` is when you tighten the framework's password policy beyond its default. Passwords are hashed with an engine-level argon2id policy the framework owns — plaintext never persists and never appears in logs.
+* **oauth** — a per-provider map. Google takes explicit `clientId` and `secret` (almost always read through `env()`), while `github: true` opts into defaults driven by environment variables. The list is open — any OAuth provider listed here gets `GET /auth/oauth/:provider` plus its callback route. OAuth accounts are stored in engine-managed columns on the user model, so the identity that results is indistinguishable from a password-created account.
+* **passkeys** — WebAuthn support for devices that register credentials. Registration and authentication endpoints mount under `/auth/passkeys/*`. Available in v1.x.
+* **magicLink** — passwordless sign-in via emailed links. The mailed token is single-use and delivered out of band, so there is no password to leak or reset. Available in v1.x and requires a mail integration.
+
+Multiple providers compose freely. Users are not locked to the method they first used; a session is a session regardless of how it was created. The engine-managed columns track which credentials belong to which account, so a mixed-method user is one row, one identity, one `ctx.session`.
+
+## Sessions [#sessions]
+
+The `session` block controls how an authenticated identity is persisted between requests.
+
+### Strategy [#strategy]
+
+| Strategy             | Behavior                                                   |
+| -------------------- | ---------------------------------------------------------- |
+| `database` (default) | Sessions stored in the session store, referenced by cookie |
+| `cookie`             | Session payload carried directly in the cookie             |
+| `jwt`                | Signed token authenticated on each request                 |
+
+The strategy determines where the authoritative session record lives, not what your code reads — `ctx.session` has the same shape under every strategy. `database` is the default because it makes sessions queryable: revocation, sign-out everywhere, expiry sweeps, and device listing are all plain operations against the store. `cookie` trades the lookup for a signed client-side payload, and `jwt` verifies a signed token per request. Whichever you choose, the store backend itself is configured separately in `src/config/session.ts`.
+
+### Expiry [#expiry]
+
+`expiresIn` sets the session lifetime in milliseconds — the example above is seven days. Expiry is sliding: each successful request extends the window, so active users stay signed in while dormant sessions age out. An actively used session never lapses mid-work, while an abandoned session eventually dies without anyone having to remember to revoke it.
+
+### Cookie policy [#cookie-policy]
+
+The `cookie` object mirrors the flags any hardened session cookie should carry: `httpOnly` keeps the token out of scripts, `sameSite: 'lax'` balances CSRF protection with usable redirect flows, and `secure` restricts transmission to HTTPS. These are defaults you can relax only when you know what you are trading away.
+
+### Session store [#session-store]
+
+The concrete storage backend is configured separately in `src/config/session.ts`, with `database` as the default and `redis` and `cookie` as alternatives. The store choice does not change application code — `ctx.session` looks the same no matter where the session actually lives, which is what keeps the store swappable as an app grows from a single instance to many.
+
+## The User Model Contract [#the-user-model-contract]
+
+`user.model` names the model backing accounts, and `user.fields` maps the model's columns onto the auth identity. The model must declare the auth fields you map (`email`, `name`, `role`) — the rest is managed for you:
+
+```ts title="the-user-model-contract.ts"
+defineModel('users', (f) => ({
+  id: f.id(),
+  email: f.string().unique(),
+  name: f.string(),
+  role: f.enum('user', 'admin').default('user').indexed(),
+  // engine-managed columns (added automatically at migration time):
+  // password_hash, session references, oauth accounts, passkey credentials
+}), { timestamps: true, permission: 'users' })
+```
+
+Because the model is the single source of truth, migration files pick up the managed columns automatically — the password hash column, the session references, and any OAuth or passkey account tables are added before you ever migrate. The `permission: 'users'` option additionally ties account management to a policy namespace, so admin surfaces that touch users inherit the same authorization as everything else.
+
+### Field mapping and type inference [#field-mapping-and-type-inference]
+
+The `fields` mapping is where your model's column names map onto the framework's notion of an identity. `email`, `name`, and `role` are the fields the session payload ships. Because the mapping is typed, the user shape that reaches `ctx.session` and `useSession()` is inferred from your model — `session.user.role` is statically typed in every controller and middleware, and renaming a field surfaces a type error everywhere it matters instead of a silent miss.
+
+`verifyEmail: true` (v1.x) adds the flagged-verified column and requires a mail integration to send the confirmation. It composes with the `magicLink` provider, which reuses the same delivery channel.
+
+## Hooks [#hooks]
+
+Lifecycle hooks let you run application logic at the seams of the auth flow. They receive a typed event payload and may be synchronous or asynchronous:
+
+* **onSignUp** — runs after an account is created. A natural place to dispatch a welcome job, as shown above with `SendWelcome`.
+* **onSignIn** — runs after every successful sign-in. Emit events or record activity.
+* **onDeleteUser** — runs when an account is removed, for cleanup of related data.
+
+Hooks keep auth code out of your handlers: the framework fires them consistently across every provider, so a magic-link sign-in and a password sign-in both trigger `onSignIn` exactly once. There is no per-provider duplication to maintain, and the payloads are typed from the user model, so the hook body can rely on the same field names the rest of the app uses.
+
+> \[!NOTE]
+> Hooks are for reactive work — dispatch a job or emit an event. Long synchronous work inside a hook blocks the auth response; prefer dispatching to the background worker where the work is not time-critical.
+
+## Environment-Backed Secrets [#environment-backed-secrets]
+
+Secrets never live in the definition file. OAuth credentials are read with `env('GOOGLE_CLIENT_ID')`, the typed environment accessor that validates every key at boot — a missing variable is a friendly startup error, not a runtime surprise. The same pattern covers cookies, session store URLs, and mail credentials. `kwiva key:generate` provisions the signing keys the auth layer needs, and key rotation follows the standard workflow for the signing material — issue a new key, let the old one expire naturally.
+
+## Security Defaults [#security-defaults]
+
+Auth ships hardened without extra work:
+
+* **Password hashing** — an engine-level hashing policy (argon2id) combined with the configured `minLength`.
+* **Rate limiting** — auth routes are rate-limited by default via `src/config/api.ts`, throttling brute-force attempts on credential endpoints.
+* **Enumeration-safe errors** — `UNAUTHORIZED` is returned for both an unknown email and a wrong password, so sign-in responses never leak which accounts exist.
+* **CSRF** — session-token double-submit protection is enabled by default on form routes through the `csrf` middleware. Forms authenticate by sending both the session cookie and a matching token; mismatches are rejected before any handler runs.
+
+Together these defaults cover the common auth attack surface — credential stuffing, account enumeration, cross-site request forgery, and cookie interception — without configuration.
+
+## What's Next [#whats-next]
+
+* [Sessions](/docs/auth/sessions) — session lifetime, stores, and revocation in depth
+* [Auth Providers](/docs/auth/providers) — what each provider offers and how to stack them
+* [Protecting Routes](/docs/auth/protecting-routes) — securing middleware, controllers, and pages
+* [Models](/docs/data/models) — the `defineModel` surface behind the user contract
+* [Default Protections](/docs/security/default-protections) — rate limiting, CSRF, and the rest of the security posture

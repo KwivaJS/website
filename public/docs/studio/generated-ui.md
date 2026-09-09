@@ -1,0 +1,153 @@
+# Generated UI (/docs/studio/generated-ui)
+
+
+
+The core promise of Studio is that its entire interface is derived from the model definition. This page walks through exactly what is generated for each model, how each screen maps back to the model IR, and the guarantees that fall out of deriving — rather than duplicating — your schema.
+
+Studio generates, never approximates. A column is the field type's renderer, a filter is the field's allowed values, a form field is the field's validation, an action is the model's policy. Nothing is guessed, which is why the admin UI and the API agree on every detail.
+
+## Screens Per Model [#screens-per-model]
+
+Every model produces four screens. The route shape is deterministic, which makes Studio predictable to navigate, document, and link into:
+
+| Screen | URL                      | Contents                                                                                   |
+| ------ | ------------------------ | ------------------------------------------------------------------------------------------ |
+| List   | `/studio/posts`          | DataTable: typed columns, enum filters, full-text search, pagination, row and bulk actions |
+| Detail | `/studio/posts/:id`      | Field groups and relation previews                                                         |
+| Create | `/studio/posts/new`      | Schema-derived form                                                                        |
+| Edit   | `/studio/posts/:id/edit` | The same form, prefilled                                                                   |
+
+The URLs are derived from the model name, so a model named `products` lands at `/studio/products` regardless of which folder it lives in. This deterministic addressing is what lets you link Studio screens into documentation, dashboards, and notifications before iteration.
+
+## A Model Driving Four Screens [#a-model-driving-four-screens]
+
+Take a model:
+
+```ts title="src/app/models/posts.ts"
+// src/app/models/posts.ts
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().validation((s) => s.min(1).max(200)),
+  body: f.text().optional(),
+  status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
+  authorId: f.uuid().indexed(),
+  publishedAt: f.timestamp().optional(),
+  author: f.belongsTo(() => User),
+  comments: f.hasMany(() => Comment),
+}), {
+  timestamps: true,
+  uniques: [['authorId', 'title']],
+  permission: 'posts',
+})
+```
+
+From this single declaration, Studio derives:
+
+* **Columns** — field types become cell renderers. A timestamp renders as a formatted date, an enum renders as a tagged value, a boolean renders as a switch-readable cell, and relations render as links into the related screen.
+* **Filters** — enum fields get dropdown filters over their allowed values; relation fields get filtered pickers over the related model.
+* **Form fields** — validation flows from the field DSL. A string with `max(200)` enforces that limit on input; an optional field is not required; a field with a default shows that default. There are no separately maintained validation schemas for Studio.
+* **Actions** — the `permission` namespace on the model maps to its policy, and every action is gated against the current user's abilities.
+
+## The List Screen [#the-list-screen]
+
+The DataTable is the workhorse of Studio and the screen your operators will live in:
+
+* **Typed columns** derived from the model IR; add or remove visible columns per screen without touching the model
+* **Full-text search** across the model's searchable fields
+* **Field filters** mirroring the model's enums and relations
+* **Pagination** matching the pagination API of the generated routes
+* **Row actions** — per-row edit, delete, and any custom actions you declare
+* **Bulk actions** — delete and update selected rows in one operation (v1.x)
+
+Because scoping and policies run server-side on the generated routes, the list screen never needs to reimplement access rules. It renders rows the API returned and hides actions the user cannot perform. The DataTable is also the customization seam for the whole screen — see [Customization](/docs/studio/customization).
+
+## The Create and Edit Screens [#the-create-and-edit-screens]
+
+Create and Edit share one schema-derived form:
+
+* Fields render according to their type — text, textarea, enum select, relation picker, date, and so on
+* Validation rules from the field DSL apply before submit, and the same rules are enforced again on the API boundary
+* Fields marked optional are not required; fields with defaults are prefilled with them
+* A `readonly` override (see [Customization](/docs/studio/customization)) can freeze a field on either screen
+
+The edit screen loads the existing row through the typed client and prefills the form from it — the exact same read path your application uses, so what operators see is what your API serves. Submitting the create form calls the same generated create route your client would call; there is no second write path.
+
+## The Detail Screen [#the-detail-screen]
+
+The detail screen is a read view of a single row:
+
+* Fields grouped by type and relation
+* Relation previews — a `belongsTo` shows a link to the related row; a `hasMany` shows a preview of related rows with a link to their screen
+* For audited models, the change history for the row
+* Per-row actions carried over from the list, so an operator can act without navigating away
+
+## Relation Editors [#relation-editors]
+
+Relations from the model IR become first-class editing surfaces (v1.x):
+
+* A `belongsTo` field renders as a picker over the related model's list route
+* A `hasMany` or `belongsToMany` field can create or pick related rows inline, without leaving the current screen
+* Picked rows are validated against the field's relation rules, including the tenant scoping and policy context of the parent row
+
+Relation edits go through the same generated routes as everything else, so creating a related row from a Studio form is no different from creating it through your API. See [Relations](/docs/data/relations) for the model-side surface these editors derive from.
+
+## Audit Trail [#audit-trail]
+
+Models declared with `{ audit: true }` record `createdBy` and `updatedBy` from the session on every row. Studio surfaces that history on the detail screen for audited models, and the built-in Audit screen (v1.x) aggregates change history across all audited models.
+
+The audit trail is not decorative gating — it rests on the same policy engine. Operators see change history only if their abilities permit it, and tenant scoping applies to history records just as it applies to the rows themselves.
+
+## No Duplicated Studio-Side Schema [#no-duplicated-studio-side-schema]
+
+Studio holds zero copies of your schema. There is no Studio config file that re-declares fields, no admin-specific validation, no separate list of admin resources. The single pipeline is:
+
+```plaintext title="no-duplicated-studio-side-schema.txt"
+defineModel ──► model IR ──► generated routes ──► typed client ──► Studio screens
+```
+
+This is the guarantee that matters operationally: &#x2A;*model changes flow to Studio without code.** Add a field in development and it appears in the form and the table on the next load. Change a validation rule and the form enforces it immediately. Because the API and the admin UI read from the same IR, the two cannot disagree.
+
+## Soft-Delete Aware [#soft-delete-aware]
+
+When a model declares soft deletes, Studio is aware of it:
+
+* Trashed rows are shown distinctly in the list
+* Restore and purge actions appear alongside the standard actions
+* The screen toggles between the live view and the trashed view following the same semantics as the model's query API
+
+Restore and purge are themselves policy-gated actions, so only operators with the matching abilities can bring a row back or remove it permanently. See [Soft Deletes](/docs/data/soft-deletes).
+
+## Built-In Screens [#built-in-screens]
+
+Beyond per-model CRUD, Studio ships operational screens (several v1.x) that are not tied to any single model:
+
+| Screen           | Purpose                                                          |
+| ---------------- | ---------------------------------------------------------------- |
+| Users & sessions | Engine user management — ban, impersonate, force sign-out (v1.x) |
+| Tenants          | Tenant list, plan, owner (when tenancy is enabled)               |
+| Queue            | Job table — pending/failed/dead-letter, retry (v1.x)             |
+| Schedule         | Task runs and manual trigger (v1.x)                              |
+| Audit            | Change history for `{ audit: true }` models (v1.x)               |
+| Settings         | Model-backed settings tables                                     |
+| Addons           | Installed addons — contributions, versions, update (v1.x)        |
+
+These screens reuse the same machinery as generated CRUD — they read through the typed client, check abilities, and respect tenant scoping — so the Queue screen can show a failed job to an operator who has the queue ability and to no one else.
+
+## Guarantees [#guarantees]
+
+Recapping what generated UI holds true:
+
+1. **Policy enforcement** — every action checks abilities; Studio is never a bypass.
+2. **Tenant scoping** — Studio renders only the resolved tenant's data.
+3. **No drift** — screens regenerate from the IR; schema and UI stay in lockstep.
+4. **No secondary schema** — validation, columns, filters, and forms all come from the model.
+
+## What's Next [#whats-next]
+
+* [Customization](/docs/studio/customization) — override individual screens or fields
+* [Configuration](/docs/studio/configuration) — enabling, guarding, and branding Studio
+* [Models](/docs/data/models) — every model option that drives a Studio screen
+* [Data Hooks](/docs/frontend/data-hooks) — the typed client surface Studio reuses
+* [Policies](/docs/authorization/policies) — the ability model behind every action

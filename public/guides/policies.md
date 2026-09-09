@@ -1,0 +1,89 @@
+# How do I add a policy? (/guides/policies)
+
+
+
+Adding a policy means naming a resource's permission namespace once and writing one pure function that decides who can do what. Every generated route, controller action, Studio screen, channel, and MCP tool enforces that same policy.
+
+## Prerequisites [#prerequisites]
+
+* Authentication is enabled with `defineAuth`
+* Your `users` model has a `role` field and your resource records track an owner such as `authorId`
+* The resource model or controller carries a `permission` name, like `posts`
+
+## Name the permission namespace on the model [#name-the-permission-namespace-on-the-model]
+
+A model's `permission` option ties its generated routes to that namespace. The framework checks `{permission}.{action}` before every generated handler runs:
+
+```ts title="name-the-permission-namespace-on-the-model.ts"
+import { defineModel } from "@kwiva/data"
+
+export default defineModel("posts", (f) => ({
+  id: f.id(),
+  authorId: f.string(),
+}), { timestamps: true, permission: "posts" })
+```
+
+## Define the policy [#define-the-policy]
+
+Policies live one file per resource. The callback receives `(user, ability, resource?)` and returns a boolean or a promise:
+
+```ts title="define-the-policy.ts"
+import { definePolicy } from "@kwiva/core"
+
+export default definePolicy("posts", (user, ability, resource) => {
+  if (user.role === "admin") return true
+  switch (ability) {
+    case "read":
+      return true
+    case "create":
+      return user.id != null
+    case "update":
+    case "delete":
+      return resource ? resource.authorId === user.id : false
+    case "publish":
+      return user.role === "editor"
+    default:
+      return false
+  }
+})
+```
+
+Policies are pure logic with no HTTP concerns, so the same file governs routes, Studio, channels, and MCP tools alike.
+
+## Wire permissions onto controller routes [#wire-permissions-onto-controller-routes]
+
+Controller actions declare their ability with a `permission` option. Custom actions extend the namespace, so a publish route creates the `posts.publish` ability the policy already handles:
+
+```ts title="wire-permissions-onto-controller-routes.ts"
+import { defineController } from "@kwiva/http"
+
+export default defineController("posts", (c) => ({
+  update: c.put("/:id", handler, { permission: "posts.update" }),
+  publish: c.post("/:id/publish", handler, { permission: "posts.publish" }),
+}))
+```
+
+## Check abilities in handlers and on the client [#check-abilities-in-handlers-and-on-the-client]
+
+`ctx.can` reads the signed-in user's abilities on the server, and `useCan` does the same on the client so UI can react:
+
+```ts title="check-abilities-in-handlers-and-on-the-client.ts"
+const canUpdate = ctx.can("posts.update", post)
+const canPublish = useCan("posts.publish")
+```
+
+Outside routes, such as in a seeder or task, `authorize("posts.update", post)` throws a `ForbiddenError` when the ability is denied.
+
+## Verify it works [#verify-it-works]
+
+* Start the dev server with `kwiva dev` and sign in as a non-admin author.
+* `PUT /posts/:id` succeeds on a post you own and is rejected before the handler runs on another user's post.
+* Sign in as an editor and `POST /posts/:id/publish` succeeds; the same call as a plain user returns `403`.
+* Render a button behind `useCan("posts.publish")` and it only appears for users the policy allows.
+
+## Related Documentation [#related-documentation]
+
+* [Policies](/docs/authorization/policies)
+* [Permissions](/docs/authorization/permissions)
+* [Enforcement Points](/docs/authorization/enforcement)
+* [RBAC](/docs/authorization/roles)

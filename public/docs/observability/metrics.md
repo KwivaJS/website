@@ -1,0 +1,106 @@
+# Metrics (/docs/observability/metrics)
+
+
+
+Kwiva records metrics at every boundary the framework owns, then samples and exports them on a fixed interval through the same telemetry pipeline as tracing and logs. Like the rest of observability, metrics are zero-code: they exist because you used framework APIs, and they require no explicit instrumentation.
+
+## The Metrics Pipeline [#the-metrics-pipeline]
+
+The pipeline works in four stages:
+
+1. **Record** — framework layers increment counters and observe durations at natural boundaries: an HTTP response completes, a query returns, a job finishes, a cache lookup resolves, a task runs, a page prerenders.
+2. **Sample** — the metric runtime aggregates values in memory.
+3. **Flush** — on the configured `interval` (default `10_000` milliseconds), point-in-time values are exported.
+4. **Forward** — data leaves through the configured exporters for your collector, dashboard, and alerting stack.
+
+The interval setting lives in the telemetry config:
+
+```ts title="src/config/telemetry.ts"
+// src/config/telemetry.ts
+export default defineConfig('telemetry', {
+  defaults: {
+    sampleRate: 1.0,
+    exporters: { otlp: { endpoint: 'http://collector:4318' } },
+    metrics: { interval: 10_000 },
+  },
+})
+```
+
+With no exporters configured, metric collection runs as a no-op with negligible overhead — a dev machine or single instance pays nothing until you enable forwarding.
+
+## Series Definitions [#series-definitions]
+
+| Series                                    | Kind          | Labels                      | What it tells you                        |
+| ----------------------------------------- | ------------- | --------------------------- | ---------------------------------------- |
+| `http_requests_total`                     | Total counter | `route`, `method`, `status` | Traffic volume and error ratio per route |
+| `http_request_duration`                   | Duration      | `route`, `method`, `status` | Latency distribution per route           |
+| `model_queries_total`                     | Total counter | `model`, `op`               | Query volume per model operation         |
+| `model_query_duration`                    | Duration      | `model`, `op`               | Query latency per model operation        |
+| `queue_depth`                             | Gauge         | `queue`                     | Pending work waiting on each queue       |
+| `job_duration`                            | Duration      | `queue`, `job`              | Execution time per job type              |
+| `job_failures_total`                      | Total counter | `queue`, `job`              | Failure volume per job type              |
+| `cache_hits_total` / `cache_misses_total` | Total counter | `layer`, `key prefix`       | Cache effectiveness per layer            |
+| `task_runs_total`                         | Total counter | `task`                      | Run volume per scheduled task            |
+| `task_duration`                           | Duration      | `task`                      | Execution time per scheduled task        |
+| `ssr_duration`                            | Duration      | `route`                     | Server-side render time per route        |
+| `hydration_duration`                      | Duration      | `route`                     | Client hydration time per route          |
+
+Each series carries enough labels to slice by route, model, queue, or task without losing the ability to roll up to a global view.
+
+## Reading the Series [#reading-the-series]
+
+The series split cleanly between **volume** and **health signals**:
+
+* `_total` counters answer "how much": `http_requests_total`, `model_queries_total`, `job_failures_total`, `task_runs_total`.
+* Duration series answer "how slow": `http_request_duration`, `model_query_duration`, `job_duration`, `task_duration`, `ssr_duration`, `hydration_duration`.
+* Gauges answer "how backed up": `queue_depth`.
+* The two cache counters read together as a ratio.
+
+Pair a volume series with its duration series and a failure counter, and a dashboard slice becomes a diagnosis: a route with rising volume, rising p99, and a nonzero error ratio is a route under stress; a route with flat volume and rising p99 is a regression.
+
+## Queue Depth [#queue-depth]
+
+`queue_depth` is the canary metric for background health. It is reported per queue and reflects pending work at the moment of the flush. A flat, healthy baseline with spikes on deploys and daily batch work is normal; a queue that climbs monotonically while jobs fail is your earliest signal that something downstream is stuck. Cross-check it with `job_failures_total` and `job_duration` — a full queue plus failure spikes is a poisoned worker; a full queue with healthy jobs is a throughput problem downstream.
+
+## Cache Hit Rate [#cache-hit-rate]
+
+Cache health is expressed as a ratio of two counters:
+
+```text title="cache-hit-rate.txt"
+cache hit rate = cache_hits_total / (cache_hits_total + cache_misses_total)
+```
+
+Both counters are labeled by `layer` and `key prefix`, so you can compare the effectiveness of page-level route caching against model cache against the client cache — and, within a layer, against a specific prefix such as posts. Watch the ratio per prefix: a prefix that drops to near-zero hit rate after a deploy usually means an invalidation rule is too eager, and the cache is being cleared faster than it fills.
+
+## Request Latency [#request-latency]
+
+`http_request_duration` is the direct observable for what users experience. Because it is labeled by route, method, and status, you can distinguish a slow-but-200 endpoint from an endpoint that is slow because it is failing. Watch the tail (p95 and p99) rather than the mean: means hide one slow query among hundreds of fast ones, while the tail catches exactly the requests users complain about.
+
+## Model Query Metrics [#model-query-metrics]
+
+Model query series decompose the latency story one level down. Where `http_request_duration` says a route is slow, `model_query_duration` says which operation on which model is accountable — join them on the same span data from [Tracing](/docs/observability/tracing). `model_queries_total` by `op` also reveals N+1 patterns in the aggregate: a `list` route that issues far more `get` queries per request than the code appears to is a signal to re-read the relations, not the metrics.
+
+## Where to Consume Them [#where-to-consume-them]
+
+Three consumption paths exist for the same series:
+
+* **Dashboards** — point your metrics pipeline at the exporter endpoint and build views for traffic, latency, queue depth, and cache effectiveness.
+* **Alerting** — thresholds configured in the telemetry config emit events to a webhook channel when crossed. For example, a `jobFailureRate` threshold of `0.05` fires when job failures exceed five percent, and the event composes with the notifications module.
+* **Development** — the dev overlay and `kwiva console` expose a live view of the same counters, so you can watch series change as you exercise routes locally.
+
+The three paths consume the same points, so a value that cracks a dashboard threshold and an alerting threshold is the same number — no dashboard-specific accumulation to reconcile.
+
+## Sampling in Production [#sampling-in-production]
+
+Trace sampling does not reduce data you lose — it reduces collection cost proportionally. Production guidance is a `sampleRate` of `0.1` (ten percent of traffic), which is enough to detect latency regressions and failure spikes while keeping export volume manageable. Metrics are aggregated, not per-request, so they are effectively always-on regardless of sample rate.
+
+> \[!NOTE]
+> With no exporters configured, everything here — the pipeline, the series, the interval — runs as a no-op. Metrics cost you nothing until you point an exporter at them; when you do, the series above start leaving the process within one flush interval.
+
+## What's Next [#whats-next]
+
+* [Tracing](/docs/observability/tracing) — the span tree that explains what the counters measure
+* [Logging](/docs/observability/logging) — the correlated detail behind any metric anomaly
+* [Dev Overlay](/docs/observability/dev-overlay) — watch live series during development
+* [Background Work](/docs/background-work/observability) — queue depth and job series in depth
+* [Configuration](/docs/core-concepts/configuration) — tune `interval`, `sampleRate`, and exporters

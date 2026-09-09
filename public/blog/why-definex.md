@@ -1,0 +1,66 @@
+# Why one defineX grammar (/blog/why-definex)
+
+
+
+Every app-facing construct in Kwiva is a `defineX` factory. `defineModel`, `defineController`, `definePage`, `defineJob`, `defineEvent`, `defineTask`, `definePolicy`, `defineModule` — the list keeps growing, but the shape never changes. Some people assume this is a branding tic. It isn't. The one-grammar rule is the mechanism that keeps a full-stack framework coherent.
+
+## The problem with different grammars [#the-problem-with-different-grammars]
+
+Consider the alternative: models as classes, controllers as route objects, pages as component exports, jobs as bare functions. Each construct gets its own "natural" syntax. That works fine in a library. In a framework that spans data, HTTP, frontend, and platform concerns, it compounds into real costs:
+
+* **Two mental models.** Every file type you touch asks you to re-learn a convention.
+* **Two tooling surfaces.** Generators, lint rules, and IDE support must be written per-shape.
+* **Two error surfaces.** "Why does my class look different from my function?" is a real question developers ask.
+* **Two testing habits.** Patterns don't transfer between constructs.
+
+None of these are fatal on their own. Together, they turn onboarding into a small tax you pay forever.
+
+## One grammar, everywhere [#one-grammar-everywhere]
+
+The `defineX` convention collapses that tax:
+
+```ts title="src/app/models/posts.ts"
+// src/app/models/posts.ts
+export default defineModel('posts', (f) => ({ ... }), { timestamps: true })
+
+// src/app/http/controllers/posts.ts
+export default defineController('posts', (c) => ({ ... }), { prefix: '/posts' })
+
+// src/app/jobs/send-welcome.ts
+export default defineJob('send-welcome', async ({ payload }) => { ... }, { queue: 'mail' })
+```
+
+Same shape, different domain. Once you understand `defineModel`, you already know how `defineJob` works — the arguments differ, the contract doesn't.
+
+## It enables the tooling [#it-enables-the-tooling]
+
+Because every construct shares a grammar, the framework can build tooling that covers all of them at once:
+
+* **Generators.** `kwiva make:*` scaffolds every construct from one template engine.
+* **Lint gates.** One rule can enforce conventions across models, controllers, pages, and jobs.
+* **Auto-discovery.** Files are found by directory, so nothing needs manual registration.
+* **Type inference.** Types flow through the whole stack from a single source — no codegen step, no duplicate type definitions.
+
+## It makes reading the app possible [#it-makes-reading-the-app-possible]
+
+Here's the quiet payoff. When every file follows the same shape, reading a codebase becomes reading a product description:
+
+> "The app has a `posts` model with title, body, and status. It has a controller exposing five actions. It has a `send-welcome` job on the mail queue. When a user signs up, the `user.signed-up` event dispatches it."
+
+That's not a summary written after the fact — it's the code, rendered flat. One grammar is the difference between a codebase you navigate and a codebase you read.
+
+## The boundary it draws [#the-boundary-it-draws]
+
+There's a second, subtler reason. The `defineX` convention draws a hard line between what's framework and what's application. App code imports only `@kwiva/*` and writes only `defineX(...)`. Everything underneath — the internal engines, the toolchain — is framework-owned. One grammar makes that boundary legible: if it's not a `defineX`, it isn't app code.
+
+## The tradeoff [#the-tradeoff]
+
+Uniformity has a cost: some constructs *could* be more concise in a bespoke syntax. A single-action controller is more ceremonious than a bare function. But the framework's position is deliberate — consistency compounds, cleverness doesn't. The small ceremony of a factory call buys coherence across every concern, every package, and every developer who joins later.
+
+That's why the grammar is one of the four design pillars. It's not decoration — it's the architecture.
+
+## Read more [#read-more]
+
+* **[The defineX Convention](/docs/core-concepts/definex)** — the full factory surface
+* **[Design Principles](/architecture/design-principles)** — the four pillars
+* **[Model Derivation](/architecture/model-derivation)** — what a single declaration can produce

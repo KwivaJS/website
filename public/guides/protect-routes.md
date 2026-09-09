@@ -1,0 +1,86 @@
+# How do I protect a route? (/guides/protect-routes)
+
+
+
+Protecting a route means rejecting requests that carry no valid session before any handler logic runs. Kwiva gives you guards for controller actions, middleware for request-wide checks, and `beforeLoad` redirects for pages.
+
+## Prerequisites [#prerequisites]
+
+* Authentication is configured with `defineAuth` and sessions resolve on `ctx.session`
+* Your `users` model maps `id`, `email`, and `role`, so `ctx.session.user` is typed
+* The `session` middleware is in the global stack in `src/config/app.ts`
+
+## Guard a controller action with requireAuth [#guard-a-controller-action-with-requireauth]
+
+`requireAuth` is a `beforeHandle` guard that returns `401` when no user is signed in:
+
+```ts title="guard-a-controller-action-with-requireauth.ts"
+import { defineController } from "@kwiva/http"
+import { Post } from "../models/posts"
+
+export default defineController("posts", (c) => ({
+  create: c.post("/", async ({ body, session }) => {
+    return Post.create({ ...body, authorId: session.user.id })
+  }, {
+    body: { title: "string", body: "string?" },
+    permission: "posts.create",
+  }).guard({ beforeHandle: requireAuth }),
+}))
+```
+
+Guard objects compose — chain further checks on the same route, such as `.guard({ beforeHandle: adminOnly })`.
+
+## Protect every request with middleware [#protect-every-request-with-middleware]
+
+The framework ships an `auth` middleware with `requireAuth` semantics that returns `401` for anonymous callers. Add it to the middleware stack in `src/config/app.ts`, or define a check of your own:
+
+```ts title="protect-every-request-with-middleware.ts"
+import { defineMiddleware } from "@kwiva/http"
+
+export default defineMiddleware("auth", async (ctx, next) => {
+  if (!ctx.session.user) return error("UNAUTHORIZED")
+  return next()
+})
+```
+
+## Protect pages with beforeLoad [#protect-pages-with-beforeload]
+
+`beforeLoad` receives the session and runs on the server during SSR and again on the client during navigation. Throwing a `redirect` sends guests to `/login` before the loader or component runs:
+
+```tsx title="protect-pages-with-beforeload.tsx"
+import { definePage } from "@kwiva/react"
+
+export default definePage({
+  loader: async ({ client }) => ({ orders: await client.orders.list({}) }),
+  beforeLoad: ({ session }) => {
+    if (!session.user) throw redirect({ to: "/login" })
+  },
+  component: AccountPage,
+})
+```
+
+## Raise the bar with a policy [#raise-the-bar-with-a-policy]
+
+Auth checks prove someone is signed in; policies decide what they may do. Give a route a `permission` such as `posts.create` and it is checked against the matching policy before the handler runs. Branch on the same ability inside a handler:
+
+```ts title="raise-the-bar-with-a-policy.ts"
+get: c.get("/:id", async (ctx) => {
+  const post = await Post.findOrFail(ctx.params.id)
+  return ctx.can("posts.update", post) ? post : error("FORBIDDEN")
+}),
+```
+
+See [How do I add a policy?](/guides/policies) to define the ability checks these routes rely on.
+
+## Verify it works [#verify-it-works]
+
+* Start the dev server with `kwiva dev`.
+* Without a session, `curl -i http://localhost:3000/posts/1` returns `401`, and `/account` redirects to `/login`.
+* Sign in with `POST /auth/sign-in`, repeat the request with the session cookie, and the handler returns data.
+
+## Related Documentation [#related-documentation]
+
+* [Protecting Routes](/docs/auth/protecting-routes)
+* [Middleware](/docs/http/middleware)
+* [Guards](/docs/http/guards)
+* [Policies](/docs/authorization/policies)

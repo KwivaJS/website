@@ -1,0 +1,97 @@
+# How do I configure tenancy? (/guides/tenancy)
+
+
+
+Tenancy gives every tenant its own view of the data: requests resolve to a tenant, queries auto-scope to it, and cross-tenant access is indistinguishable from a 404. Turn it on from one config file and the rest stays invisible in application code.
+
+## Prerequisites [#prerequisites]
+
+* A Kwiva project with a tenants model (the scaffolded flow provisions tenant + owner)
+* A `tenantId`-style column available on the models you want to scope
+* `src/config/tenancy.ts` present in the config folder
+
+## Enable tenancy [#enable-tenancy]
+
+Configure tenancy in `src/config/tenancy.ts`:
+
+```ts title="enable-tenancy.ts"
+import { defineConfig } from '@kwiva/config'
+
+export default defineConfig('tenancy', {
+  defaults: {
+    mode: 'domain',
+    tenantField: 'tenantId',
+    models: '*',
+    cache: { scoped: true },
+    storage: { scoped: true },
+  },
+})
+```
+
+* `mode` selects the resolution strategy (next step).
+* `tenantField` is the model column used for scoping.
+* `models: '*'` scopes every model; pass a list like `['projects', 'invoices']` to scope only those.
+* `cache` and `storage` scope per-tenant state with tenant-prefixed keys and paths.
+
+## Choose a resolution strategy [#choose-a-resolution-strategy]
+
+| Mode     | Resolution               | Example                                    |
+| -------- | ------------------------ | ------------------------------------------ |
+| `domain` | Subdomain → tenant       | `acme.app.dev` → tenant `acme`             |
+| `path`   | First path segment       | `/t/acme/...`                              |
+| `header` | `x-tenant-id` header     | API clients, internal tools                |
+| `fixed`  | Single configured tenant | Single-tenant app with the same guarantees |
+| `org`    | Auth org membership      | Org is the tenant                          |
+| `none`   | Disabled                 | Solo apps, zero overhead                   |
+
+The tenant is resolved once per request by the tenant middleware and exposed as typed `ctx.tenant` (`{ id, name, ownerId }`). Domain mode looks the tenant up by its `slug`.
+
+## Scope the models [#scope-the-models]
+
+With `models: '*'` every model is already scoped. You can also opt a model in explicitly via `tenantField`:
+
+```ts title="scope-the-models.ts"
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('projects', (f) => ({
+  id: f.id(),
+  name: f.string(),
+}), {
+  tenantField: 'tenantId',
+})
+```
+
+Once opted in, every query — list, get, update, delete — auto-injects `where tenantId = ctx.tenant.id`. Writes stamp `tenantId` from context, and a client-supplied value is stripped by the server. Cross-tenant access attempts return the same result as a missing row, so no existence leaks. Admin scopes can escape via `tenant.asAdmin()`, available inside policies only.
+
+## Isolate per-tenant state [#isolate-per-tenant-state]
+
+Beyond rows, state isolation is automatic across the rest of the stack:
+
+* Cache keys are prefixed `{tenantId}:{key}`.
+* Storage paths are written under `storage/{tenantId}/`.
+* Queue payloads carry `tenantId`, and workers re-hydrate the tenant context before running handlers.
+* Realtime channels are policy-checked per tenant.
+
+## Verify it works [#verify-it-works]
+
+Drive requests as a specific tenant in tests to confirm isolation:
+
+```ts title="verify-it-works.ts"
+withApp(async (app) => {
+  const acme = app.asTenant('acme')
+  const client = createTestClient(app, { tenant: acme })
+})
+```
+
+1. Create a row as tenant `acme`, then request it as a second tenant and confirm the response is a 404.
+2. Confirm `acme` can still read, update, and delete its own rows.
+3. Check stored cache keys and storage paths carry the `{tenantId}:` prefix.
+
+## Related Documentation [#related-documentation]
+
+* [Tenancy Configuration](/docs/tenancy/configuration) — `mode`, `tenantField`, `models`
+* [Tenant Resolution](/docs/tenancy/resolution) — Domain, path, header strategies
+* [Tenant Scoping](/docs/tenancy/scoping) — Auto-injected query filters
+* [Tenant Isolation](/docs/tenancy/isolation) — Storage, cache, queue isolation
+* [Tenancy](/docs/tenancy) — Tenancy overview
+* [Models](/docs/data/models) — The `defineModel` reference

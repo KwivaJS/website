@@ -1,0 +1,129 @@
+# CLI (/docs/cli)
+
+
+
+The `kwiva` binary is one CLI for the entire application lifecycle, built on the Rust-speed toolchain and the Bun runtime. Scaffold a project, generate typed files, run the type/lint/format gate, migrate and seed the database, start queue workers, drive the scheduler, and install addons — all from one command surface with one set of conventions.
+
+This page is the map. Each command group has its own reference page, and the sections below explain the design rules every command follows — so once you learn one command, the rest are variations on the same grammar.
+
+## One CLI for the Whole Lifecycle [#one-cli-for-the-whole-lifecycle]
+
+Frameworks that spread their operations across several tools force you to learn several conventions. Kwiva deliberately does not: project scaffolding, development, verification, database operations, background work, deployment, and addon management are all `kwiva` commands. The CLI also reads `kwiva.config.ts` for every command, so mode and presets flow from configuration — there is no second configuration format to keep in sync.
+
+Command resolution is deterministic — built-ins first, then your app's console commands, then module commands. If your application defines `import:legacy` and a module defines the same name, the app's command wins; the resolver never has to guess.
+
+```bash title="terminal"
+kwiva new helpdesk          # scaffold
+kwiva dev                   # develop
+kwiva check                 # gate
+kwiva test                  # verify behavior
+kwiva db:migrate            # schema
+kwiva build && kwiva deploy # ship
+```
+
+## Command Surface [#command-surface]
+
+| Group                                             | Commands                                                                                                                                 | What they do                                       |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| [Project & lifecycle](/docs/cli/project-commands) | `new`, `dev`, `check`, `test`, `build`, `preview`, `deploy`, `console`, `key:generate`, `upgrade`, `config:cache`                        | Scaffold, develop, verify, build, and ship the app |
+| [Generators](/docs/cli/generators)                | `make:model`, `make:controller`, `make:job`, and the rest of `make:*`                                                                    | Emit typed, convention-compliant files             |
+| [Database](/docs/cli/database-commands)           | `db:migrate`, `db:rollback`, `db:seed`, `db:reset`, `db:studio`, `db:status`, `db:diff`, `db:push`                                       | Own migrations, seeders, and schema                |
+| Queue & schedule                                  | `queue:work`, `queue:listen`, `queue:failed`, `queue:retry`, `queue:clear`, `schedule:list`, `schedule:work`, `schedule:run`, `task:run` | Run workers and drive the scheduler                |
+| Addons                                            | `add`, `addons search`, `addons list`, `addons info`, `addons remove`, `addons update`, `addons outdated`                                | Install and manage capabilities                    |
+| Config & misc                                     | `config:cache`, `module:build`, `doctor`                                                                                                 | Cache config, package modules, diagnose            |
+
+## Quick Reference [#quick-reference]
+
+| Command                             | One-line description                     |
+| ----------------------------------- | ---------------------------------------- |
+| `kwiva new <name> --mode=<mode>`    | Scaffold an app skeleton                 |
+| `kwiva dev`                         | Start the dev server with HMR            |
+| `kwiva check`                       | Run the exec/lint/format gate            |
+| `kwiva test [--e2e]`                | Run tests, optionally end-to-end         |
+| `kwiva build [--preset] [--binary]` | Produce the production build             |
+| `kwiva console`                     | Open a REPL with app context             |
+| `kwiva make:model post`             | Generate a model, migration, and factory |
+| `kwiva db:migrate`                  | Apply pending migrations                 |
+| `kwiva queue:work --concurrency=5`  | Start the built-in queue worker          |
+| `kwiva schedule:work`               | Run the foreground scheduler             |
+| `kwiva add <addon>`                 | Install and register an addon            |
+
+## What Every Command Shares [#what-every-command-shares]
+
+Three rules make the surface predictable:
+
+* **Conventions are enforced, not assumed.** Generators emit lowercase, kebab-named files with typed stubs that pass `kwiva check`; database commands operate on model-derived migrations; anything that violates a convention is rejected at creation time rather than failing the gate later.
+* **Configuration is central.** Every command reads `kwiva.config.ts` and the typed config folder. The same `src/config/database.ts` that the application uses at runtime is what `db:migrate` reads — what the CLI touches is exactly what the app connects to.
+* **Output is scriptable.** Global flags such as `--json` make command output machine-readable where sensible, so the CLI slots into shell scripts and CI pipelines, not just interactive terminals.
+
+Interactive prompts fill in omitted arguments — run `kwiva new` with no name and you are asked — while supplying all arguments runs the command non-interactively for scripts. Colors appear only in TTY sessions, `NO_COLOR` is respected, and errors include did-you-mean suggestions for mistyped commands.
+
+## Finding the Command You Need [#finding-the-command-you-need]
+
+* **I want to start working** — `kwiva new`, then `kwiva dev`.
+* **I need a file generated** — anything starting with `make:`; it maps one-to-one to the [defineX convention](/docs/core-concepts/definex).
+* **I changed a model** — run `kwiva check` for types and lint, then `kwiva db:diff` to preview the schema change.
+* **Work should happen later** — `kwiva make:job` for queue work, `kwiva make:task` plus `src/config/schedule.ts` for cron work.
+* **I'm unsure about the environment** — `kwiva doctor` (v1.x) diagnoses runtime, environment, and dependency health.
+* **I want to ship** — `kwiva build`, `kwiva preview` to inspect, then `kwiva deploy`.
+
+## App-Defined Commands [#app-defined-commands]
+
+The CLI is extensible from the application itself. Commands in `src/app/console/` are auto-discovered and join the built-in surface under their own names:
+
+```ts title="src/app/console/import-legacy.ts"
+// src/app/console/import-legacy.ts
+import { defineCommand } from '@kwiva/cli'
+
+export default defineCommand('import:legacy', {
+  description: 'Import users from the legacy export',
+  signature: 'import:legacy {file} {--dry-run}',
+  handle: async ({ input, output, models, config }) => {
+    const file = input.argument('file')
+    const dry = input.option('dry-run')
+    const bar = output.progress(rows.length)
+    for (const row of rows) { ...; bar.tick() }
+    output.info(`imported ${n} users`)
+  },
+})
+```
+
+Signature-based parsing, progress bars, tables, and styled output come built in. The `handle` receives typed access to application state — `models`, `config`, and anything else the app resolves — so an app-defined command is just code with the framework's context. Run it exactly like a built-in:
+
+```bash title="terminal"
+kwiva import:legacy export.csv --dry-run
+```
+
+The signature grammar mirrors the rest of the surface: `{file}` declares a positional argument, `{--dry-run}` declares a boolean flag. See [The defineX Convention](/docs/core-concepts/definex) for how auto-discovery picks files up.
+
+## Global Flags [#global-flags]
+
+Every command accepts the same global flags:
+
+| Flag           | Effect                                 |
+| -------------- | -------------------------------------- |
+| `--env <file>` | Load a specific environment file       |
+| `--no-color`   | Disable styled output                  |
+| `--json`       | Machine-readable output where sensible |
+| `--verbose`    | Extended logging                       |
+
+`--env` lets a script point any command at a specific environment file without touching the working directory's default. `--json` is the scripting hook — schedule listings, addon inventories, and status tables are available as structured data where a consumer would want them.
+
+## Generators, Database, and Addons [#generators-database-and-addons]
+
+The three command families you will reach for constantly each have their own reference page:
+
+| Page                                                       | Covers                                                                                                                |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| [Generators](/docs/cli/generators)                         | The full `make:*` surface — model, controller, service, job, event, policy, task, command, page, seeder, module, test |
+| [Database Commands](/docs/cli/database-commands)           | Migrations, rollback, seed, reset, status, diff, push, Studio                                                         |
+| [Addon Commands](/docs/cli/addon-commands)                 | `add`, `addons list/search/info/remove/update/outdated`                                                               |
+| [Project & Lifecycle Commands](/docs/cli/project-commands) | The full arc from `new` to `deploy`                                                                                   |
+
+## What's Next [#whats-next]
+
+* [Project & Lifecycle Commands](/docs/cli/project-commands) — scaffold, develop, check, build, deploy
+* [Generators](/docs/cli/generators) — the full `make:*` surface
+* [Database Commands](/docs/cli/database-commands) — migrations, seeders, and schema
+* [Addon Commands](/docs/cli/addon-commands) — install and manage capabilities
+* [The defineX Convention](/docs/core-concepts/definex) — the pattern every generator emits

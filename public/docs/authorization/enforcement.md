@@ -1,0 +1,98 @@
+# Enforcement Points (/docs/authorization/enforcement)
+
+
+
+A policy that is never checked is decoration. Kwiva enforces policies at every access surface, so the decision you write once in `definePolicy` is executed consistently no matter how a user (or an agent) reaches the data. This page is the map of where checks run and why the order of those checks matters.
+
+The unifying property across every surface is the policy source. Each check resolves through the same `definePolicy` file, so "can this user publish this post" has exactly one answer everywhere. What varies per surface is the mechanism — a route lifecycle hook, a Studio render decision, a channel subscription gate, an explicit `authorize()` call in a job — never the decision itself.
+
+## The Enforcement Map [#the-enforcement-map]
+
+| Surface                | Rule                                                   |
+| ---------------------- | ------------------------------------------------------ |
+| Generated model routes | `{permission}.{action}` checked in the route lifecycle |
+| Controller routes      | `permission` option resolved against the policy        |
+| Studio screens         | Actions hidden or disabled without the ability         |
+| Realtime channels      | Subscribe is policy-checked                            |
+| MCP tools              | Per-tool ability enforcement                           |
+| Seeders / tasks        | Explicit `authorize()` calls                           |
+
+Each surface uses the same policy source, so there is exactly one definition of "can a user publish this post" — not a route copy, a UI copy, and an agent copy that slowly diverge.
+
+## Generated Model Routes [#generated-model-routes]
+
+The most important enforcement point is the one you never write. A model declared with the `permission` option generates five routes — `list/get/create/update/delete` — and every one of them checks `{permission}.{action}` against the policy namespace during the request lifecycle:
+
+```ts title="generated-model-routes.ts"
+defineModel('posts', (f) => ({ ... }), {
+  timestamps: true,
+  permission: 'posts',
+})
+```
+
+`posts` maps to list `posts.read`, get `posts.read`, create `posts.create`, update `posts.update`, and delete `posts.delete`, resolved through the `posts` policy before the handler executes. Because the check lives in the route lifecycle, it composes with every other stage — auth and tenant middleware have already run, so the policy receives a real session and a scoped request.
+
+The route lifecycle stage matters for correctness: validation runs before the check, so the policy decides on a validated request; auth runs before it, so `user` is never `null`; and tenant resolution runs before it, so the request already knows whose data it touches. A rejected decision produces a typed error response before the handler body executes.
+
+## Controller Routes [#controller-routes]
+
+Hand-written endpoints opt into the same machinery with the `permission` route option. This is how custom actions — anything beyond the four CRUD verbs — get enforced:
+
+```ts title="controller-routes.ts"
+export default defineController('posts', (c) => ({
+  publish: c.post('/:id/publish', (), { permission: 'posts.publish' }),
+}))
+```
+
+The `publish` ability is a custom action registered in the route manifest; the policy's `case 'publish'` decides it. Wire the same namespace on the model and the controller, and one policy gates both the generated surface and the bespoke one.
+
+## Studio Screens [#studio-screens]
+
+Studio respects the same policies without a line of configuration. Actions a user lacks the ability to perform are hidden or disabled on generated CRUD screens — no create button without `create`, no delete without `delete`. Studio derives columns, filters, and forms from the model and gates actions with its policy, so the admin UI can never offer an operation a policy would reject. In v1.x, role matrices generated from policies show administrators exactly who holds which ability, straight from the source of truth.
+
+Studio is the most visible proof of policy purity: the same boolean that rejects a request in the pipeline also hides the button in the UI. There is no second implementation of "can the user do this" living in the admin interface.
+
+## Realtime Channels [#realtime-channels]
+
+Subscription is an access decision too. A channel subscribe is policy-checked before the WebSocket connection receives events, so a user can hold an authenticated session without being able to join a private stream — `channel('chat.{roomId}')` resolves membership through the policy engine rather than manual guard lists.
+
+The check runs at the handshake, before the connection upgrades, so an unauthorized subscriber is rejected before a stream opens. Per-tenant membership follows the same rule — see [Tenant isolation](/docs/tenancy/isolation) for how channel membership is additionally scoped by tenant.
+
+## MCP Tools [#mcp-tools]
+
+Agent surfaces are gated by the same policies as every other surface. When a model's CRUD operations are exposed as MCP tools, each tool runs through per-tool permission checks; custom controller actions exposed as tools carry their `permission` ability. An agent with tool access is bound by exactly the same lines as an API client or a Studio user — no parallel authorization model for machines.
+
+This is deliberate: the tool resolver and the HTTP route resolve the same policy for the same ability, so an agent cannot reach records a richer permission would forbid. Machines get no special path.
+
+## Seeders and Tasks [#seeders-and-tasks]
+
+Background execution has a different nature: there is no request, no route lifecycle, and often no browser. Seeders and tasks therefore enforce explicitly with `await authorize(...)`, which throws a `ForbiddenError` when the current context lacks the ability. Explicit is correct here — silent `false` in a seed would half-provide data, and a task that quietly no-ops can be worse than one that fails loudly.
+
+```ts title="seeders-and-tasks.ts"
+// inside a task or seeder
+await authorize('posts.update', post)   // throws ForbiddenError on denial
+```
+
+The throwing variant is preferred in these surfaces precisely because there is no UI to hide a button in. A background operation that cannot legally proceed should fail loudly, surface in logs, and be retryable — not complete with half its intended effect.
+
+## Defense-in-Depth Ordering [#defense-in-depth-ordering]
+
+Enforcement is layered, and the layers run in a deliberate order:
+
+1. **Authentication** — the session middleware resolves who is making the request; unauthenticated requests are cut off early with `401`.
+2. **Policy checks** — in the route lifecycle, before the handler, via `{permission}.{action}` or the route `permission` option.
+3. **Handler logic** — explicit `ctx.can`/`authorize` for decisions the generic checks do not cover.
+4. **Data-level scoping** — models with a tenant field auto-scope queries, so even a permitted request cannot reach records outside its tenant; `whereCan` (v1.x) applies policy filtering to result sets themselves.
+5. **Surface-level gating** — Studio, channels, and MCP run the same policies for non-HTTP access.
+
+Each layer assumes the ones before it ran. An early layer failing stops the request cheaply; a later layer catching something the earlier ones missed is normal defense-in-depth, not duplication. The framework's contribution is that every layer reads from the same policy source, so the layers reinforce rather than contradict each other.
+
+> \[!WARNING]
+> Layering is not redundancy to be pruned. Removing the data-level scoping layer because the policy layer "already passed" turns a permitted-but-scoped request into a permitted-and-unscoped one. Keep the layers; they enforce orthogonal boundaries.
+
+## What's Next [#whats-next]
+
+* [Policies](/docs/authorization/policies) — writing the decisions every surface enforces
+* [Permissions](/docs/authorization/permissions) — the strings that name those decisions
+* [Middleware](/docs/http/middleware) — where auth and policy checks sit in the pipeline
+* [Tenancy](/docs/tenancy/scoping) — the data-level scope that runs after authorization

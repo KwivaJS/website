@@ -1,0 +1,138 @@
+# Channels (/docs/realtime/channels)
+
+
+
+Channels are Kwiva's WebSocket broadcast primitive. A channel is a named stream of messages; clients subscribe by name, servers broadcast into them, and access control is part of the channel definition rather than an afterthought. A channel is also a first-class route citizen: it runs through the same request pipeline as a REST handler, which is exactly why session and tenant state are available while it authorizes.
+
+Where raw sockets give you one connection, channels give you a named, policy-checked, fan-out addressable group of connections. The `c.ws` route that opens a connection and the `channel()` factory that names and scopes it are complementary — see [WebSockets](/docs/http/websockets) for the socket-level surface and this page for the broadcast layer.
+
+## Defining a Channel [#defining-a-channel]
+
+A channel is defined once with the `channel()` factory from `@kwiva/http`:
+
+```ts title="defining-a-channel.ts"
+import { channel } from '@kwiva/http'
+
+export const chat = channel('chat.{roomId}')
+  .policy(({ params, session }) => session.user && isMember(session.user, params.roomId))
+  .on('message', ({ payload }) => broadcast(payload))
+  .presence(true)
+```
+
+This single definition declares the channel's name pattern, who may join it, and how inbound messages are handled. The definition is also the documentation: an operator reading the file sees the rule that governs every subscription to the channel family.
+
+## Dynamic Channel Names [#dynamic-channel-names]
+
+Channel names support segments. The `chat` channel family takes a dynamic room segment, so each room is one channel rather than a single blanket channel for the whole feature. When a client subscribes to `chat.42`, the subscribe handshake resolves the room segment from the requested name, and the resolved value is available to the channel's policy as `params.roomId`.
+
+Dynamic segments give you:
+
+* **Isolation** — room A never sees room B's traffic.
+* **Authorization** — the policy receives the resolved segment, so membership checks are exact.
+* **Automatic fan-out** — a broadcast to `chat.42` addresses exactly one room without server-side bookkeeping.
+
+The same idea covers user-scoped channels (`user.{id}`) and board-scoped channels (`board.{id}`), where the dynamic segment identifies the user or the board. Segments are typed from the pattern, so `params.roomId` inside the policy is a typed value, not a string you parse.
+
+## Subscribing [#subscribing]
+
+A client joins a channel by name. Subscribing is where authorization is enforced: the subscribe request is checked against the channel's policy before a connection is established, so a denied client never receives a working socket. The check happens during the WebSocket handshake, using the same policy engine that guards REST routes — the session is resolved, the tenant is resolved, and the channel policy runs against both.
+
+The framework handles the transport details — the WebSocket upgrade, lifecycle, and socket bookkeeping. Your definition supplies only the three things that are actually specific to your product: the name pattern, the access rule, and the message handler. Any guard or middleware mounted on a `c.ws` route runs its checks on the connection before the upgrade completes, so unauthenticated clients are rejected at the handshake rather than when they send their first message.
+
+## Authorization at the Handshake [#authorization-at-the-handshake]
+
+Channel authorization is policy-based and mirrors REST authorization. The policy receives the resolved `params` and the caller's `session`, and returns a boolean:
+
+```ts title="authorization-at-the-handshake.ts"
+export const chat = channel('chat.{roomId}')
+  .policy(({ params, session }) => session.user && isMember(session.user, params.roomId))
+```
+
+A member check like `isMember` keeps the rule readable: the room segment is resolved from the subscription, the session tells you who is calling, and the policy decides whether they belong. The same policies that guard REST routes shape channel access, so an administrator who can read a room's messages can subscribe to its channel with no separate entitlement. See [Policies](/docs/authorization/policies) for the policy model that powers it.
+
+## Handling Messages [#handling-messages]
+
+After subscription, inbound messages route through the handlers defined on the channel. A message handler receives the typed payload and a reference to the originating socket:
+
+```ts title="handling-messages.ts"
+.on('message', ({ payload }) => broadcast(payload))
+```
+
+The handler shown echoes every message back to the whole room — the canonical chat pattern. Handlers can do more: persist first, then broadcast; filter or transform before fan-out; or route into a domain event for downstream processing. Because messages are validated against the channel's schema before the handler runs, a malformed message is rejected at the channel and never reaches your handler logic or the room.
+
+## Broadcasting from the Server [#broadcasting-from-the-server]
+
+Anywhere in your application, the `broadcast` function pushes a payload into a channel by name:
+
+```ts title="broadcasting-from-the-server.ts"
+// server-side emit from anywhere in your app
+import { broadcast } from '@kwiva/http'
+
+broadcast('chat.42', { type: 'message', body: 'Hello' })
+```
+
+Broadcast calls are ordinary server-side operations — they can run in a controller, a job, a task, or an event listener, which is exactly how model lifecycle hooks can announce changes in realtime. The broadcast address is the concrete channel name; when multiple instances are deployed, the framework fans the message out to every instance that holds subscribers (see [Scaling Realtime](/docs/realtime/scaling)).
+
+## Model-Driven Broadcasting [#model-driven-broadcasting]
+
+The most common broadcast is "this record changed", and Kwiva provides hook sugar for it on models:
+
+```ts title="model-driven-broadcasting.ts"
+Post.onCreated(() => broadcast('posts'))
+```
+
+On create, everyone subscribed to `posts` is notified. The same pattern composes with the other lifecycle hooks, and because the broadcast is a plain call, handlers can pass additional context:
+
+```ts title="model-driven-broadcasting-2.ts"
+Post.onUpdated(async (post) => broadcast('posts', { id: post.id, status: post.status }))
+```
+
+## Tenant Scoping [#tenant-scoping]
+
+Channels inherit the application's tenancy rules. When tenancy is configured, subscription resolution and broadcast fan-out operate inside the resolved tenant's scope, the same scope that constrains queries, cache keys, and storage prefixes — so a client in one tenant cannot address or observe another tenant's channel traffic, even with a crafted channel name. Cross-tenant subscription attempts resolve exactly like cross-tenant record access: as if the channel does not exist. See [Tenancy](/docs/tenancy).
+
+## Presence (v1.x) [#presence-v1x]
+
+Presence tracks who is joined to a channel. On a channel with presence enabled, the framework records join and leave events, and clients can read the member set:
+
+```ts title="presence-v1.ts"
+// server side
+.presence(true)
+
+// client side
+const { members } = usePresence(`chat.${roomId}`)
+```
+
+Presence powers "who is online in this room" UI without custom bookkeeping. The member list and join and leave events are available to subscribers, and presence state is scoped per channel name. Presence is part of the realtime fast-follow and layers cleanly onto the same channel definitions — enabling it is a one-line option, not a parallel system. Across instances, presence state is coordinated through shared state rather than assumed to converge by accident (see [Scaling Realtime](/docs/realtime/scaling)).
+
+## Channel Publishing from a Route [#channel-publishing-from-a-route]
+
+Channels also compose with raw socket routes. A `c.ws` endpoint inside a controller subscribes a socket to a channel on open and publishes inbound frames on message:
+
+```ts title="channel-publishing-from-a-route.ts"
+chat: c.ws('/chat', {
+  open: (ws) => chat.subscribe(ws),
+  message: (ws, { data }) => chat.publish(data),
+  close: (ws) => chat.unsubscribe(ws),
+})
+```
+
+Subscribing a client to a channel and publishing to it are separate operations, so membership is explicit: `open` subscribes, handlers publish, and `close` typically unsubscribes — intermediate code can even move a connection between channels without a reconnect.
+
+## Transport Matrix [#transport-matrix]
+
+| Concern                  | Behavior                                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Subscribe authorization  | Policy-checked during the WebSocket handshake                                                           |
+| Inbound message handling | Channel handlers, validated before execution                                                            |
+| Outbound fan-out         | `broadcast(name, payload)` from any server code                                                         |
+| Transport                | Framework-owned channel engine over the server's WebSocket upgrade; stateful primitives on edge presets |
+| One-directional fallback | SSE over the same channel semantics when WebSockets are blocked                                         |
+
+## What's Next [#whats-next]
+
+* [Events & Broadcasting](/docs/realtime/events) — route domain events into channels
+* [Client-Side Realtime](/docs/realtime/client-usage) — subscribe with `useChannel` and `usePresence`
+* [Scaling Realtime](/docs/realtime/scaling) — how channels behave across instances
+* [WebSockets](/docs/http/websockets) — raw socket routes for custom protocols
+* [Authorization](/docs/authorization/policies) — the policy model that guards subscriptions

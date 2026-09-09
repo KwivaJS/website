@@ -1,0 +1,166 @@
+# Routes & Routing (/docs/http/routes)
+
+
+
+Routing maps incoming requests to controller actions. In Kwiva every route is declared in one of three places: generated model routes, authored controller routes, or infrastructure-level server routes. All three compile into a single typed route manifest, and the manifest is the only source the typed client, OpenAPI, and MCP tools read from.
+
+Because every route — generated or authored — becomes a manifest entry, the behavior you can rely on is uniform: parsing, validation, authorization, error mapping, and response serialization behave identically whether the path was produced by `defineModel`, written with `defineController`, or applied as a server rule.
+
+## URL Conventions [#url-conventions]
+
+```plaintext title="url-conventions.txt"
+/api                        # API prefix (src/config/api.ts)
+/api/{model}                # generated → /api/posts
+/api/{model}/:id            # single resource
+/api/{model}/:id/{action}   # custom, controller-defined
+/api/{controller}/...       # controller routes under prefix
+/openapi.json               # OpenAPI 3.1 spec
+/docs                       # Swagger UI (optional)
+/mcp                        # MCP endpoint (optional)
+/healthz · /readyz           # health checks
+```
+
+Naming is enforced by convention: lowercase plural models, kebab-case custom segments, and no verbs in paths — actions on a resource are expressed as custom routes, not verbs.
+
+## Route Handlers [#route-handlers]
+
+Controllers declare routes via the builder methods `get`, `post`, `put`, `patch`, and `delete`, each taking a path, a handler, and an optional schema:
+
+```ts title="route-handlers.ts"
+c.get('/:id', async ({ params }) => Post.findOrFail(params.id))
+
+c.post('/', async ({ body, session }) =>
+  Post.create({ ...body, authorId: session.user.id })
+, {
+  body: { title: 'string', body: 'string?' },
+  permission: 'posts.create',
+})
+```
+
+The method determines the HTTP verb, the handler produces the response, and the option object narrows the request before the handler runs. `put` and `patch` are distinct: `put` sends a complete representation, while `patch` is the partial-update convention used by the generated model routes.
+
+## Paths and Params [#paths-and-params]
+
+Paths use `:param` segments. Params are parsed before the handler runs and typed from the route schema:
+
+```ts title="paths-and-params.ts"
+c.patch('/posts/:id', async ({ params, body }) => {
+  const post = await Post.findOrFail(params.id)
+  return post.update(body)
+}, {
+  params: { id: 'string' },
+  body: { title: 'string?', body: 'string?' },
+})
+```
+
+If a requested param fails validation, the route short-circuits with a validation error before the handler is ever called. Unknown params in a declared schema reject the request; undeclared params are ignored. Params are always strings at runtime — a schema that parses them, such as `{ id: 'number' }`, runs the value through the same validation runtime as body and query.
+
+> \[!NOTE]
+> Path matching is exact per segment. A route declared as `/posts/:id` matches `/posts/1` but not `/posts/1/edit` — the segments are fixed. Custom actions occupy their own path with their own segments.
+
+## Schema Options [#schema-options]
+
+Every route can validate any subset of the request in its option object:
+
+| Option    | Validates               |
+| --------- | ----------------------- |
+| `body`    | Request body            |
+| `query`   | Query-string parameters |
+| `params`  | Path parameters         |
+| `headers` | Request headers         |
+| `cookies` | Request cookies         |
+
+All routes are validated by the same schema-driven validation runtime used by models, jobs, and channels. See [Validation](/docs/http/validation).
+
+## Generated Model Routes [#generated-model-routes]
+
+Each model contributes exactly five deterministic routes. This shape is stable so documentation and tooling can rely on it:
+
+| Method   | Path             | Request                                          | Response                                |
+| -------- | ---------------- | ------------------------------------------------ | --------------------------------------- |
+| `GET`    | `/api/posts`     | `where`, `page`, `limit`, `orderBy`, `with`, `q` | `` `{ data, total, page, lastPage }` `` |
+| `GET`    | `/api/posts/:id` | —                                                | `Post`                                  |
+| `POST`   | `/api/posts`     | validated body                                   | `Post` (201)                            |
+| `PATCH`  | `/api/posts/:id` | validated partial body                           | `Post`                                  |
+| `DELETE` | `/api/posts/:id` | —                                                | 204                                     |
+
+Generated routes are enforced at the model level:
+
+* `where` is schema-checked against the model — unknown fields return a 422.
+* `with` accepts only declared relations.
+* Each route requires the policy matching its operation, for example `posts.read` and `posts.update`, unless `permission` is disabled for the model.
+
+Because the five routes derive from the model's field DSL, changing a model changes the schemas, the responses, and the client signatures of every generated route together. See [Generated Endpoints](/docs/api/generated-endpoints).
+
+## Route Manifest [#route-manifest]
+
+Every route — generated or authored — contributes an entry to the route manifest: path, method, schemas, response type, permission, and tags. The manifest is rendered once at boot and feeds three consumers:
+
+* `@kwiva/client` — typed RPC methods inferred at the type level, zero codegen
+* OpenAPI 3.1 — served at `/openapi.json` with an optional Swagger UI at `/docs`
+* `@kwiva/mcp` — controller and model routes exposed as agent-callable tools
+
+Because generation happens from one intermediate representation, the client, the spec, and the tools can never drift from the routes you declared. The same entries drive Studio screens, so a route you add appears in the admin UI and the agent surface without further wiring. See [API: OpenAPI](/docs/api/openapi) and [Studio](/docs/studio).
+
+## Server Routes [#server-routes]
+
+`defineServerRoute` adds infrastructure-level routes and rules outside the controller surface. Server routes live in `src/routes/*.ts` and are the place for redirects, proxies, caching rules, and engine-level controls:
+
+```ts title="src/routes/rules.ts"
+// src/routes/rules.ts
+import { defineServerRoute } from '@kwiva/http'
+
+export default [
+  defineServerRoute('/legacy/**',  { redirect: { to: '/new/**', status: 308 } }),
+  defineServerRoute('/api/**',     { cors: true, rateLimit: { max: 600, per: 60 } }),
+  defineServerRoute('/proxy/img',  { proxy: 'https://img.acme.dev/**' }),
+  defineServerRoute('/healthz',    { handler: () => new Response('ok') }),
+]
+```
+
+The full rule surface is available:
+
+| Rule        | Effect                                  |
+| ----------- | --------------------------------------- |
+| `cache`     | Cache whole responses for a TTL         |
+| `swr`       | Stale-while-revalidate refresh          |
+| `isr`       | Regenerate a static page on an interval |
+| `static`    | Build-time output                       |
+| `prerender` | Crawled and rendered at build time      |
+| `redirect`  | Permanent or temporary redirects        |
+| `proxy`     | Reverse-proxy matched paths             |
+| `headers`   | Attach arbitrary response headers       |
+| `cors`      | Apply or override the CORS preset       |
+| `rateLimit` | Enforce per-path request limits         |
+
+Rules are applied before the request context is assembled, so cached public routes skip session loading entirely. See [Response Caching](/docs/http/caching) and [CORS & Security Headers](/docs/http/cors).
+
+## Groups and Prefixes [#groups-and-prefixes]
+
+Controllers mount under a prefix, which composes with the API prefix configured in `src/config/api.ts`. Multiple controllers can share a prefix by each declaring it, and guards provide the nesting model — every route inside a guard inherits its middleware and checks. See [Controllers](/docs/http/controllers) and [Guards](/docs/http/guards).
+
+## Versioning [#versioning]
+
+URL versioning is configured in `src/config/api.ts`:
+
+```ts title="versioning.ts"
+export default defineConfig('api', {
+  defaults: {
+    versioning: { strategy: 'url', default: 'v1' },
+  },
+})
+```
+
+With the `url` strategy, routes mount under `/api/v1/...`. Breaking changes require a new version; deprecation signals can be attached to routes via route rules and are carried through to the OpenAPI output. The typed client targets the configured version automatically, so application code never hard-codes the version segment.
+
+## Health Checks [#health-checks]
+
+`/healthz` and `/readyz` are provided by server routes. The former is the liveness probe — the process is up — while the latter reports readiness, such as database and queue connectivity. Health responses are kept tiny and uncached so orchestrators get an accurate signal. See [Getting Started: configuration](/docs/getting-started/configuration) for wiring health routes into deployments.
+
+## What's Next [#whats-next]
+
+1. [Controllers](/docs/http/controllers) — declaring routes with typed handlers
+2. [API: Generated endpoints](/docs/api/generated-endpoints) — the five-model-route contract
+3. [API: RPC client](/docs/api/rpc) — consuming the manifest from the client
+4. [API: OpenAPI](/docs/api/openapi) — the spec rendered from the manifest
+5. [Middleware](/docs/http/middleware) — pipeline stages that run around routing

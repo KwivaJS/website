@@ -1,0 +1,140 @@
+# File-Based Routing (/docs/frontend/routing)
+
+
+
+Routing is owned by the framework. `@kwiva/router` provides the core — route tree, matching, loaders, guards, history — and `@kwiva/react` binds it to pages and components. The route tree is **generated from the file system**: there is no central route configuration file and nothing to keep in sync. The router core is a Kwiva deliverable (ADR-0005) whose ergonomics follow a file-based reference router; the library itself is not a dependency, so there is no version pin and no upstream surface to import.
+
+## The Page Tree [#the-page-tree]
+
+All routes live under `src/ui/pages/`:
+
+```plaintext title="the-page-tree.txt"
+src/ui/pages/
+├─ __root.tsx              # root layout + providers + outlet
+├─ index.tsx               # /
+├─ about.tsx               # /about
+├─ posts.index.tsx         # /posts
+├─ posts.$id.tsx           # /posts/:id
+├─ posts.$id.edit.tsx      # /posts/:id/edit
+├─ settings/
+│  ├─ profile.tsx          # /settings/profile
+│  └─ security.tsx         # /settings/security
+└─ files.$.tsx             # splat: /files/*
+```
+
+Four conventions cover the entire tree:
+
+| Convention          | Meaning                       | Example                            |
+| ------------------- | ----------------------------- | ---------------------------------- |
+| Flat + dotted paths | Dots become path separators   | `posts.index.tsx` → `/posts`       |
+| `$param` segments   | Dynamic path segment          | `posts.$id.tsx` → `/posts/:id`     |
+| `$` splat           | Catch-all remainder           | `files.$.tsx` → `/files/*`         |
+| `__root.tsx`        | Root layout for the whole app | hosts providers + outlet           |
+| Folder layout files | `_layout.tsx` inside a folder | composes routes inside that folder |
+
+Files and folders nest arbitrarily deep, and each level contributes either a route or a layout — never both. A folder with a `_layout.tsx` groups routes that share chrome; a folder without one is just namespacing.
+
+## Dynamic Segments [#dynamic-segments]
+
+A `$` prefix marks a file segment as dynamic. `posts.$id.tsx` matches `/posts/1a2b3c`, `/posts/anything` — and nothing else. The matched value is available as typed params:
+
+```tsx title="dynamic-segments.tsx"
+const { id } = Route.useParams()
+```
+
+Params are string-typed per the segment, and code that reads a param that the route file does not define fails at compile time. Multiple dynamic segments work the same way: `posts.$id.edit.tsx` declares `$id` and matches two-segment `posts/:id/edit` paths.
+
+### Splats [#splats]
+
+The bare `$` matches the whole remainder of the path, including multiple segments. `files.$.tsx` matches `/files/a`, `/files/a/b`, and `/files/a/b/c.txt`. Splats are useful for catch-all surfaces (file views, docs trees) where the shape of the tail is unknown at authoring time.
+
+## Typed Search Params [#typed-search-params]
+
+Search state is validated per route with `validateSearch`, and the resulting shape flows to `Route.useSearch()`, to link `search` props, and into navigation calls:
+
+```tsx title="typed-search-params.tsx"
+validateSearch: (s) => s.object({ q: s.optional(s.string()), page: s.optional(s.number()) })
+```
+
+```tsx title="typed-search-params-2.tsx"
+const search = Route.useSearch()   // typed by validateSearch
+const { q, page } = search
+```
+
+Validation runs before the route is even accepted, on both server and client. Invalid `to`, `params`, or `search` values fail **at compile time** — the route tree types are generated into `src/.kwiva/types` and ambiently available to every file. A `search` object that does not satisfy the target route's schema is a type error.
+
+## Matching Rules [#matching-rules]
+
+Routes are matched by score, not by declaration order:
+
+* A literal segment always beats a `$param` segment at the same position
+* A `$param` segment beats the `$` splat
+* The splat matches any remainder, including multi-segment ones
+* Layouts participate in the match: a request resolves against the layout chain that can render the URL
+
+Because matching is deterministic, `/posts/readme` resolves to `posts.$id.tsx` (literal score wins among equal shapes), while `/files/a/b/c.txt` resolves to the `$` splat. The same request always resolves to the same route — the behavior is scored, not order-dependent.
+
+## Nested Folders [#nested-folders]
+
+Folders nest both routes and layouts. Files inside `settings/` share the folder's layout file:
+
+```plaintext title="nested-folders.txt"
+src/ui/pages/settings/
+├─ _layout.tsx             # /settings shell
+├─ profile.tsx             # /settings/profile
+└─ security.tsx            # /settings/security
+```
+
+Each route renders into the nearest enclosing layout's outlet, composing arbitrary depth. A matched URL is rendered through the chain of layouts that owns it, root first, leaf last. See [Nested Layouts](/docs/frontend/layouts) for composition rules and layout-level loaders.
+
+## Loaders and Match [#loaders-and-match]
+
+The router runs loaders for **every matched route** — the layouts and the page together — in parallel, deduplicated per request. Loader results are keyed identically on server and client, so navigation reuses what already exists. `loaderDeps` scopes re-execution to a slice of the search state, and `beforeLoad` guards run before any loader in the chain. See [Loaders & Data](/docs/frontend/loaders).
+
+## Route Context [#route-context]
+
+The router carries a typed context available to loaders, guards, and components. The root route provides it — session, typed client, config, and the data-hook cache are injected without manual wiring:
+
+```tsx title="route-context.tsx"
+createRootWithContext({ session, client, config })
+```
+
+Anything declared here is available in every loader's argument and in every page component, so pages never construct infrastructure themselves. Loaders receive `params`, `search`, `client`, `session`, `config`, and `location`; guards receive the same surface plus the URL being navigated to. No import, no context typing ceremony — the route file declares what it needs.
+
+## History Modes [#history-modes]
+
+The router supports the three standard history modes, selected per use case:
+
+| Mode            | Fits when                                                       |
+| --------------- | --------------------------------------------------------------- |
+| Browser history | Default web apps — clean URLs, server renders the initial route |
+| Hash history    | Static hosts that cannot rewrite unknown paths                  |
+| Memory history  | Tests and embedded environments without a real URL              |
+
+The same matching, loader, and type surface applies in every mode, which is what lets one file render server-side, client-side, and inside a test harness without changes.
+
+## Type Generation [#type-generation]
+
+The route tree, its params, its search schemas, and its loader return types are all compiled into generated types under `src/.kwiva/types`. The framework reads these at type level — there is no runtime codegen step, no generated JavaScript, and nothing to commit. The same generated surface powers `Route.useParams()`, `Route.useSearch()`, `Route.useLoaderData()`, typed `<Link>` targets, and navigation calls. You notice the output only as autocomplete and compiler errors.
+
+## Code Splitting [#code-splitting]
+
+Because routes are the unit of navigation, they are also the unit of client code. The framework owns code splitting and dehydration (ADR-0006): each route's component, loader, and hooks load with the navigation that needs them, on both the server-rendered and single-page paths. Splitting follows the route automatically — there is no manual `lazy()` wiring per page, because the route boundary *is* the code boundary. A settings page's components never ship to a user who visits only the homepage.
+
+## 404 and Not Found [#404-and-not-found]
+
+A route that matches the tree but cannot resolve its data can throw the typed `notFound()` from a guard or loader. The router renders the nearest `notFoundComponent`, or the root boundary when none exists closer. Because `404` is a data outcome, it participates in the same loader/type flow as every other result. See [Pages](/docs/frontend/pages).
+
+## Dev Ergonomics [#dev-ergonomics]
+
+* `kwiva make:page posts.$id` scaffolds a route file with a typed stub, providers, and a loader
+* The dev overlay lists the route tree, loader timings, and cache state (v1.x)
+* OTel spans per match: the dev overlay shows the loader waterfall for each request
+
+## What's Next [#whats-next]
+
+* [Pages](/docs/frontend/pages) — what goes inside a route file
+* [Nested Layouts](/docs/frontend/layouts) — composing the tree with layout files
+* [Navigation & Link](/docs/frontend/navigation) — moving between routes with type safety
+* [Loaders & Data](/docs/frontend/loaders) — how each matched route loads data
+* [Server-Side Rendering](/docs/rendering/ssr) — how the route tree serves a request

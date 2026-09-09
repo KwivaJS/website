@@ -1,0 +1,176 @@
+# Nested Layouts (/docs/frontend/layouts)
+
+
+
+Layouts are pages. A layout file is an ordinary `definePage` whose component renders an `<Outlet />` — the place where matched child routes appear. Because layouts are pages, they get everything pages get: loaders, guards, pending and error UI, head meta, and search validation. Composition falls out of the file tree rather than from a routing table.
+
+This is the same model as the framework-owned router everywhere else: a matched URL is rendered through the chain of layouts that owns it, each level providing its own chrome and data without coupling to its children.
+
+## The Root Layout [#the-root-layout]
+
+Every application has a root layout at `src/ui/pages/__root.tsx`. It establishes the provider tree and the single outlet that the whole application renders through:
+
+```tsx title="the-root-layout.tsx"
+import { definePage, Providers, Outlet } from '@kwiva/react'
+
+export default definePage({
+  component: () => (
+    <Providers theme="kwiva">
+      <Layout>
+        <Outlet />
+      </Layout>
+    </Providers>
+  ),
+})
+```
+
+`Providers` injects session state, the typed client, the data-hook cache, internationalization, and theming into context. Anything mounted here (a sidebar, a topbar, a provider tree) wraps every route in the app. The root layout is also the natural home for a root-level `errorComponent`, because uncaught errors bubble up to it — plus a root-level loader for app-wide data every route needs.
+
+## Folder Layouts [#folder-layouts]
+
+Nested layouts live in folders using a `_layout.tsx` file. Routes inside the folder render into that layout's outlet:
+
+```plaintext title="folder-layouts.txt"
+src/ui/pages/
+├─ settings/
+│  ├─ _layout.tsx          # /settings shell — sidebar, heading, outlet
+│  ├─ profile.tsx          # /settings/profile
+│  └─ security.tsx         # /settings/security
+```
+
+```tsx title="src/ui/pages/settings/_layout.tsx"
+// src/ui/pages/settings/_layout.tsx
+import { definePage, Outlet } from '@kwiva/react'
+
+export default definePage({
+  component: () => (
+    <SettingsShell>
+      <Outlet />
+    </SettingsShell>
+  ),
+})
+```
+
+`/settings/profile` now renders inside `<SettingsShell />`, which itself renders inside the root layout. Each level contributes its own chrome without coupling. The file moved the navigation from a shared component into a section — it did not restructure the router.
+
+## Composition [#composition]
+
+Layouts and pages collapse in a predictable way: a matched URL is rendered through the layout chain that owns it, root first, leaf last:
+
+```plaintext title="composition.txt"
+request: /settings/profile
+  └─ __root.tsx           → renders <Providers><Layout><Outlet/>
+       └─ settings/_layout.tsx  → renders <SettingsShell><Outlet/>
+            └─ settings/profile.tsx → renders the page
+```
+
+Anything a parent layout renders around its outlet is inherited by every descendant — deciding to move a nav bar from the root into the `settings` layout is a file move, not a refactor. Each layout participates in the router match, so the chain that renders a URL is always the chain the score chose — see [File-Based Routing](/docs/frontend/routing) for matching rules.
+
+## Layouts and the URL [#layouts-and-the-url]
+
+Layout files contribute the URL prefix their folder owns. `settings/_layout.tsx` makes `/settings` the anchor of every route inside `settings/` — the same way `posts.$id.tsx` owns `/posts/:id`, a folder layout owns its directory:
+
+```plaintext title="layouts-and-the-url.txt"
+src/ui/pages/account/        → URL prefix /account
+├─ _layout.tsx               # /account shell
+├─ billing.tsx               # /account/billing
+└─ invoices.tsx              # /account/invoices
+```
+
+The file tree is the URL tree: routes and layouts read the same naming rules, and the score-based matcher resolves both. Because paths are stable this way, moving a section under a layout is an organizing change — the routes that render into it are untouched.
+
+## Nested Layout Chains [#nested-layout-chains]
+
+Folders nest freely, and each level composes its own chrome. A two-level section needs two layout files, each owning its prefix:
+
+```plaintext title="nested-layout-chains.txt"
+src/ui/pages/account/
+├─ _layout.tsx              # /account shell
+├─ settings/
+│  ├─ _layout.tsx           # /account/settings shell
+│  ├─ profile.tsx           # /account/settings/profile
+│  └─ security.tsx          # /account/settings/security
+```
+
+`/account/settings/profile` renders through three layouts — root, account, account/settings — each contributing its own nav, heading, or data. Loaders across the whole chain run in parallel and deduplicate shared dependencies, so the deeper the chain, the more lookups collapse into existing cache entries rather than multiplying.
+
+## When to Reach for a Layout [#when-to-reach-for-a-layout]
+
+Layouts are the right tool when a group of routes shares behavior. Common triggers:
+
+| Situation                                     | Layout move                                         |
+| --------------------------------------------- | --------------------------------------------------- |
+| A section reuses chrome (nav, heading, shell) | Folder `_layout.tsx`                                |
+| A section requires auth or a permission       | `beforeLoad` guard on the layout                    |
+| Section-wide data every child renders         | Layout loader                                       |
+| Shared error or pending UI                    | `errorComponent` / `pendingComponent` on the layout |
+| Document meta for the whole section           | `head` on the layout                                |
+
+The opposite also holds: a route that shares nothing does not need a layout file. Because layouts are pages, starting without one and adding `_layout.tsx` later never changes the child route files — composition is additive.
+
+## Layout-Level Loaders [#layout-level-loaders]
+
+Layouts participate in data loading like any page. A layout loader runs in parallel with the loaders of every other matched route, and its results are typed into the layout's children through the same loader-data mechanism:
+
+```tsx title="src/ui/pages/settings/_layout-2.tsx"
+// src/ui/pages/settings/_layout.tsx
+export default definePage({
+  loader: async ({ client }) => ({
+    workspaces: await client.workspaces.list(),
+  }),
+  component: ({ loaderData }) => (
+    <SettingsShell workspaces={loaderData.workspaces}>
+      <Outlet />
+    </SettingsShell>
+  ),
+})
+```
+
+Loaders across all matched routes execute in parallel and are deduplicated per request — a shared dependency is fetched once even when several layouts query it. On the server this happens in-process with no network hop; on the client navigation walks the same cached entries. Seen from the client, the whole layout chain composes into a single fast navigation. See [Loaders & Data](/docs/frontend/loaders) for the parallel execution contract.
+
+## Guards at the Layout Level [#guards-at-the-layout-level]
+
+Because layouts are pages, `beforeLoad` belongs here too. Protecting an entire section becomes one declaration in the folder's `_layout.tsx` instead of a repeated check in every child page:
+
+```tsx title="guards-at-the-layout-level.tsx"
+beforeLoad: ({ session }) => {
+  if (!session.user) throw redirect({ to: '/login' })
+}
+```
+
+```plaintext title="guards-at-the-layout-level-2.txt"
+Settings section
+  └─ beforeLoad guard on settings/_layout.tsx
+       └─ children never run their loaders when the guard throws
+```
+
+A guard that throws stops every loader in the chain beneath it — nothing in the section runs, no data leaks, no flash of unauthorized content. This is the same guarantee pages get individually, promoted to a whole subtree. See [Protecting Routes](/docs/auth/protecting-routes) and [Pages](/docs/frontend/pages).
+
+## Loading, Error, and Meta in Layouts [#loading-error-and-meta-in-layouts]
+
+Since layouts are pages, they also take the full UI-state surface:
+
+| Surface                      | Layout use                                                   |
+| ---------------------------- | ------------------------------------------------------------ |
+| `pendingComponent`           | Section-wide loading skeleton while the layout's loaders run |
+| `pendingMs` / `pendingMinMs` | Debounce and floor for that skeleton                         |
+| `errorComponent`             | Shared error panel for the whole section                     |
+| `notFoundComponent`          | Section-scoped not-found UI                                  |
+| `head`                       | Document meta applied to every child route                   |
+| `loaderDeps`                 | Scope the layout loader to a slice of search state           |
+
+A section-wide loading skeleton, a shared error panel, or document meta applied to every child route is defined once in the layout instead of repeated per page. Deferred data (`stream()`) works here too — a layout can block its chrome on one value and stream a supplementary panel behind a suspense boundary.
+
+## Nesting Depth [#nesting-depth]
+
+Layering is not limited: root, folders, nested folders, and route files can compose arbitrarily deep, and matching scores the layout chain that best fits the URL. Deep nesting stays cheap because loaders run in parallel and the router reuses the same cache across levels — on the server, shared dependencies are deduplicated per request; on the client, navigation walks the same cached entries.
+
+There is no artificial ceiling on depth. What keeps deep trees fast is the loader contract, not the nesting itself: every matched loader across the chain resolves in parallel, deduplicated per request, and dehydrated into the same page stream. See [Loaders & Data](/docs/frontend/loaders) and [Hydration](/docs/rendering/hydration).
+
+## What's Next [#whats-next]
+
+* [File-Based Routing](/docs/frontend/routing) — the file conventions that create layouts
+* [Pages](/docs/frontend/pages) — the `definePage` contract layouts use
+* [Loaders & Data](/docs/frontend/loaders) — parallel loading across layout chains
+* [Data Hooks](/docs/frontend/data-hooks) — consuming layout data on the client
+* [Server-Side Rendering](/docs/rendering/ssr) — how the layout chain renders a request

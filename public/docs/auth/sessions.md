@@ -1,0 +1,110 @@
+# Sessions (/docs/auth/sessions)
+
+
+
+A session is the currency of authentication: once a user signs in, a session represents that identity to every middleware, controller, loader, and page until it expires or is revoked. Kwiva makes the session a typed, first-class value across both sides of the stack, so you check identity the same way everywhere instead of hand-rolling cookie parsing. The session machinery — storage, signing, expiry, revocation — belongs to a sealed, framework-owned auth engine; your code only reads and acts on the result.
+
+Sessions ride through the request lifecycle at a defined point. During context assembly, cookies are decoded and the session is loaded from the configured store (database or Redis by default), then the resolved identity is reused by everything downstream — tenant resolution, logging, audit fields, and permission checks all draw on the same `ctx.session` rather than re-reading cookies.
+
+## The Typed Server Session [#the-typed-server-session]
+
+Every request that passes through the session middleware carries a `ctx.session` — typed as either a user payload or `null`, never an untyped blob:
+
+```ts title="the-typed-server-session.ts"
+const { session } = ctx // typed: { user: { id, email, role } | null }
+```
+
+A route that requires identity simply reads it:
+
+```ts title="the-typed-server-session-2.ts"
+defineMiddleware('auth', async (ctx, next) => {
+  if (!ctx.session.user) return error('UNAUTHORIZED')
+  return next()
+})
+```
+
+Because the user shape is inferred from the field mappings in `defineAuth`, `session.user.id` and `session.user.role` are statically typed in every controller and middleware that touches them. Rename a model field and the type error surfaces everywhere it matters — no stringly-typed lookups.
+
+The session is resolved once per request and reused. The tenant middleware, request logging, audit fields, and permission checks all draw on the same identity, so there is exactly one notion of "who is making this request" in a single request cycle. Session resolution joins tenant resolution with a combined target of under 2ms on a warm database or Redis hit, and route caching short-circuits before session load entirely — public cached pages never force an identity lookup.
+
+> \[!TIP]
+> If a route does not need identity, keep it off the auth path. Because caching short-circuits before session load, public routes can serve from cache without touching the session store at all.
+
+## Session Lifecycle [#session-lifecycle]
+
+Lifetime is controlled by `session.expiresIn` in `defineAuth` (milliseconds) and by the store backend configured in `src/config/session.ts`:
+
+| Store                | Where sessions live       | Notes                                                   |
+| -------------------- | ------------------------- | ------------------------------------------------------- |
+| `database` (default) | Sessions table            | Survives restarts; queryable for revocation and listing |
+| `redis`              | In-memory store           | Fast, shared across instances                           |
+| `cookie`             | Signed client-side cookie | Stateless, no lookup                                    |
+
+Expiry is **sliding**: each authenticated request refreshes the window, so an actively-used session never lapses while an idle one eventually does. This defaults to a sensible balance between convenience and hygiene — no configuration required.
+
+### Session strategies in depth [#session-strategies-in-depth]
+
+The `strategy` option selects how the authoritative session record is persisted:
+
+* **`database`** — the store holds a session row referenced by the cookie. Revocation is a delete; device listing is a query; expiry sweeps are routine maintenance. Best for anything that needs multi-device management or auditability.
+* **`cookie`** — the session payload travels in the signed cookie itself. There is no server-side lookup, at the cost of being unable to revoke before the cookie expires somewhere other than the store.
+* **`jwt`** — a signed token is verified on each request. Stateless verification across instances, with revocation handled at the token level.
+
+The choice does not leak into application code: `ctx.session` and `useSession()` are identical under all three strategies, which is what lets you start with `database` and move later without touching handlers.
+
+## Cookies [#cookies]
+
+The session cookie is configured in the `session.cookie` block and is hardened by default: `httpOnly` blocks script access, `sameSite: 'lax'` limits cross-site sends, and `secure` restricts the cookie to HTTPS. The typed RPC client on the frontend needs no manual wiring — session cookies flow automatically on every request, and the SSR pass sends them with the initial hydration.
+
+Cookie hardening is defense for the identity layer: script access is blocked (XSS cannot exfiltrate the session), cross-site sends are limited (reducing CSRF surface), and HTTPS-only transmission keeps the cookie off plaintext connections. The framework's `csrf` middleware then handles the residual cross-site risk separately.
+
+## Revocation [#revocation]
+
+Sessions can be revoked at any time, independent of expiry. Deleting a session record (or an expired sweep of the store) invalidates it immediately; the same mechanism powers sign-out, admin account bans, and forced logouts. Query the store like any model to prune or audit:
+
+```ts title="revocation.ts"
+const n = await Session.query().where('expiresAt', '<', new Date()).delete()
+```
+
+Because the store is shared and externalized, revocation is immediately visible to every instance — there is no per-process list to synchronize. A single sign-out invalidates the session everywhere: other tabs, other devices, and other instances all see the revoked session on their next request.
+
+### Multi-device sessions [#multi-device-sessions]
+
+Each sign-in creates its own session record, so the same account can hold several active sessions on different devices simultaneously. That is the normal state of affairs — and it is why revocation is per-session rather than per-account. Revoking one device's session leaves the others signed in; an account-wide ban revokes them all by deleting every row for that user.
+
+## CSRF on Form Routes [#csrf-on-form-routes]
+
+Session authentication introduces CSRF exposure, so the `csrf` middleware uses the session token in a double-submit pattern and is enabled by default on form routes. Forms authenticate by sending both the session cookie and a matching token; mismatches are rejected before any handler runs. This composes with the auth middleware: sessions identify the request, CSRF proves the request came from the user's own browser.
+
+## Device and Session Listing (v1.x) [#device-and-session-listing-v1x]
+
+In v1.x the session store powers a device and session listing inside Studio, so users can inspect every active session and revoke individual devices instead of signing out everywhere at once. Because the store holds one row per session, the listing is a query and the revoke is a delete — the same primitives the framework uses everywhere.
+
+## The Client Side [#the-client-side]
+
+On the frontend the same identity arrives through `useSession()`:
+
+```tsx title="the-client-side.tsx"
+const { user, signOut, isPending } = useSession()
+```
+
+`useSession()` is SSR-safe: the server renders the authenticated view from the cookie, and the client hydrates the same state without a flash of logged-out UI. `signOut` hits the session revocation endpoint and updates every session-aware hook. See [Client-Side Auth](/docs/auth/client-usage) for the full frontend flow.
+
+## Session Maintenance [#session-maintenance]
+
+Routine hygiene is a plain operation against the store:
+
+* **Expiry sweeps** — delete rows past `expiresAt` on a schedule, exactly as shown above.
+* **Forced logout** — delete the row for a player's session; the next request is unauthenticated.
+* **Bans** — delete all sessions for an account, then let policies block further sign-in.
+* **Audit** — query the store for active sessions per user for support and security review.
+
+All of these are ordinary model operations — sessions are just rows with the same query surface as any other scoped model.
+
+## What's Next [#whats-next]
+
+* [Client-Side Auth](/docs/auth/client-usage) — `useSession()` and sign-in flows in the browser
+* [Auth Configuration](/docs/auth/configuration) — session strategy, expiry, and cookie settings
+* [Protecting Routes](/docs/auth/protecting-routes) — turning `ctx.session` into route guards
+* [Authorization](/docs/authorization) — what a session allows, enforced by policies
+* [Security](/docs/security/default-protections) — CSRF and session hardening

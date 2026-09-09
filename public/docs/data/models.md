@@ -1,0 +1,229 @@
+# Models (/docs/data/models)
+
+
+
+A model in Kwiva is more than a database schema. It is the **single source of truth** for a resource: the database table, migrations, REST and RPC APIs, the typed client SDK, the admin UI, the OpenAPI spec, search indexes, and MCP tools all derive from it. Because the model is one file of plain data, there is no second schema to keep in sync — changing the model and regenerating touches every derived surface consistently.
+
+Models live one-per-file in `src/app/models/` and are authored with `defineModel`, a function-based factory (the same `defineX` convention used across the framework). `kwiva make:model` scaffolds a model, its migration, and a factory stub.
+
+## The defineModel Factory [#the-definemodel-factory]
+
+```ts title="the-definemodel-factory.ts"
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().validation((s) => s.min(1).max(200)),
+  body: f.text().optional(),
+  status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
+  publishedAt: f.timestamp().optional(),
+  authorId: f.uuid().indexed(),
+  author: f.belongsTo(() => User),
+  comments: f.hasMany(() => Comment),
+}), { timestamps: true, permission: 'posts', audit: true })
+```
+
+The factory accepts three arguments:
+
+| Argument  | Type               | Description                                                                  |
+| --------- | ------------------ | ---------------------------------------------------------------------------- |
+| `name`    | `string`           | Table/resource name, lowercase and plural (for example `'users'`, `'posts'`) |
+| `fields`  | `(f) => ({ ... })` | Field factory function returning the field map                               |
+| `options` | `ModelOptions`     | Model-level configuration: timestamps, tenancy, permissions, hooks           |
+
+The third argument is typed — every option is validated and flows into the model IR.
+
+## Model Options [#model-options]
+
+| Option        | Type                           | Description                                                   |
+| ------------- | ------------------------------ | ------------------------------------------------------------- |
+| `timestamps`  | `boolean`                      | Adds `createdAt` and `updatedAt`, maintained automatically    |
+| `softDelete`  | `boolean`                      | Adds a `deletedAt` column and filters trashed rows by default |
+| `audit`       | `boolean`                      | Adds `createdBy` and `updatedBy`, set from the session        |
+| `tenantField` | `string`                       | Column name used for automatic tenant scoping                 |
+| `permission`  | `string`                       | Policy namespace for generated routes and Studio screens      |
+| `uniques`     | `string[][]`                   | Composite unique constraints, each entry an array of columns  |
+| `indexes`     | `IndexDefinition[]`            | Additional indexes beyond single-field `indexed()`            |
+| `hooks`       | `ModelHooks`                   | Lifecycle hooks around creating and deleting                  |
+| `computed`    | `Record<string, (row) => any>` | Derived, read-only fields (`v1.x`)                            |
+| `searchable`  | `string[]`                     | Fields indexed for full-text search                           |
+| `orderable`   | `boolean`                      | Default ordering on `createdAt` for list queries              |
+| `cache`       | `CacheOptions`                 | Per-model caching configuration                               |
+| `routes`      | `false`                        | Disables the generated REST surface for this model            |
+
+> \[!TIP]
+> Set only what varies per model. Global conventions (tenancy defaults, validator choice, database driver) belong in the config folder — see [Configuration](/docs/core-concepts/configuration).
+
+## The Field DSL [#the-field-dsl]
+
+Fields use a function-based DSL. Each field starts from a type constructor and accepts a chain of modifiers:
+
+```ts title="the-field-dsl.ts"
+f.string().optional().default('draft').indexed().validation((s) => s.min(1).max(200))
+f.text().optional().nullable()
+f.enum('active', 'inactive').default('active')
+f.uuid().indexed()
+f.integer().min(0).max(1000000)
+f.float().step(0.01)
+f.boolean().default(false)
+f.timestamp().optional()
+f.datetime().optional()
+f.date().optional()
+f.json<{ readingTime: number }>().optional()
+f.jsonb().optional()
+f.binary().optional()
+f.currency().optional()
+f.geoPoint().optional()
+f.email().optional()
+f.url().optional()
+f.phone().optional()
+f.ip().optional()
+f.cidr().optional()
+f.color().optional()
+f.slug().optional()
+f.regex(/^[a-z]+$/).optional()
+f.file().optional()
+f.image().optional()
+f.object().optional()
+f.array(f.string()).optional()
+f.map(f.string()).optional()
+f.foreignId('users').references('id')
+f.belongsTo(() => User)
+f.hasMany(() => Post)
+f.hasOne(() => Profile)
+f.belongsToMany(() => Role, () => UserRole)
+f.morphTo()
+f.morphMany(() => Comment)
+f.morphOne(() => Image)
+f.morphToMany(() => Tag)
+```
+
+Every field flows through the same chain:
+
+```plaintext title="the-field-dsl-2.txt"
+Field definition → Type resolution → Modifier chain → Validation schema → Database column
+```
+
+The identity and scalar types are covered in depth on [Fields & DSL](/docs/data/fields); relationship constructors and their loading strategies on [Relations](/docs/data/relations).
+
+## What This Generates [#what-this-generates]
+
+| Artifact         | Location                               | Derived from                    |
+| ---------------- | -------------------------------------- | ------------------------------- |
+| Database table   | Generated schema for the active driver | Field map + options             |
+| Migration file   | `src/database/migrations/`             | Schema diff                     |
+| REST API routes  | `/api/{model}`                         | `list/get/create/update/delete` |
+| Typed RPC client | `@kwiva/client`                        | Model IR                        |
+| Studio screens   | `@kwiva/studio`                        | Schema-derived CRUD             |
+| OpenAPI schema   | `/openapi.json`                        | Model IR                        |
+| Validation rules | Field-level                            | Modifier chain                  |
+| Permission gates | Policy namespace                       | `permission` option             |
+| MCP tools        | `@kwiva/mcp`                           | Model IR                        |
+| TypeScript types | Ambient types                          | Field map                       |
+| Search indexes   | Search provider                        | `searchable` fields             |
+
+## Model API [#model-api]
+
+```ts title="model-api.ts"
+import { Post, db } from '@kwiva/data'
+
+const posts = await Post.query()
+  .where('status', 'published')
+  .orderBy({ createdAt: 'desc' })
+  .with('author', 'comments')
+  .page(1, 20)
+
+const post = await Post.findOrFail(id)        // throws NotFoundError → 404 mapping
+const created = await Post.create({ title: 'Hello', authorId })
+await post.update({ status: 'published' })
+await post.delete()                          // soft when enabled
+await Post.restore(id)
+await Post.withTrashed().first(...)
+await Post.forceDelete(id)
+
+const count = await Post.query().where('status', 'published').count()
+const sum = await Post.query().sum('views')
+
+await db.transaction(async (tx) => {
+  const order = await Order.create(payload, { tx })
+  await OrderPlaced.emit({ orderId: order.id }, { tx })   // outbox: delivered post-commit
+})
+
+const rows = await db.raw<{ n: number }>('select count(*) n from posts')
+```
+
+See [Queries](/docs/data/queries) for the full builder surface.
+
+## Generated REST Surface [#generated-rest-surface]
+
+Unless `routes: false` is set, each model derives a deterministic set of routes:
+
+| Route                         | Handler        | Extras                                                    |
+| ----------------------------- | -------------- | --------------------------------------------------------- |
+| `GET /api/posts`              | list           | `where`, `page`, `orderBy`, `with` (all schema-validated) |
+| `GET /api/posts/:id`          | get            | Policy `posts.read`                                       |
+| `POST /api/posts`             | create         | Body validation, hooks, audit fields                      |
+| `PATCH /api/posts/:id`        | update         | Policy, optimistic concurrency (`v1.x`)                   |
+| `DELETE /api/posts/:id`       | delete         | Policy, soft delete when enabled                          |
+| `POST /api/posts/:id/:action` | custom actions | Via `defineController` extensions                         |
+
+The route shape is deterministic, so the typed client and OpenAPI document are always in lockstep with the model.
+
+## Hooks [#hooks]
+
+`hooks` lets you run framework-managed logic at model lifecycle points:
+
+| Hook         | Signature                     | Use case                                                       |
+| ------------ | ----------------------------- | -------------------------------------------------------------- |
+| `onCreating` | `(row, ctx) => void`          | Defaults and derived values before insert (for example a slug) |
+| `onDeleting` | `(row, ctx) => Promise<void>` | Guards before delete — throw to abort the delete               |
+
+```ts title="hooks.ts"
+export default defineModel('posts', (f) => ({
+  title: f.string(),
+  isPinned: f.boolean().default(false),
+}), {
+  hooks: {
+    onCreating: (row, { session }) => { row.slug = slugify(row.title) },
+    onDeleting: async (row) => { if (row.isPinned) throw new Error('cannot delete pinned') },
+  },
+})
+```
+
+The hook context carries the session, so audit-aware and tenant-aware logic can reuse values already resolved for the request.
+
+## Custom Accessors [#custom-accessors]
+
+Beyond `computed` options, fields can derive or transform values per field:
+
+```ts title="custom-accessors.ts"
+export default defineModel('users', (f) => ({
+  email: f.string().unique(),
+  displayName: f.string().computed((row) => `${row.firstName} ${row.lastName}`),
+  password: f.string().mutator((val) => hash(val, 'argon2id')),
+}), { timestamps: true })
+```
+
+* `computed` fields are derived, read-only values exposed to the API without a database column.
+* `mutator` transforms a value before it is persisted (for example hashing a password).
+* `computed` as a model option produces a set of derived fields (`v1.x`).
+
+## Validation Integration [#validation-integration]
+
+Field-level `validation()` uses Standard Schema, with Valibot as the documented default — switchable through `src/config/app.ts` under the `validator` key. The generated routes validate the request **body** and **query**: `where` and `orderBy` shapes are schema-checked against the model, so a client cannot inject arbitrary filters. See [Validation](/docs/data/validation).
+
+## Derivation Pipeline [#derivation-pipeline]
+
+```plaintext title="derivation-pipeline.txt"
+defineModel files → model IR → SQL tables + migrations → REST routes → typed client → Studio → OpenAPI → MCP tools → TypeScript types → Search indexes
+```
+
+The intermediate representation at `src/.kwiva/model-ir.json` is the single artifact every generator consumes — see [Advanced: Model IR](/docs/advanced/model-ir).
+
+## What's Next [#whats-next]
+
+1. [Fields & DSL](/docs/data/fields) — every field type and modifier
+2. [Relations](/docs/data/relations) — relationship constructors and loading
+3. [Validation](/docs/data/validation) — field-level and request-level rules
+4. [Queries](/docs/data/queries) — the full query builder
+5. [Your First Model](/docs/getting-started/first-model) — end-to-end walkthrough

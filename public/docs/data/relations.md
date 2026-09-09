@@ -1,0 +1,182 @@
+# Relations (/docs/data/relations)
+
+
+
+Relations model how resources connect. Kwiva provides a complete relationship system covering one-to-one, one-to-many, many-to-many, and polymorphic associations, with a single consistent loading surface. Relations are declared with the field DSL, use lazy references so models compose without circular imports, and derive foreign keys, pivot tables, REST endpoints, and client types automatically.
+
+## Declaring Relations [#declaring-relations]
+
+```ts title="src/app/models/comments.ts"
+// src/app/models/comments.ts
+export default defineModel('comments', (f) => ({
+  postId: f.foreignId('posts').references('id'),
+  body: f.text(),
+}), { timestamps: true })
+
+// src/app/models/posts.ts
+export default defineModel('posts', (f) => ({
+  title: f.string(),
+  comments: f.hasMany(() => Comment),
+  author: f.belongsTo(() => User),
+}), { timestamps: true })
+```
+
+| Relation        | Definition                                  | Inverses with            |
+| --------------- | ------------------------------------------- | ------------------------ |
+| `belongsTo`     | `f.belongsTo(() => Model)`                  | `hasMany` / `hasOne`     |
+| `hasMany`       | `f.hasMany(() => Model)`                    | `belongsTo`              |
+| `hasOne`        | `f.hasOne(() => Model)`                     | `belongsTo`              |
+| `belongsToMany` | `f.belongsToMany(() => Model, () => Pivot)` | `belongsToMany`          |
+| `morphTo`       | `f.morphTo()`                               | `morphMany` / `morphOne` |
+| `morphMany`     | `f.morphMany(() => Model)`                  | `morphTo`                |
+| `morphOne`      | `f.morphOne(() => Model)`                   | `morphTo`                |
+| `morphToMany`   | `f.morphToMany(() => Model)`                | `morphToMany`            |
+
+### Lazy References [#lazy-references]
+
+Relations take a **lazy reference** — `f.belongsTo(() => User)`, not `f.belongsTo(User)`. The framework resolves the reference at boot during model scanning, which keeps model files circular-import-free: `posts.ts` can reference `User` while `users.ts` is loaded first.
+
+### Foreign Keys [#foreign-keys]
+
+For `belongsTo`, the framework infers the foreign key column (for example `authorId`) and wires the constraint. When you want an explicit column, declare it directly:
+
+```ts title="foreign-keys.ts"
+postId: f.foreignId('posts').references('id'),
+```
+
+## Eager Loading [#eager-loading]
+
+Relations are lazy by default — accessing `post.comments()` runs a query. To avoid N+1 queries, load relations with `with()`. The argument list is variadic and accepts nested paths:
+
+```ts title="eager-loading.ts"
+const posts = await Post.query().with('author', 'comments')
+const posts = await Post.query().with('comments.author')               // nested
+const posts = await Post.query().with('comments', (q) => q.where('approved', true))  // constrained
+const posts = await Post.query().withCount('comments', 'likes')        // aggregate counts
+```
+
+* Eager loads join or batch-fetch related rows in as few queries as possible.
+* Constrained loads accept a query callback, so a relation can be filtered, ordered, or limited per load.
+* `withCount` attaches a `{relation}Count` value to every row without loading the referenced rows.
+* Nested paths load through many levels: `with('comments.author')`.
+
+> \[!TIP]
+> In development, relation loads that are not declared in `with()` are flagged in the dev overlay as potential N+1s (`v1.x`). Lean on `with()` from the start — see [Observability: Tracing](/docs/observability/tracing).
+
+## Filtering by Relations [#filtering-by-relations]
+
+Filter the parent query based on the existence or shape of related rows:
+
+```ts title="filtering-by-relations.ts"
+const comments = await Post.query().whereHas('comments', (q) => q.where('approved', true)).get()
+```
+
+`whereHas` requires the related rows to match the callback; `withCount` plus `having` gives you arithmetic on counts. Combined with eager loading this covers the vast majority of "find parents that have at least one X" patterns.
+
+## Relationship Access on Instances [#relationship-access-on-instances]
+
+Loaded instances expose their relations directly, still typed:
+
+```ts title="relationship-access-on-instances.ts"
+const post = await Post.findOrFail(id)
+const comments = await post.comments().get()
+```
+
+Accessing the relation method returns a fresh query scoped to the instance; `.get()` executes it. If the relation was eager-loaded, `post.comments()` returns the already-loaded collection without a query.
+
+## Pivot Tables (Many-to-Many) [#pivot-tables-many-to-many]
+
+Many-to-many relations are backed by a pivot table. Kwiva can infer the pivot from the two model names, or you can pass an explicit pivot model as the second argument:
+
+```ts title="src/app/models/roles.ts"
+// src/app/models/roles.ts
+export default defineModel('roles', (f) => ({
+  name: f.string(),
+  users: f.belongsToMany(() => User, () => UserRole),
+}), { timestamps: true })
+```
+
+| Argument | Role                                                          |
+| -------- | ------------------------------------------------------------- |
+| First    | The related model (lazy reference)                            |
+| Second   | Optional pivot model; infer when omitted, explicit when given |
+
+The pivot participates in every derived surface just like a model: schema, migrations, and typed relation access. Pivot rows are created and removed by the framework when the relation is written through the runtime API. Declaring the pivot model explicitly (rather than relying on inference) is the right move when the pivot carries its own fields — role assignments with a `grantedAt`, team memberships with a `role` — because those columns need a schema home of their own.
+
+## Morph Relations (Polymorphic) [#morph-relations-polymorphic]
+
+A `morphTo` relation lets one table reference **any** model through a type-plus-id pair. This is the natural shape for comments, likes, flags, and notes that attach to posts, files, and teams alike:
+
+```ts title="src/app/models/comments-2.ts"
+// src/app/models/comments.ts
+export default defineModel('comments', (f) => ({
+  body: f.text(),
+  commentable: f.morphTo(),                   // attaches to any parent
+}), { timestamps: true })
+
+// src/app/models/posts.ts
+export default defineModel('posts', (f) => ({
+  title: f.string(),
+  comments: f.morphMany(() => Comment),       // commentable → this post
+}), { timestamps: true })
+```
+
+| Constructor                  | Meaning                                                          |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `f.morphTo()`                | The owning side; `type` and `id` columns refer to any parent row |
+| `f.morphMany(() => Model)`   | The child side, pointing at the morph target                     |
+| `f.morphOne(() => Model)`    | Single-child variant (for example one avatar image)              |
+| `f.morphToMany(() => Model)` | Many-to-many morph across multiple parent types                  |
+
+The same loading surface works: `with('commentable')` eager-loads whatever the parent actually is, and `with('comments')` on the post loads its polymorphic children. Morph relations are validated the same way as every other relation, so a client cannot point a comment at a table it should not touch.
+
+## Eager Loading in Depth [#eager-loading-in-depth]
+
+Eager loading is where relation design pays off or punishes you. The rules:
+
+```ts title="eager-loading-in-depth.ts"
+// load author for every post, plus approved comments only
+const posts = await Post.query()
+  .with('author')
+  .with('comments', (q) => q.where('approved', true))
+  .get()
+
+// nested through two levels
+const threads = await Post.query().with('comments.author').get()
+
+// count relations without loading them
+const withCounts = await Post.query().withCount('comments', 'likes').get()
+// withCounts[0].commentsCount
+```
+
+| Load                           | Query cost              | Use when                              |
+| ------------------------------ | ----------------------- | ------------------------------------- |
+| `with('author')`               | 1 extra query, batched  | You render the author on every row    |
+| `with('comments', q => ...)`   | 1 constrained batch     | You need a filtered subset per parent |
+| `with('comments.author')`      | 2 batched queries       | You display nested graphs             |
+| `withCount('comments')`        | COUNT grouped by parent | You show totals, not rows             |
+| `post.comments().get()` (lazy) | 1 query per instance    | One-off access, never inside a loop   |
+
+The N+1 rule is simple: inside a loop, eager-load; only outside a loop is lazy access free.
+
+## Cascade Behavior [#cascade-behavior]
+
+| Relation        | On Delete    | On Update |
+| --------------- | ------------ | --------- |
+| `hasMany`       | cascade      | cascade   |
+| `hasOne`        | cascade      | cascade   |
+| `belongsTo`     | set null     | restrict  |
+| `belongsToMany` | delete pivot | cascade   |
+
+Choosing the right relation usually follows from ownership: parents own one-to-many children (cascade), while `belongsTo` references should never silently remove the parent when a child goes away (set null or restrict).
+
+## Relations and Tenancy [#relations-and-tenancy]
+
+Tenant scoping applies to relations automatically. A tenant-scoped model's queries are scoped by the injected `tenantField`, and eager-loading a tenant-scoped relation filters those rows to the current tenant as well. This is enforced by the same mechanism that scopes top-level queries — see [Tenancy: Scoping](/docs/tenancy/scoping).
+
+## What's Next [#whats-next]
+
+1. [Models](/docs/data/models) — declaring the full model surface
+2. [Queries](/docs/data/queries) — the query builder behind eager loading
+3. [Soft Deletes](/docs/data/soft-deletes) — how trashed rows interact with relations
+4. [Tenancy](/docs/tenancy) — how tenant scoping composes with relations

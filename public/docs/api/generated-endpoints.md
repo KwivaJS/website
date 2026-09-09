@@ -1,0 +1,157 @@
+# Generated Endpoints (/docs/api/generated-endpoints)
+
+
+
+Every model generates the same deterministic set of endpoints. Count on it: five routes per model, identical for a blog post or a billing invoice, because the routes are derived from the model file rather than declared by hand. Tooling, Studio, documentation, and the typed client all rely on this shape.
+
+Stability is the point. Because the five routes are always the same, an API consumer can predict the full surface of a new model without reading its source, and the framework can generate the schemas, the client methods, and the OpenAPI paths for every model mechanically.
+
+## The Five Routes [#the-five-routes]
+
+| Method   | Path             | Request                                                 | Response                                |
+| -------- | ---------------- | ------------------------------------------------------- | --------------------------------------- |
+| `GET`    | `/api/posts`     | query: `where`, `page`, `limit`, `orderBy`, `with`, `q` | `` `{ data, total, page, lastPage }` `` |
+| `GET`    | `/api/posts/:id` | —                                                       | `Post`                                  |
+| `POST`   | `/api/posts`     | validated body                                          | `Post` (201)                            |
+| `PATCH`  | `/api/posts/:id` | validated partial body                                  | `Post`                                  |
+| `DELETE` | `/api/posts/:id` | —                                                       | 204                                     |
+
+Requests, bodies, and responses are fully typed — because they all derive from `defineModel` and the same route manifest that feeds the client, Studio, OpenAPI, and MCP tools.
+
+## Where the Routes Come From [#where-the-routes-come-from]
+
+Generated routes come from a single model file:
+
+```ts title="src/app/models/posts.ts"
+// src/app/models/posts.ts
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().validation((s) => s.min(1).max(200)),
+  body: f.text().optional(),
+  status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
+  publishedAt: f.timestamp().optional(),
+  authorId: f.uuid().indexed(),
+  author: f.belongsTo(() => User),
+  comments: f.hasMany(() => Comment),
+}), {
+  timestamps: true,
+  permission: 'posts',
+})
+```
+
+Change the model and every generated route, its schema, and its client signature change together. There is no separate route file to update and no drift to fix.
+
+## Reading a List [#reading-a-list]
+
+The list route accepts `where`, `page`, `limit`, `orderBy`, `with`, and `q` as query parameters:
+
+```plaintext title="reading-a-list.txt"
+GET /api/posts?page=1&limit=20
+```
+
+Prefer the typed client for structured queries — filters are checked against the model at compile time:
+
+```ts title="reading-a-list-2.ts"
+const { data } = await client.posts.list({
+  where: { status: 'published' },
+  with: ['comments'],
+  page: 1,
+  limit: 20,
+})
+```
+
+The `where` argument is schema-checked against the model; unknown fields return a `VALIDATION` error. The `with` argument accepts only declared relations. The pagination contract — `page`, `limit`, `orderBy`, `q` — is validated the same way. See [REST conventions: pagination](/docs/api/rest) and [Data: pagination](/docs/data/pagination).
+
+## Create and Update [#create-and-update]
+
+`POST` and `PATCH` carry validated bodies from the model's field DSL and any route-level schemas:
+
+```ts title="create-and-update.ts"
+const created = await client.posts.create({ title: 'Hello', status: 'draft' })
+const updated = await client.posts.update(id, { status: 'published' })
+```
+
+`PATCH` is a partial update — send only the fields you change. A `PATCH` body is validated as a partial of the model: fields present are checked against the field DSL, and fields omitted are left untouched. `POST` validates a full create shape, applying model defaults for anything not supplied.
+
+## Custom Actions [#custom-actions]
+
+The five routes are the baseline, not the ceiling. Add application-specific actions with a controller:
+
+```ts title="src/app/http/controllers/posts.ts"
+// src/app/http/controllers/posts.ts
+import { defineController } from '@kwiva/http'
+
+export default defineController('posts', (c) => ({
+  publish: c.post('/:id/publish', async ({ params }) => {
+    const post = await Post.findOrFail(params.id)
+    return post.update({ status: 'published', publishedAt: new Date() })
+  }, {
+    body: { note: 'string?' },
+    permission: 'posts.publish',
+  }),
+}), { prefix: '/posts', tags: ['posts'] })
+```
+
+This mounts `POST /api/posts/:id/publish`, validates the optional body, and appears in OpenAPI and the typed client exactly like a generated route. A custom action adds to the deterministic five — the shape you can count on, plus the behavior you actually need.
+
+## Permission Gating [#permission-gating]
+
+Every generated route is gated by the model's `permission` option:
+
+* `permission: 'posts'` requires `posts.read`, `posts.create`, `posts.update`, `posts.delete` for the corresponding routes.
+* `permission: false` disables gating entirely — use for fully public models.
+
+Permission checks run through `definePolicy` in the `onBeforeHandle` stage of the request lifecycle, after validation, so a policy can make decisions against the validated body. The same namespace gates Studio screens and MCP tools, so one decision surface governs every entry point. See [Authorization: permissions](/docs/authorization/permissions) and [Authorization: enforcement](/docs/authorization/enforcement).
+
+> \[!NOTE]
+> The five list, get, create, update, and delete operations map to `posts.read`, `posts.read`, `posts.create`, `posts.update`, and `posts.delete`. A missing session maps to `UNAUTHORIZED`; a present session without the ability maps to `FORBIDDEN`; both return before the route executes.
+
+## Generated Routes and the Manifest [#generated-routes-and-the-manifest]
+
+Generated routes are first-class manifest entries. They carry path, method, schemas, response types, permission, and tags into the same intermediate representation as every controller route — which is why the typed client offers `client.posts.list`, `/docs` documents them, and MCP exposes them as tools without any per-route wiring.
+
+## Deterministic Routing by Model Name [#deterministic-routing-by-model-name]
+
+The routes derive their paths from the model name: `posts` produces `/api/posts`, `blog-posts` produces `/api/blog-posts`. The client methods (`client.posts.list`, `client.posts.get`) follow the same naming, and Studio organizes by the same identity. One name, five routes, everywhere consistent.
+
+## List Filtering and Eager Loading [#list-filtering-and-eager-loading]
+
+`where` accepts the model's fields as filter keys; `with` accepts only declared relations. Both are schema-checked before the query builder runs, so a malformed filter returns `VALIDATION` instead of executing. See [Data: queries](/docs/data/queries) for the full filter surface.
+
+## Partial Updates [#partial-updates]
+
+`PATCH` validates as a partial: the body is checked against the model's create shape, but only the fields supplied are set. Sending `{ status: 'published' }` leaves title untouched. Update is partial by contract — there is no generated full-replacement path to accidentally wipe a row.
+
+## The 204 Contract [#the-204-contract]
+
+`DELETE` resolves with 204 and no body. The typed client models this as a success with no payload, so `res.ok` is true and there is nothing to read. Consumers that expect a JSON body for deletions are expecting behavior the framework intentionally omits.
+
+## Custom Actions Depend on Permissions [#custom-actions-depend-on-permissions]
+
+A custom action carries its own `permission` key. Generated routes get theirs from the model option; custom actions declare their own per action — `posts.publish`, `reports.export` — and gate exactly that path. See [Authorization: permissions](/docs/authorization/permissions).
+
+## The Full Generated Surface [#the-full-generated-surface]
+
+| Method   | Path             | Purpose                   | Permission     |
+| -------- | ---------------- | ------------------------- | -------------- |
+| `GET`    | `/api/posts`     | list, filters, pagination | `posts.read`   |
+| `GET`    | `/api/posts/:id` | single record             | `posts.read`   |
+| `POST`   | `/api/posts`     | create                    | `posts.create` |
+| `PATCH`  | `/api/posts/:id` | partial update            | `posts.update` |
+| `DELETE` | `/api/posts/:id` | delete                    | `posts.delete` |
+
+Forward relations expose nested paths such as `/api/posts/:id/comments` when the model declares them, and the generated client types those too.
+
+## Generated Serialization [#generated-serialization]
+
+Responses serialize through the model IR with `fields`, relations, and transforms applied — not raw rows. Paginated lists use the shared envelope; single resources serialize directly. The shape a consumer sees is the model IR, which is also what OpenAPI documents. See [Models](/docs/data/models).
+
+## What's Next [#whats-next]
+
+* [REST Conventions](/docs/api/rest) — the URL, status, and envelope contract
+* [Typed RPC](/docs/api/rpc) — call generated routes with full type inference
+* [Controllers](/docs/http/controllers) — `defineController` and custom actions
+* [Models](/docs/data/models) — the `defineModel` source of truth
+* [Permissions](/docs/authorization/permissions) — permission namespaces and enforcement

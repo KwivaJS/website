@@ -1,0 +1,126 @@
+# How do I create a background job? (/guides/background-jobs)
+
+
+
+Background jobs move slow, non-request work — emails, exports, webhook calls — out of the request path and onto a queue consumed by a worker process.
+
+## Prerequisites [#prerequisites]
+
+* A Kwiva project with a running Redis instance (or a database queue driver)
+* A queue declared in `src/config/queue.ts`
+* A model the job reads or writes, so the handler can reference it
+
+## Generate the job [#generate-the-job]
+
+Scaffold the job into `src/app/jobs/` with the CLI generator:
+
+```bash title="terminal"
+kwiva make:job send-welcome
+```
+
+The generator creates `src/app/jobs/send-welcome.ts` and the job registry picks it up by convention.
+
+## Define the job [#define-the-job]
+
+`defineJob` takes a job name, a handler, and options. The handler receives a typed context with `payload`, `job`, and `logger`.
+
+```ts title="define-the-job.ts"
+import { defineJob } from '@kwiva/queue'
+import User from '../models/user'
+import { WelcomeMail } from '../mail/welcome'
+
+export default defineJob(
+  'send-welcome',
+  async ({ payload, job, logger }) => {
+    const user = await User.findOrFail(payload.userId)
+    await mail.send(WelcomeMail(user))
+    job.progress(50)
+    return { delivered: true }
+  },
+  {
+    queue: 'emails',
+    schema: { userId: 'uuid' },
+    attempts: 5,
+    backoff: 'exponential',
+    priority: 10,
+    idempotencyKey: (p) => `welcome:${p.userId}`,
+  },
+)
+```
+
+* `schema` types and validates the payload with Standard Schema validation, so the handler only runs with a well-formed `userId`.
+* `attempts` plus `backoff` (`'fixed'`, `'exponential'`, or a function of the attempt) control retries.
+* `idempotencyKey` dedupes enqueues so the same user never gets two welcome jobs.
+* `queue` selects which configured queue receives the job.
+
+## Declare the queue [#declare-the-queue]
+
+Queues are declared in `src/config/queue.ts`. Use the `redis` driver in production, `database` when you want zero extra infrastructure, and `memory` for development and tests.
+
+```ts title="declare-the-queue.ts"
+import { defineConfig } from '@kwiva/config'
+
+export default defineConfig('queue', {
+  defaults: {
+    driver: 'redis',
+    url: 'redis://localhost:6379',
+    default: 'default',
+  },
+  queues: {
+    emails: { driver: 'redis' },
+    nightly: { driver: 'database' },
+  },
+  env: {
+    url: 'REDIS_URL',
+  },
+})
+```
+
+## Dispatch the job [#dispatch-the-job]
+
+Import the job definition and call `dispatch` from anywhere — a controller action, an event listener, or a command:
+
+```ts title="dispatch-the-job.ts"
+import SendWelcome from '../app/jobs/send-welcome'
+
+await SendWelcome.dispatch({ userId: user.id })
+await SendWelcome.dispatch({ userId: user.id }, { delay: 60 })
+await SendWelcome.dispatch({ userId: user.id }, { queue: 'nightly' })
+```
+
+The first call uses the job's default queue. The `delay` option defers the run, and the queue override routes the job to another configured queue.
+
+## Run a worker [#run-a-worker]
+
+Consume the queue with a worker process:
+
+```bash title="terminal"
+kwiva queue:work --queue=emails,default --concurrency=5
+```
+
+`kwiva queue:listen` runs in verbose mode for development. In production, deploy the worker as its own process.
+
+## Handle failures [#handle-failures]
+
+When attempts are exhausted the job lands in the DLQ (`failed_jobs` table). List, retry, and clear it from the CLI:
+
+```bash title="terminal"
+kwiva queue:failed
+kwiva queue:retry <id>
+kwiva queue:clear <queue>
+```
+
+## Verify it works [#verify-it-works]
+
+1. Start a worker: `kwiva queue:work --queue=emails --concurrency=5`.
+2. Trigger a dispatch with a real user id — for example, right after a user signs up.
+3. Watch the worker run the handler, report progress, and finish with `{ delivered: true }`.
+4. To exercise failure handling, throw inside the handler, let the job exhaust its attempts, then confirm the row in `kwiva queue:failed` and retry it.
+
+## Related Documentation [#related-documentation]
+
+* [Jobs](/docs/background-work/jobs) — The `defineJob` factory and options
+* [Queues & Workers](/docs/background-work/queues) — `kwiva queue:*` commands and drivers
+* [Job Observability](/docs/background-work/observability) — Spans, metrics, and failed jobs
+* [Events & Broadcasting](/docs/realtime/events) — Queue-backed event listeners
+* [CLI Generators](/docs/cli/generators) — `kwiva make:*` scaffolds

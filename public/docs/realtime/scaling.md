@@ -1,0 +1,99 @@
+# Scaling Realtime (/docs/realtime/scaling)
+
+
+
+A single instance of a Kwiva application is the simplest possible realtime topology: every socket is held in memory by the one process that also runs your handlers, so a broadcast is a local operation and presence is local bookkeeping. The moment you scale out, sockets spread across instances, and the questions change. This page covers what holds up and what needs coordination once there is more than one process.
+
+## One Instance Is Simple [#one-instance-is-simple]
+
+On a single instance, the channel engine holds every connection in the same process that broadcasts into channels:
+
+* A broadcast to a channel reaches every subscriber with a local loop over connections.
+* Presence join and leave tracking is in-process memory.
+* No shared state is involved anywhere in the path.
+
+This topology is the default and requires zero configuration. For development, staging, and a large share of production workloads, it is also sufficient — most applications run comfortably on one instance without engineering for fan-out.
+
+## Many Instances Change the Picture [#many-instances-change-the-picture]
+
+When the application runs on several instances, each socket connects to exactly one instance. The consequence is direct: an in-memory fan-out reaches only the sockets on the same instance. A client subscribed to `chat.42` on instance B does not exist in the socket table of instance A, so a broadcast executed on instance A needs a way to reach instance B.
+
+The framework solves this by separating two concerns:
+
+* **Connection ownership** — each socket is owned by the instance that accepted it.
+* **Event distribution** — broadcasts travel through a shared plane that every instance participates in.
+
+An instance that receives a broadcast from its own handler delivers it to its local sockets and forwards it to every other instance, which deliver to theirs. Connection routing follows the client: a reconnect can land on any healthy instance, and because socket state is not assumed to be process-local, that reconnect is served correctly wherever it lands.
+
+## Channel Affinity [#channel-affinity]
+
+Channel affinity describes which instance owns a given channel's state. It depends on the deployment transport:
+
+| Environment                                           | Transport                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------------ |
+| Server presets (primary and Node-compatible runtimes) | Framework-owned channel engine over the server's WebSocket upgrade |
+| Edge presets with stateful workers                    | Stateful channel primitives via the preset's WebSocket wiring      |
+| Static output                                         | Realtime disabled; clients degrade gracefully                      |
+
+On server presets, sockets bind to the accepting instance, and cross-instance delivery uses the shared distribution plane. On edge presets with stateful workers, channels carry state alongside the worker that hosts them, which changes the affinity model: a channel lives with its state rather than with a random accepting process. The choice of preset lines the framework's transport up with how the host platform already models state.
+
+> \[!NOTE]
+> Because channel and presence state is coordinated through shared state rather than assumed local, you do not need sticky routing to keep a client pinned to one instance. Every instance can serve any reconnect; stickiness is an optimization you may add for your own reasons, never a correctness requirement.
+
+## Shared State for Fan-Out [#shared-state-for-fan-out]
+
+Cross-instance broadcasting runs on a shared pub/sub adapter. Configuration lives with the rest of the API surface:
+
+```ts title="src/config/api.ts"
+// src/config/api.ts
+// set the broadcast driver to a shared pub/sub backend
+// instances subscribe and forward to their local sockets
+//   broadcast: { driver: 'redis' }
+```
+
+The Redis pub/sub adapter is the documented design for broadcast fan-out at scale: instances subscribe to the channels their clients care about, receive broadcasts published by any instance, and forward them to their own local sockets. Instances cooperate through one shared distribution plane, and each instance remains responsible only for the sockets it physically holds.
+
+Without a shared backend, broadcasts are instance-local — correct on a single instance, incomplete across several. If you scale out and broadcast behavior matters, configure the driver before you add the second instance.
+
+## Presence Needs Coordination [#presence-needs-coordination]
+
+Presence is the feature most sensitive to topology. Single-instance presence is in-process and exact. Across instances, join and leave events originate on whatever instance accepted each socket, so a correct member set requires that presence state be shared. The framework's presence model accounts for this: when presence spans instances, it is coordinated through shared state rather than assumed to converge by accident.
+
+The practical guidance:
+
+* On one instance, presence is exact with zero configuration.
+* Across instances, plan for presence coordination before you rely on member counts for product behavior.
+* Presence is part of the realtime fast-follow, so the coordination story matures alongside it.
+
+## Reliability Across Scalings [#reliability-across-scalings]
+
+Delivery through the distribution plane is at-least-once by design, and that property does not change with instance count. A broadcast may arrive on a client that reconnects mid-flight more than once, which is why listeners and event-handling jobs carry idempotency keys and why the client's missed-message catch-up (v1.x) reconciles by event id. Scaling adds transport hops, never weaker delivery guarantees — the plane is shared, so a message published once is fanned out once to every instance's subscribers.
+
+## What Does Not Change [#what-does-not-change]
+
+Regardless of instance count, these properties hold constant:
+
+* **Channel definitions** — policies and message handlers are per-definition, not per-instance.
+* **Subscription authorization** — the handshake policy runs wherever the socket lands.
+* **Typed payloads** — event definitions retype every client handler on every instance.
+* **SSE fallback** — one-directional feeds cross instances on the same distribution plane.
+
+Scaling realtime means adding a broadcast driver and, when presence matters, coordination — not restructuring the channel code. The same `channel()` definitions, the same event broadcasts, and the same client hooks run unchanged from one instance to fifty.
+
+## A Practical Path [#a-practical-path]
+
+1. Build and ship on one instance with zero realtime configuration.
+2. Add more instances for capacity; if broadcast fan-out is needed, set the broadcast driver to a shared pub/sub backend.
+3. Enable presence-dependent UI only after presence state is coordinated across the instances serving it.
+4. Where edge presets fit your latency goals, lean on stateful channel primitives for affinity with state.
+5. Watch queue and broadcast observability as instances grow — fan-out latency and presence errors both surface in the shared tracing and metrics pipeline.
+
+Realtime in Kwiva is correct by default at small scale and predictable by design at large scale — the configuration grows with your topology instead of being required before you write a channel.
+
+## What's Next [#whats-next]
+
+* [Client-Side Realtime](/docs/realtime/client-usage) — how subscriptions behave under reconnection and fallback
+* [Channels](/docs/realtime/channels) — the definitions that stay identical across instances
+* [Deployment](/docs/deployment) — presets that determine the transport
+* [Deployment](/docs/deployment/adapters) — server and edge presets for realtime workloads
+* [Production Checklist](/docs/deployment/production-checklist) — topology and telemetry before you ship

@@ -1,0 +1,1 @@
+import{t as e}from"./flexsearch-static-BK64bR1H.js";export default e();

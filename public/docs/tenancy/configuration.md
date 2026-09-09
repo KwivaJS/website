@@ -1,0 +1,135 @@
+# Tenancy Configuration (/docs/tenancy/configuration)
+
+
+
+Tenancy is configured from a single module in the config folder. Everything that governs resolution, scoping, and isolation lives in `src/config/tenancy.ts`, following the framework rule that configuration lives in one place — with inline `defineX` options winning when a specific construct needs to differ.
+
+The module exists because tenancy is a correctness boundary. A misconfigured resolution mode in production is a data-exposure bug, not a cosmetic one, so the framework type-checks the module, validates environment overrides at boot, and gives every value a single typed read path.
+
+## The Config Module [#the-config-module]
+
+```ts title="src/config/tenancy.ts"
+// src/config/tenancy.ts
+export default defineConfig('tenancy', {
+  defaults: {
+    mode: 'domain',            // 'domain' | 'path' | 'header' | 'fixed' | 'org' (v1.x) | 'none'
+    tenantField: 'tenantId',   // model column used for scoping
+    models: '*',               // or ['projects', 'invoices'] — scoped models only
+    cache: { scoped: true },   // tenant-prefixed cache keys
+    storage: { scoped: true }, // tenant-prefixed paths
+  },
+})
+```
+
+The module is a typed config module like any other: defaults are type-checked, environment overrides can be mapped through the `env` block, and reading the value anywhere goes through `config('tenancy.mode')`.
+
+## Choosing a Resolution Strategy [#choosing-a-resolution-strategy]
+
+The `mode` key selects how the tenant is identified on each request:
+
+| Mode     | Resolution                          | Example                                    |
+| -------- | ----------------------------------- | ------------------------------------------ |
+| `domain` | subdomain to Tenant lookup          | `acme.app.dev` resolves to tenant `acme`   |
+| `path`   | first path segment                  | `/t/acme/...` resolves to tenant `acme`    |
+| `header` | `x-tenant-id` request header        | internal tools and API clients             |
+| `fixed`  | a single configured tenant          | single-tenant app with the same guarantees |
+| `org`    | authenticated org membership (v1.x) | orgs mapped to tenants via the auth layer  |
+| `none`   | disabled                            | solo app — scoping off, zero overhead      |
+
+Domain mode is the default and the right choice for most product-style multi-tenant apps: each customer owns a subdomain and is isolated by it. Path mode suits workspaces reached through a shared host. Header mode fits machine-to-machine traffic where no domain or path structure exists. Fixed mode gives a single-tenant deployment the identical isolation guarantees without resolution work, and `none` is for apps that want none of it.
+
+### Choosing by traffic shape [#choosing-by-traffic-shape]
+
+| Traffic shape                                  | Recommended mode |
+| ---------------------------------------------- | ---------------- |
+| Product customers on subdomains                | `domain`         |
+| Workspaces behind a shared host                | `path`           |
+| Internal tools and API clients                 | `header`         |
+| Single-tenant deployment of a multi-tenant app | `fixed`          |
+| Auth orgs map to tenants                       | `org` (v1.x)     |
+| Solo app, no tenants                           | `none`           |
+
+The choice is about where tenant identity lives in the request, and every mode except `none` produces the same `ctx.tenant` downstream — the resolution strategy never changes what scoping, storage, or cache do afterward.
+
+## Configuring the Tenant Field [#configuring-the-tenant-field]
+
+The `tenantField` option names the model column used for scoping. The default is `tenantId`.
+
+There are two places the field can be set:
+
+1. **Globally** in `src/config/tenancy.ts`, which applies the field to every scoped model
+2. **Per model** on the `defineModel` options, which overrides the global default for that model
+
+```ts title="configuring-the-tenant-field.ts"
+defineModel('projects', (f) => ({ ... }), { tenantField: 'tenantId' })
+```
+
+Both are legitimate, and per-model wins. The rule of thumb: set it globally once, then tune per model only where the naming differs.
+
+### The convention: `tenantId` [#the-convention-tenantid]
+
+The default column name is `tenantId`, and it pays to keep it. The query engine injects `where tenantId = ctx.tenant.id` into every scoped operation, the migration generates the column, and the tenant context carries the `id` that matches it. Using the default keeps the mapping from the tenant context to the scoping predicate a zero-config correspondence.
+
+## Choosing Which Models Are Scoped [#choosing-which-models-are-scoped]
+
+The `models` option narrows scoping to a specific set:
+
+```ts title="choosing-which-models-are-scoped.ts"
+defaults: {
+  models: ['projects', 'invoices'], // only these get tenant predicates
+}
+```
+
+The default is `models: '*'`, meaning every model participates. Scope this down when you have cross-tenant reference data — for example a lookup table of countries or tax codes — that should be readable by every tenant. Keep in mind the trade-off: unscoped models are shared by construction, so their rows must be safe to expose across tenants.
+
+> \[!WARNING]
+> Every model that gets a tenant predicate also gets the isolation guarantee — and every model excluded from the list is shared by construction. Decide the `models` list consciously: global reference data belongs out of the list, tenant-owned business data belongs in it.
+
+## Cache and Storage Scoping [#cache-and-storage-scoping]
+
+The `cache` and `storage` blocks control derived-state isolation:
+
+```ts title="cache-and-storage-scoping.ts"
+defaults: {
+  cache: { scoped: true },   // keys become {tenantId}:{key}
+  storage: { scoped: true }, // paths become storage/{tenantId}/...
+}
+```
+
+Both default to scoped. Leave them true for tenant isolation guarantees; set `scoped: false` only for assets and caches you intend to share globally, such as a public logo bucket. Isolating state is what makes multi-instance deployments correct — see [Isolation](/docs/tenancy/isolation).
+
+### What each flag covers [#what-each-flag-covers]
+
+| Flag                        | Effect when true                     | Effect when false     |
+| --------------------------- | ------------------------------------ | --------------------- |
+| `cache: { scoped: true }`   | Keys prefixed with the tenant id     | Keys shared globally  |
+| `storage: { scoped: true }` | Paths under `storage/{tenantId}/...` | Paths shared globally |
+
+The rule of thumb: tenant-owned derived state is scoped, and only explicitly public assets — brand media, product-wide computed values — are shared. The flags make the distinction explicit at one glance rather than scattering it through call sites.
+
+## Per-Tenant Config Overrides [#per-tenant-config-overrides]
+
+Where a deployment needs tenant-specific behavior — different rate limits, different storage quotas, different feature flags — tenancy supports tenant-aware config overrides (v1.x). The override layer resolves per request against the configured tenant and merges over the defaults for that tenant's scope.
+
+The mechanism follows the config precedence rule: global defaults first, tenant overrides applied for the resolved tenant, and anything more specific on a construct beating both. This keeps tenancy configuration in the config folder rather than scattered through application code.
+
+## Env and Runtime Overrides [#env-and-runtime-overrides]
+
+Like every config module, `tenancy` can map environment variables through its `env` block:
+
+```ts title="env-and-runtime-overrides.ts"
+export default defineConfig('tenancy', {
+  defaults: { mode: 'domain' },
+  env: { mode: 'TENANCY_MODE' },
+})
+```
+
+Typed env access applies here as it does everywhere: `env('TENANCY_MODE')` validates at boot, and using an undeclared variable fails fast at compile time and boot time. That matters for tenancy because a misconfigured resolution mode in production is a correctness bug, not a cosmetic one.
+
+## What's Next [#whats-next]
+
+* [Resolution](/docs/tenancy/resolution) — how each strategy resolves the tenant per request
+* [Scoping](/docs/tenancy/scoping) — how `tenantField` scopes every query
+* [Isolation](/docs/tenancy/isolation) — storage, cache, queue, and audit separation
+* [Configuration](/docs/core-concepts/configuration) — the config folder and precedence rules
+* [Models](/docs/data/models) — the `tenantField` and `permission` model options

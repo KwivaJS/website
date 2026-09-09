@@ -1,0 +1,942 @@
+# @kwiva/data (/api/data)
+
+
+
+`@kwiva/data` is the package that owns the entire data plane. A single `defineModel` file in `src/app/models/` is the source of truth from which the framework derives database tables, migration files, REST and RPC endpoints, the typed client SDK, Studio screens, the OpenAPI spec, and MCP tools. The same package exports the runtime query plane, transactions, migrations, seeders, factories, and the database connection handle.
+
+```ts title="kwiva-data.ts"
+import { defineModel, defineMigration, defineSeeder, defineFactory, db, Post, User } from '@kwiva/data'
+```
+
+## defineModel [#definemodel]
+
+The model factory. One file per model, default export, stored in `src/app/models/`.
+
+```ts title="definemodel.ts"
+defineModel(name, fields, options?)
+```
+
+| Argument  | Type               | Description                                                                                                          |
+| --------- | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `name`    | `string`           | Table and resource name, lowercase plural (`'users'`, `'posts'`).                                                    |
+| `fields`  | `(f) => ({ ... })` | Field factory function. Receives the field builder `f` and returns an object of field definitions.                   |
+| `options` | `ModelOptions`     | Optional model-level behavior: timestamps, soft delete, audit, tenancy, permission, indexes, hooks, computed fields. |
+
+```ts title="definemodel-2.ts"
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().validation((s) => s.min(1).max(200)),
+  body: f.text().optional(),
+  status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
+  views: f.integer().default(0),
+  isPinned: f.boolean().default(false).indexed(),
+  publishedAt: f.timestamp().optional(),
+  authorId: f.uuid().indexed(),
+  author: f.belongsTo(() => User),
+  comments: f.hasMany(() => Comment),
+}), {
+  timestamps: true,
+  uniques: [['authorId', 'title']],
+  indexes: [{ columns: ['status', 'publishedAt'] }],
+  permission: 'posts',
+})
+```
+
+### Model Options [#model-options]
+
+| Option        | Type                           | Description                                                                   | Stability |
+| ------------- | ------------------------------ | ----------------------------------------------------------------------------- | --------- |
+| `timestamps`  | `boolean`                      | Adds `createdAt` and `updatedAt` columns, maintained automatically.           | v1        |
+| `softDelete`  | `boolean`                      | Adds a `deletedAt` column; queries exclude soft-deleted rows unless opted in. | v1        |
+| `audit`       | `boolean`                      | Adds `createdBy` and `updatedBy`, populated from the session context.         | v1        |
+| `tenantField` | `string`                       | Column name for automatic tenant scoping of every query.                      | v1        |
+| `permission`  | `string`                       | Policy namespace applied to generated routes and Studio screens.              | v1        |
+| `uniques`     | `string[][]`                   | Composite unique constraints across columns.                                  | v1        |
+| `indexes`     | `IndexDefinition[]`            | Additional database indexes (`{ columns: string[] }`).                        | v1        |
+| `hooks`       | `ModelHooks`                   | Lifecycle hooks for create/update/delete.                                     | v1        |
+| `computed`    | `Record<string, (row) => any>` | Derived, read-only fields surfaced in the API and Studio.                     | v1.x      |
+| `readonly`    | `boolean`                      | Marks enum/lookup models as read-only reference tables.                       | v1.x      |
+| `routes`      | `false`                        | Set to `false` to skip generating REST routes for the model.                  | v1        |
+
+## What defineModel Generates [#what-definemodel-generates]
+
+Every model flows through the derivation pipeline into a model intermediate representation used by every generator:
+
+```text title="what-definemodel-generates.txt"
+defineModel files -> model IR
+  -> database table definitions and migration files
+  -> REST routes (list/get/create/update/delete)
+  -> typed client types
+  -> Studio screens
+  -> OpenAPI schemas
+  -> MCP tools
+```
+
+Unless `routes: false`, each model produces five deterministic routes:
+
+| Route                   | Handler                                             |
+| ----------------------- | --------------------------------------------------- |
+| `GET /api/posts`        | list — validated `where`, `page`, `orderBy`, `with` |
+| `GET /api/posts/:id`    | get — policy `posts.read`                           |
+| `POST /api/posts`       | create — body validation, hooks, audit              |
+| `PATCH /api/posts/:id`  | update — policy checks                              |
+| `DELETE /api/posts/:id` | delete — policy checks, soft-delete aware           |
+
+## The Field DSL [#the-field-dsl]
+
+Fields are declared with the function-based DSL. Every field resolves through the same pipeline: type resolution, modifier chain, validation schema, database column.
+
+```ts title="the-field-dsl.ts"
+defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().optional().default('draft').unique().indexed().description('Post title').validation((s) => s.min(1).max(200)),
+  body: f.text().optional(),
+  views: f.integer().default(0),
+  score: f.float().optional(),
+  isPinned: f.boolean().default(false).indexed(),
+  publishedAt: f.timestamp().optional(),
+  publishedOn: f.date().optional(),
+  metadata: f.json<{ readingTime: number }>().optional(),
+  status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
+  ownerId: f.uuid().indexed(),
+  ref: f.ulid().unique(),
+  payload: f.bytes().optional(),
+}))
+```
+
+### Field Factories [#field-factories]
+
+| Factory                 | Description                                                                                                 |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `f.id()`                | Primary-key field for the model. `f.id('autoincrement')` selects an auto-incrementing integer identity key. |
+| `f.string()`            | Short text column (`VARCHAR(255)`).                                                                         |
+| `f.text()`              | Long text column (`TEXT`).                                                                                  |
+| `f.integer()`           | Integer column (`INTEGER`).                                                                                 |
+| `f.float()`             | Floating-point column (`FLOAT`).                                                                            |
+| `f.boolean()`           | Boolean column (`BOOLEAN`).                                                                                 |
+| `f.timestamp()`         | Date and time column (`TIMESTAMP`).                                                                         |
+| `f.date()`              | Date-only column (`DATE`).                                                                                  |
+| `f.json<T>()`           | Typed JSON column (`JSON`); the field value is typed as `T`.                                                |
+| `f.enum('a', 'b', 'c')` | Fixed set of allowed values; stored with a check constraint.                                                |
+| `f.uuid()`              | UUID identifier column, typically used for foreign keys.                                                    |
+| `f.ulid()`              | ULID identifier column — sortable and unique.                                                               |
+| `f.bytes()`             | Raw binary payload column (`BLOB`).                                                                         |
+
+### Field Modifiers [#field-modifiers]
+
+Modifiers chain onto any field factory and may be combined.
+
+| Modifier            | Signature        | Effect                                                           |
+| ------------------- | ---------------- | ---------------------------------------------------------------- |
+| `.optional()`       | `()`             | Column allows `NULL`; field excluded from required validation.   |
+| `.default(v)`       | `(value)`        | Default value applied on insert.                                 |
+| `.unique()`         | `()`             | Unique constraint at the database level.                         |
+| `.indexed()`        | `()`             | Creates a database index on the column.                          |
+| `.primaryKey()`     | `()`             | Marks the field as the primary key, overriding the default `id`. |
+| `.autoincrement()`  | `()`             | Enables auto-increment behavior.                                 |
+| `.description(str)` | `(text: string)` | Documentation string surfaced in Studio and OpenAPI.             |
+| `.validation(fn)`   | `(fn) => schema` | Attaches Standard Schema validation.                             |
+
+### Composite Constraints [#composite-constraints]
+
+Model-level `uniques` and `indexes` express constraints across multiple columns:
+
+```ts title="composite-constraints.ts"
+defineModel('posts', (f) => ({
+  title: f.string(),
+  authorId: f.uuid().indexed(),
+}), {
+  uniques: [['authorId', 'title']],
+  indexes: [{ columns: ['status', 'publishedAt'] }],
+})
+```
+
+### Type Inference [#type-inference]
+
+Field factories produce TypeScript types automatically.
+
+| Field Definition   | Inferred Type |
+| ------------------ | ------------- |
+| `f.string()`       | `string`      |
+| `f.integer()`      | `number`      |
+| `f.boolean()`      | `boolean`     |
+| `f.json<T>()`      | `T`           |
+| `f.timestamp()`    | `Date`        |
+| `f.enum('a', 'b')` | `'a' \| 'b'`  |
+| `f.uuid()`         | `string`      |
+
+## Validation [#validation]
+
+Field-level validation uses Standard Schema. Every `.validation()` call receives a schema builder for the field's own type and returns a rule. The shipped validator is the default engine; it can be switched in the app configuration:
+
+```ts title="validation.ts"
+export default defineConfig('app', {
+  validator: 'valibot',
+})
+```
+
+The validator is abstracted behind the Standard Schema interface, so switching engines requires no model-level changes.
+
+```ts title="validation-2.ts"
+defineModel('posts', (f) => ({
+  title: f.string().validation((s) => s.min(1).max(200)),
+  body: f.text().validation((s) => s.min(10)),
+  email: f.string().validation((s) => s.email()),
+  age: f.integer().validation((n) => n.min(0).max(150)),
+  authorId: f.uuid().validation((s) => s.uuid()).indexed(),
+}))
+```
+
+Validation rules defined in the field DSL flow everywhere the model is used:
+
+1. Generated route bodies are validated before insert and update.
+2. Generated list endpoints validate query parameters — `where`/`orderBy` shapes are schema-checked against the model.
+3. `Post.create({ ... })` validates before insert and `post.update({ ... })` validates before update.
+4. Studio forms validate against the same field definitions.
+5. OpenAPI schemas are generated from the field schemas.
+
+## Relations [#relations]
+
+Relations are declared with lazy references (arrow functions) so model files never import each other directly — circular imports are impossible. References resolve at scan time from the model intermediate representation.
+
+| Relation        | Field factory                                  | Foreign key location | Eager load                          |
+| --------------- | ---------------------------------------------- | -------------------- | ----------------------------------- |
+| `belongsTo`     | `f.belongsTo(() => Model)`                     | On the current model | `with('name')`                      |
+| `hasMany`       | `f.hasMany(() => Model)`                       | On the related model | `with('name')`, `withCount('name')` |
+| `hasOne`        | `f.hasOne(() => Model)`                        | On the related model | `with('name')`                      |
+| `belongsToMany` | `f.belongsToMany(() => Model, () => Junction)` | Junction table       | `with('name')`                      |
+
+```ts title="relations.ts"
+defineModel('posts', (f) => ({
+  author: f.belongsTo(() => User),
+  comments: f.hasMany(() => Comment),
+  coverImage: f.hasOne(() => CoverImage),
+  tags: f.belongsToMany(() => Tag, () => PostTag),
+}))
+```
+
+All four relation factories take a lazy reference as their first argument; `belongsToMany` takes a second lazy reference to the junction model.
+
+In development, relation loads that happen outside `with()` are flagged by the N+1 detector in the overlay.
+
+## Query Builder [#query-builder]
+
+Every model exposes a `.query()` builder. It compiles to the framework-owned query engine and is fully typed against the model's fields.
+
+```ts title="query-builder.ts"
+import { Post } from '@kwiva/data'
+
+const posts = await Post.query()
+const published = await Post.query().where('status', 'published')
+const popular = await Post.query().where('status', 'published').where('views', '>', 100)
+```
+
+### Where Clauses [#where-clauses]
+
+| Syntax                       | Description                                           | Example                                    |
+| ---------------------------- | ----------------------------------------------------- | ------------------------------------------ |
+| `.where(col, val)`           | Equality                                              | `.where('status', 'published')`            |
+| `.where(col, op, val)`       | Comparison operator (`=`, `>`, `<`, `>=`, `<=`, `!=`) | `.where('views', '>', 100)`                |
+| `.where(col, ['a', 'b'])`    | `IN` clause                                           | `.where('status', ['draft', 'published'])` |
+| `.where('rel.col', val)`     | Constrain on a related column                         | `.where('author.status', 'active')`        |
+| `.whereNull(col)`            | `IS NULL`                                             | `.whereNull('deletedAt')`                  |
+| `.whereNotNull(col)`         | `IS NOT NULL`                                         | `.whereNotNull('publishedAt')`             |
+| `.whereBetween(col, [a, b])` | `BETWEEN`                                             | `.whereBetween('views', [1, 100])`         |
+
+### Ordering, Limits, Selection, Joins [#ordering-limits-selection-joins]
+
+```ts title="ordering-limits-selection-joins.ts"
+const posts = await Post.query()
+  .where('status', 'published')
+  .orderBy({ createdAt: 'desc' })
+  .limit(20)
+
+const titles = await Post.query()
+  .select('id', 'title', 'status')
+
+const joined = await Post.query()
+  .join('authors', 'authors.id', 'posts.authorId')
+  .select('posts.*', 'authors.name as authorName')
+```
+
+| Method                      | Signature                       | Effect                                   |
+| --------------------------- | ------------------------------- | ---------------------------------------- |
+| `.orderBy(sort)`            | `({ column: 'asc' \| 'desc' })` | Orders results by column and direction.  |
+| `.limit(n)`                 | `(n: number)`                   | Caps the number of rows returned.        |
+| `.select(...cols)`          | `(...columns: string[])`        | Restricts the returned columns.          |
+| `.join(table, left, right)` | `(table, columnA, columnB)`     | Joins another table on matching columns. |
+
+### Aggregates [#aggregates]
+
+```ts title="aggregates.ts"
+const count = await Post.query().where('status', 'published').count()
+const totalViews = await Post.query().sum('views')
+const avgViews = await Post.query().avg('views')
+const oldest = await Post.query().min('createdAt')
+const newest = await Post.query().max('createdAt')
+
+const stats = await Post.query()
+  .select('status')
+  .count()
+  .groupBy('status')
+  .having((q) => q.count('id', '>', 10))
+```
+
+| Method              | Signature                      | Returns                   |
+| ------------------- | ------------------------------ | ------------------------- |
+| `.count()`          | `()`                           | `number`                  |
+| `.sum(col)`         | `(column: string)`             | `number`                  |
+| `.avg(col)`         | `(column: string)`             | `number`                  |
+| `.min(col)`         | `(column: string)`             | scalar of the column type |
+| `.max(col)`         | `(column: string)`             | scalar of the column type |
+| `.groupBy(...cols)` | `(...columns: string[])`       | groups aggregate rows     |
+| `.having(fn)`       | `(q) => q.count(col, op, val)` | filters grouped results   |
+
+### Eager Loading [#eager-loading]
+
+```ts title="eager-loading.ts"
+const posts = await Post.query().with('author')
+const nested = await Post.query().with('comments.author')
+const multiple = await Post.query().with('author', 'comments', 'tags')
+
+const users = await User.query().withCount('posts')
+```
+
+| Method                     | Description                                             |
+| -------------------------- | ------------------------------------------------------- |
+| `.with('relation')`        | Eager loads a single relation.                          |
+| `.with('nested.relation')` | Eager loads nested relations.                           |
+| `.with('a', 'b', 'c')`     | Eager loads multiple relations.                         |
+| `.withCount('relation')`   | Loads a `relationCount` column instead of full records. |
+
+### Finders [#finders]
+
+| Method                   | Description                                                        |
+| ------------------------ | ------------------------------------------------------------------ |
+| `Model.findOrFail(id)`   | Returns the record or throws a not-found error that maps to a 404. |
+| `Model.first({ where })` | Returns the first record matching the criteria.                    |
+| `Model.first()`          | Returns the first record.                                          |
+| `Model.exists(id)`       | Returns a boolean existence check.                                 |
+
+```ts title="finders.ts"
+const post = await Post.findOrFail(id)
+const draft = await Post.first({ where: { status: 'draft' } })
+const first = await Post.first()
+const exists = await Post.exists(id)
+```
+
+### Writes [#writes]
+
+| Method                       | Description                                                   |
+| ---------------------------- | ------------------------------------------------------------- |
+| `Model.create(data)`         | Validates and inserts one record; returns the created record. |
+| `Model.create(data, { tx })` | Creates inside a transaction or savepoint.                    |
+| `Model.createMany([...])`    | Bulk inserts many records.                                    |
+| `instance.update(data)`      | Validates and updates the record.                             |
+| `instance.delete()`          | Deletes the record; performs a soft delete when enabled.      |
+
+```ts title="writes.ts"
+const created = await Post.create({ title: 'Hello', authorId })
+const many = await Post.createMany([{ title: 'A', authorId }, { title: 'B', authorId }])
+const updated = await post.update({ status: 'published' })
+await post.delete()
+```
+
+### Tenant Scoping [#tenant-scoping]
+
+When the model configures `tenantField`, every query is scoped to the current tenant automatically — the tenant predicate is injected at runtime and requires no explicit filtering.
+
+## Pagination [#pagination]
+
+The builder supports offset pagination and cursor pagination.
+
+### Offset Pagination [#offset-pagination]
+
+```ts title="offset-pagination.ts"
+const result = await Post.query()
+  .where('status', 'published')
+  .page(1, 20)
+```
+
+```ts title="offset-pagination-2.ts"
+{
+  data: Post[],
+  total: number,
+  page: number,
+  lastPage: number,
+}
+```
+
+### Cursor Pagination [#cursor-pagination]
+
+```ts title="cursor-pagination.ts"
+const result = await Post.query()
+  .where('status', 'published')
+  .cursor('createdAt', 'desc', 'cursor-value')
+```
+
+```ts title="cursor-pagination-2.ts"
+{
+  data: Post[],
+  nextCursor: string | null,
+  hasMore: boolean,
+}
+```
+
+Cursor pagination is stable under concurrent inserts and deletes, making it the right choice for infinite scroll feeds and high-traffic lists; offset pagination suits admin dashboards and reports that need exact totals.
+
+Generated list endpoints accept both strategies as query parameters: `page` and `size` for offset mode, `cursor` and `direction` (`next` | `prev`) for cursor mode. The default page size is 20 and can be tuned globally:
+
+```ts title="cursor-pagination-3.ts"
+export default defineConfig('app', {
+  pagination: { defaultPageSize: 25, maxPageSize: 100 },
+})
+```
+
+## Raw SQL [#raw-sql]
+
+The builder composes over raw SQL, so the escape hatch returns the same typed results:
+
+```ts title="raw-sql.ts"
+const rows = await db.raw<{ n: number }>('select count(*) n from posts')
+const named = await db.raw('select * from posts where status = ?', ['published'])
+```
+
+## Transactions [#transactions]
+
+Transactions are started from the database handle. If the callback throws, the entire transaction rolls back; a committed transaction is durable and atomic.
+
+```ts title="transactions.ts"
+import { db } from '@kwiva/data'
+
+await db.transaction(async (tx) => {
+  const user = await User.create({ email }, { tx })
+  const order = await Order.create({ userId: user.id }, { tx })
+})
+```
+
+### Nested Transactions (Savepoints) [#nested-transactions-savepoints]
+
+Nested scopes use database savepoints. A failing savepoint rolls back only its own work, letting the outer transaction continue.
+
+```ts title="nested-transactions-savepoints.ts"
+await db.transaction(async (tx) => {
+  const user = await User.create({ email }, { tx })
+
+  await tx.savepoint(async (sp) => {
+    const order = await Order.create({ userId: user.id }, { tx: sp })
+  })
+})
+```
+
+### Options [#options]
+
+| Option           | Description                                              |
+| ---------------- | -------------------------------------------------------- |
+| `{ tx }`         | Pass the transaction object to any operation to join it. |
+| `isolationLevel` | `read_committed`, `repeatable_read`, or `serializable`.  |
+
+### Transaction-Aware Dispatch [#transaction-aware-dispatch]
+
+Events emitted inside a transaction are held and delivered only after commit, so a failed transaction never leaks an event:
+
+```ts title="transaction-aware-dispatch.ts"
+await db.transaction(async (tx) => {
+  const order = await Order.create(payload, { tx })
+  await OrderPlaced.emit({ orderId: order.id }, { tx })
+})
+```
+
+### Common Patterns [#common-patterns]
+
+```ts title="common-patterns.ts"
+await db.transaction(async (tx) => {
+  await Account.decrement('balance', amount, { where: { id: fromId }, tx })
+  await Account.increment('balance', amount, { where: { id: toId }, tx })
+})
+```
+
+```ts title="common-patterns-2.ts"
+await db.transaction(async (tx) => {
+  const order = await Order.create({ userId, total }, { tx })
+  for (const item of items) {
+    await OrderItem.create({ orderId: order.id, ...item }, { tx })
+  }
+})
+```
+
+Every query inside a transaction emits an observability span carrying normalized SQL text, duration, and row counts, and slow queries respect the threshold configured in the telemetry settings.
+
+## Soft Deletes [#soft-deletes]
+
+Enable `softDelete: true` to get a `deletedAt` column plus automatic query filtering. `delete()` stamps the timestamp instead of removing the row; normal queries exclude trashed rows.
+
+```ts title="soft-deletes.ts"
+defineModel('posts', (f) => ({
+  title: f.string(),
+}), {
+  softDelete: true,
+})
+```
+
+| Method                         | Description                                  |
+| ------------------------------ | -------------------------------------------- |
+| `Model.restore(id)`            | Clears `deletedAt` on one record.            |
+| `Model.restoreMany([ids])`     | Restores many records by id.                 |
+| `Model.restore({ where })`     | Restores records matching criteria.          |
+| `Model.withTrashed()`          | Scopes queries to include soft-deleted rows. |
+| `Model.forceDelete(id)`        | Permanently deletes one record.              |
+| `Model.forceDeleteMany([ids])` | Permanently deletes many records.            |
+
+```ts title="soft-deletes-2.ts"
+await Post.restore(id)
+await Post.restoreMany([1, 2, 3])
+await Post.restore({ where: { status: 'archived' } })
+
+const allPosts = await Post.withTrashed().query()
+const deletedPosts = await Post.withTrashed().whereNotNull('deletedAt')
+const total = await Post.withTrashed().count()
+const deleted = await Post.withTrashed().findOrFail(id)
+
+await Post.forceDelete(id)
+await Post.forceDeleteMany([1, 2, 3])
+```
+
+Soft-delete filtering also applies to eager-loaded relations. Related-model queries respect the parent scope:
+
+```ts title="soft-deletes-3.ts"
+const post = await Post.with('comments').findOrFail(id)
+const all = await Post.with('comments').withTrashed().findOrFail(id)
+```
+
+## Hooks [#hooks]
+
+Model hooks observe and mutate the row at lifecycle boundaries. `onCreating` runs before insert and may mutate the draft row; `onDeleting` may reject a delete by throwing.
+
+| Hook         | Signature            | Timing                                     |
+| ------------ | -------------------- | ------------------------------------------ |
+| `onCreating` | `(row, { session })` | Before insert; may mutate the row.         |
+| `onCreated`  | `(row, { session })` | After insert.                              |
+| `onUpdating` | `(row, { session })` | Before update.                             |
+| `onDeleting` | `(row, { session })` | Before delete; throwing aborts the delete. |
+
+```ts title="hooks.ts"
+defineModel('posts', (f) => ({
+  title: f.string(),
+  slug: f.string().optional().unique(),
+  isPinned: f.boolean().default(false),
+}), {
+  hooks: {
+    onCreating: (row) => {
+      row.slug = row.title.toLowerCase().replace(/\s+/g, '-')
+    },
+    onDeleting: async (row) => {
+      if (row.isPinned) {
+        throw new Error('cannot delete pinned')
+      }
+    },
+  },
+})
+```
+
+## Computed Fields [#computed-fields]
+
+The `computed` option derives read-only fields from the row. Computed values are serialized into API responses and Studio views but are never stored or writable.
+
+```ts title="computed-fields.ts"
+defineModel('posts', (f) => ({
+  title: f.string(),
+  body: f.text().optional(),
+}), {
+  computed: {
+    excerpt: (row) => row.body?.slice(0, 140) ?? '',
+  },
+})
+```
+
+| Option     | Type                           | Description                                                     |
+| ---------- | ------------------------------ | --------------------------------------------------------------- |
+| `computed` | `Record<string, (row) => any>` | Derived, read-only fields surfaced in API responses and Studio. |
+
+## Migrations [#migrations]
+
+Migrations evolve the database schema over time. They are generated from model diffs and hand-editable for complex changes. Migration files live in `src/database/migrations/` and run in filename order.
+
+```bash title="terminal"
+kwiva make:model invoice
+kwiva db:diff
+kwiva db:migrate
+kwiva db:rollback --steps=1
+kwiva db:status
+kwiva db:reset
+```
+
+### defineMigration [#definemigration]
+
+```ts title="definemigration.ts"
+defineMigration({ up, down })
+```
+
+| Argument | Type                   | Description                               |
+| -------- | ---------------------- | ----------------------------------------- |
+| `up`     | `(sql) => sql\`...\`\` | Applies the change using typed SQL steps. |
+| `down`   | `(sql) => sql\`...\`\` | Reverts the change.                       |
+
+```ts title="definemigration-2.ts"
+import { defineMigration } from '@kwiva/data'
+
+export default defineMigration({
+  up: (sql) => sql`
+    create table posts (
+      id integer primary key,
+      title varchar(255) not null
+    )
+  `,
+  down: (sql) => sql`
+    drop table posts
+  `,
+})
+```
+
+Custom migrations can contain any SQL the underlying database engine supports:
+
+```ts title="definemigration-3.ts"
+export default defineMigration({
+  up: (sql) => sql`
+    alter table posts add column excerpt text
+  `,
+  down: (sql) => sql`
+    alter table posts drop column excerpt
+  `,
+})
+```
+
+### CLI Commands [#cli-commands]
+
+| Command                       | Description                                                                                     | Stability |
+| ----------------------------- | ----------------------------------------------------------------------------------------------- | --------- |
+| `kwiva make:model <name>`     | Creates a model plus migration and factory stubs.                                               | v1        |
+| `kwiva db:diff`               | Diffs the model intermediate representation against the live database and proposes a migration. | v1        |
+| `kwiva db:migrate`            | Applies all pending migrations.                                                                 | v1        |
+| `kwiva db:rollback --steps=N` | Rolls back the last N migrations.                                                               | v1        |
+| `kwiva db:status`             | Lists applied and pending migrations.                                                           | v1        |
+| `kwiva db:reset`              | Drops all tables, then migrates and seeds.                                                      | v1        |
+| `kwiva db:push`               | Pushes model definitions straight to the database without migration files.                      | v1.x      |
+| `kwiva db:browse`             | Opens the data browser.                                                                         | v1.x      |
+
+When tenancy is configured, migrations respect the configured tenancy strategies, applying per-tenant schema or table changes automatically. Best practice: keep every migration reversible with both `up` and `down`, one logical change per file, and preview with `kwiva db:diff` before applying.
+
+## Seeders [#seeders]
+
+Seeders populate the database with initial or test data. They are safe to re-run: seeder inserts use upsert semantics, so repeated `db:seed` runs do not create duplicates.
+
+```ts title="seeders.ts"
+defineSeeder(name, handler)
+```
+
+| Argument  | Type                          | Description                                |
+| --------- | ----------------------------- | ------------------------------------------ |
+| `name`    | `string`                      | Seeder identifier, used with `--seeder`.   |
+| `handler` | `async ({ factory }) => void` | Performs inserts using the factory helper. |
+
+```ts title="src/database/seeders/01-users.ts"
+// src/database/seeders/01-users.ts
+import { defineSeeder } from '@kwiva/data'
+
+export default defineSeeder('users', async ({ factory }) => {
+  await factory(User).count(10).create()
+  await factory(User).create({ email: 'admin@acme.dev', role: 'admin' })
+})
+```
+
+```bash title="terminal"
+kwiva db:seed
+kwiva db:seed --seeder=users
+```
+
+Seeders run in filename order, so numeric prefixes express dependencies:
+
+```ts title="seeders-2.ts"
+export default defineSeeder('roles', async ({ factory }) => {
+  await factory(Role).createMany(['admin', 'editor', 'viewer'])
+})
+
+export default defineSeeder('users', async ({ factory }) => {
+  const adminRole = await Role.first({ where: { name: 'admin' } })
+  await factory(User).create({ roleId: adminRole.id })
+})
+```
+
+## Factories [#factories]
+
+Factories generate model-aware test and seed data. They respect required fields, enums, relations, defaults, and unique constraints automatically.
+
+```ts title="factories.ts"
+defineFactory(Model, (f) => ({ ... }))
+```
+
+The factory builder provides four generators:
+
+| Builder             | Signature         | Description                                  |
+| ------------------- | ----------------- | -------------------------------------------- |
+| `f.fake(fn)`        | `(fake) => value` | Generates fake data from the faker function. |
+| `f.pick(...values)` | `(...options)`    | Selects randomly from the given values.      |
+| `f.relation(Model)` | `(model)`         | Creates a related model instance.            |
+| `f.seq(n)`          | `(i) => value`    | Sequential value by index.                   |
+
+```ts title="factories-2.ts"
+import { defineFactory } from '@kwiva/data'
+
+export const PostFactory = defineFactory(Post, (f) => ({
+  title: f.fake((fake) => fake.lorem.sentence()),
+  status: f.pick('draft', 'published', 'archived'),
+  author: f.relation(User),
+}))
+```
+
+Models expose `.factory()` sugar and a fluent runtime API:
+
+| Method                | Description                          |
+| --------------------- | ------------------------------------ |
+| `Model.factory()`     | Returns the model's factory builder. |
+| `.count(n)`           | Number of records to create.         |
+| `.state(name)`        | Applies a named factory state.       |
+| `.create(overrides?)` | Creates and persists records.        |
+
+```ts title="factories-3.ts"
+await Post.factory().count(5).create()
+await Post.factory().create({ title: 'Custom Title' })
+```
+
+### Named States [#named-states]
+
+States are declared as extra keys on the returned field object and applied with `.state()`:
+
+```ts title="named-states.ts"
+export const PostFactory = defineFactory(Post, (f) => ({
+  title: f.fake((fake) => fake.lorem.sentence()),
+  status: f.pick('draft'),
+
+  published: {
+    status: f.pick('published'),
+    publishedAt: f.fake(() => new Date()),
+  },
+  archived: {
+    status: f.pick('archived'),
+  },
+}))
+```
+
+```ts title="named-states-2.ts"
+await Post.factory().state('published').create()
+await Post.factory().state('archived').create()
+```
+
+### Custom Create Logic [#custom-create-logic]
+
+A `create` hook on the definition transforms data before insert:
+
+```ts title="custom-create-logic.ts"
+export const UserFactory = defineFactory(User, (f) => ({
+  email: f.fake((fake) => fake.internet.email()),
+  name: f.fake((fake) => fake.person.fullName()),
+  role: f.pick('admin', 'editor', 'viewer'),
+
+  create: async (data) => {
+    const hashedPassword = await hash(data.password)
+    return { ...data, password: hashedPassword }
+  },
+}))
+```
+
+### In Tests [#in-tests]
+
+```ts title="in-tests.ts"
+const post = await PostFactory.create()
+const posts = await PostFactory.count(10).create()
+const published = await PostFactory.state('published').create()
+```
+
+## Database Configuration [#database-configuration]
+
+Database connections are configured in `src/config/database.ts`. The development default is SQLite; production reads a Postgres connection string from the environment, so one file serves every environment.
+
+```ts title="database-configuration.ts"
+import { defineConfig } from '@kwiva/data'
+
+export default defineConfig('database', {
+  defaults: {
+    driver: 'sqlite',
+    url: 'sqlite://storage/database.db',
+    pool: { max: 10, idleTimeout: 30_000 },
+    logging: false,
+  },
+  env: { url: 'DATABASE_URL', driver: 'DB_DRIVER' },
+})
+```
+
+| Option             | Type                     | Description                                                    |
+| ------------------ | ------------------------ | -------------------------------------------------------------- |
+| `driver`           | `'sqlite' \| 'postgres'` | Database driver.                                               |
+| `url`              | `string`                 | Connection URL.                                                |
+| `pool.max`         | `number`                 | Maximum pooled connections.                                    |
+| `pool.idleTimeout` | `number`                 | Idle connection timeout in milliseconds.                       |
+| `logging`          | `boolean`                | Enables per-query logging with duration and trace correlation. |
+
+### Named Connections [#named-connections]
+
+Separate workloads across databases with `connections`. Each named connection has its own driver, URL, and pool.
+
+```ts title="named-connections.ts"
+export default defineConfig('database', {
+  defaults: {
+    driver: 'sqlite',
+    url: 'sqlite://storage/database.db',
+  },
+  connections: {
+    main: {
+      driver: 'postgres',
+      url: process.env.DATABASE_URL,
+      pool: { max: 20 },
+    },
+    analytics: {
+      driver: 'postgres',
+      url: process.env.ANALYTICS_DB_URL,
+      pool: { max: 5 },
+    },
+  },
+})
+```
+
+### Read Replicas [#read-replicas]
+
+Read replicas distribute read traffic across instances while writes stay on the primary:
+
+```ts title="read-replicas.ts"
+export default defineConfig('database', {
+  defaults: {
+    driver: 'postgres',
+    url: process.env.DATABASE_URL,
+  },
+  replicas: [
+    { url: process.env.READ_REPLICA_1_URL },
+    { url: process.env.READ_REPLICA_2_URL },
+  ],
+})
+```
+
+| Environment Variable | Description                             |
+| -------------------- | --------------------------------------- |
+| `DATABASE_URL`       | Primary database connection URL.        |
+| `DB_DRIVER`          | Driver override (`sqlite`, `postgres`). |
+| `ANALYTICS_DB_URL`   | Analytics connection URL.               |
+| `READ_REPLICA_1_URL` | First read replica URL.                 |
+| `READ_REPLICA_2_URL` | Second read replica URL.                |
+
+Every query emits an observability span with normalized SQL, duration, and row counts. In development, the N+1 detector flags relation loads issued outside `with()`.
+
+## File Storage [#file-storage]
+
+The storage singleton provides disk-based file and object storage with pluggable drivers. Disks are declared in `src/config/storage.ts`:
+
+```ts title="file-storage.ts"
+import { defineConfig } from '@kwiva/data'
+
+export default defineConfig('storage', {
+  defaults: {
+    public: { driver: 'local', root: 'public' },
+    uploads: { driver: 'local', root: 'storage/uploads' },
+    s3: {
+      driver: 's3',
+      bucket: 'acme-media',
+      region: 'eu-west-1',
+      env: { accessKey: 'S3_ACCESS_KEY', secret: 'S3_SECRET' },
+    },
+  },
+})
+```
+
+| Driver   | Environments                 |
+| -------- | ---------------------------- |
+| `local`  | dev, server presets          |
+| `s3`     | production                   |
+| `r2`     | edge deploys (s3-compatible) |
+| `kv`     | edge-safe small artifacts    |
+| `memory` | tests                        |
+
+### Storage API [#storage-api]
+
+The runtime API is exported from `@kwiva/core`:
+
+```ts title="storage-api.ts"
+import { storage } from '@kwiva/core'
+
+const path = await storage.put('uploads/avatars', bytes, {
+  disk: 'uploads',
+  contentType: 'image/png',
+})
+const file = await storage.get(path, { disk: 'uploads' })
+const url = storage.url(path, { disk: 's3' })
+const signed = await storage.signedUrl(path, { expiresIn: 3600 })
+await storage.delete(path)
+const listing = await storage.list('uploads/avatars')
+await storage.copy(path, 'backups/' + path)
+const meta = await storage.stat(path)
+```
+
+| Method              | Signature                                   | Returns                                     |
+| ------------------- | ------------------------------------------- | ------------------------------------------- |
+| `storage.put`       | `(directory, bytes, { disk, contentType })` | `Promise<string>` — the stored path.        |
+| `storage.get`       | `(path, { disk })`                          | file contents                               |
+| `storage.url`       | `(path, { disk })`                          | public URL                                  |
+| `storage.signedUrl` | `(path, { expiresIn, disk })`               | time-limited signed URL                     |
+| `storage.delete`    | `(path)`                                    | `Promise<void>`                             |
+| `storage.list`      | `(directory)`                               | `{ files, dirs }`                           |
+| `storage.copy`      | `(source, destination)`                     | `Promise<void>`                             |
+| `storage.stat`      | `(path)`                                    | `{ size, contentType, lastModified, etag }` |
+| `storage.dump`      | `(disk)`                                    | backup export (v1.x)                        |
+| `storage.fake`      | `()`                                        | swaps to an in-memory disk for tests        |
+
+When multi-tenancy is configured, storage paths are prefixed per tenant automatically (`storage/{tenantId}/...`), isolating data with no extra configuration.
+
+### Server-Side Uploads [#server-side-uploads]
+
+Validation happens at the route; storage handles the write; the returned path is stored on the model:
+
+```ts title="server-side-uploads.ts"
+c.post('/avatar', async ({ file, session }) => {
+  const { filename, bytes, type } = await file()
+  return storage.put(`avatars/${session.user.id}`, bytes, {
+    contentType: type,
+  })
+}, { file: { maxSize: '2mb', types: ['image/png', 'image/jpeg'] } })
+```
+
+### Testing [#testing]
+
+`storage.fake()` swaps the active disk for an in-memory implementation, making file operations deterministic:
+
+```ts title="testing.ts"
+storage.fake()
+
+const path = await storage.put('avatars/123', bytes, { disk: 'uploads', contentType: 'image/png' })
+expect(path).toBe('avatars/123')
+```
+
+## What to Read Next [#what-to-read-next]
+
+* [Models](/docs/data/models) — The `defineModel` factory, options, and the model API
+* [Fields & DSL](/docs/data/fields) — Every field type, modifier, and type inference rule
+* [Relations](/docs/data/relations) — `belongsTo`, `hasMany`, `hasOne`, `belongsToMany`
+* [Validation](/docs/data/validation) — Standard Schema validation and engine switching
+* [Query Builder](/docs/data/queries) — `where`, `join`, aggregates, and raw SQL
+* [Pagination](/docs/data/pagination) — `.page()` and `.cursor()` result shapes
+* [Transactions](/docs/data/transactions) — Savepoints and transaction-aware dispatch
+* [Migrations](/docs/data/migrations) — Model-diff migrations and `defineMigration`
+* [Seeders](/docs/data/seeders) — Ordered, idempotent data seeding
+* [Factories](/docs/data/factories) — Model-aware factories, states, and test helpers
+* [Soft Deletes](/docs/data/soft-deletes) — `withTrashed()`, `restore()`, `forceDelete()`
+* [Database Configuration](/docs/data/database-config) — SQLite dev, Postgres prod, named connections
+* [File Storage](/docs/data/storage) — Disks, drivers, signed URLs, and uploads

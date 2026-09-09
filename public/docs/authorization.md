@@ -1,0 +1,113 @@
+# Authorization (/docs/authorization)
+
+
+
+Authorization answers the question authentication does not: given who the user is, what are they allowed to do? Kwiva answers it with a single, uniform model — policies defined once, checked everywhere. A `definePolicy` file in `src/app/policies/` describes what any user can do with a resource, and every access surface in the framework honors it: generated model routes, hand-written controllers, Studio screens, realtime channels, MCP tools, jobs, and seeders.
+
+Authentication and authorization are deliberately separate layers. Authentication resolves identity — `ctx.session.user` — and authorization decides what that identity may do. Kwiva composes them in a fixed order: identity first, capability second, scope third. A policy never decides who you are, and a session alone never grants access.
+
+## Overview [#overview]
+
+Authorization builds on three primitives:
+
+* **Policies** — `definePolicy('posts', (user, ability, resource) => ...)` — pure logic that decides an ability for a resource.
+* **Permissions** — the `{resource}.{action}` strings checked against policies, like `posts.publish` or `users.create`.
+* **Roles** — data stored on the user (`role`, `permission`) that policies interpret when making decisions.
+
+The shape of access control is therefore always the same: an ability is requested, a policy decides, and every layer of the framework resolves the answer the same way. A request, a Studio click, and an agent tool call all ask the identical question and receive the identical answer because they all resolve through the same policy source.
+
+### Writing versus checking [#writing-versus-checking]
+
+Authorization involves two separate acts: **writing** the decision and **checking** it. Writing happens once, in `definePolicy`. Checking happens everywhere — and the framework makes most of it automatic. Models and routes declare permissions declaratively, so the common cases (CRUD verbs, custom actions) never need a hand-written check. The helpers `ctx.can`, `authorize`, and `useCan` exist for the rest: branch, enforce, and render. The distinction matters because it decides *where* a policy change is felt — change the writer, and every checker follows.
+
+## Mental Model: Ability, Permission, Role [#mental-model-ability-permission-role]
+
+These three words are easy to conflate, so the distinction matters:
+
+| Concept    | What it is                                                     | Example                      |
+| ---------- | -------------------------------------------------------------- | ---------------------------- |
+| Ability    | The action being attempted, addressed as `{resource}.{action}` | `posts.publish`              |
+| Permission | A granted right, stored on a user or derived from role         | `permission: 'posts.create'` |
+| Role       | A named bundle of expected behavior, stored as data            | `role: 'editor'`             |
+
+The chain is always one-directional: roles inform users, policies interpret users to grant or deny abilities, and abilities are what routes and screens actually check. Application code never checks roles directly — it checks abilities, and policies are the only place role data is read.
+
+The same policy file therefore serves every consumer. Because it is pure logic — a plain function from `(user, ability, resource)` to a boolean — it has no HTTP concerns and no UI concerns, which is exactly what makes it safe to run inside a route, a Studio screen render, or a background job with identical semantics.
+
+## Where Access Is Enforced [#where-access-is-enforced]
+
+Enforcement is not a single chokepoint but a consistent layer across every surface that touches data:
+
+| Surface                | Enforcement                                            |
+| ---------------------- | ------------------------------------------------------ |
+| Generated model routes | `{permission}.{action}` checked in the route lifecycle |
+| Controller routes      | `permission` option wired to the matching policy       |
+| Studio screens         | Actions hidden or disabled without the ability         |
+| Realtime channels      | Subscribe is policy-checked                            |
+| MCP tools              | Per-tool ability checks                                |
+| Seeders and tasks      | Explicit `authorize()` calls                           |
+
+Because policies are pure logic with no HTTP concerns, the same `definePolicy` file gates a request, a screen action, and an agent tool with identical results. There is one definition of "can this user publish this post" — not a route copy, a UI copy, and an agent copy that slowly diverge. See [Enforcement Points](/docs/authorization/enforcement) for the full map.
+
+### The manifest connects it all [#the-manifest-connects-it-all]
+
+Policies and permissions reach every surface through the route manifest — the intermediate representation that every generated route, controller route, Studio screen, MCP tool, and OpenAPI spec is compiled from. When a controller registers a custom action with `permission: 'posts.publish'`, the manifest records the ability once, and every consumer of the manifest reads the same string. That single registration is why a permission can be referenced from client types the moment it is declared, and why authorization never needs a second, hand-maintained wiring document.
+
+## Setting Up [#setting-up]
+
+```ts title="src/app/policies/posts.ts"
+// src/app/policies/posts.ts
+import { definePolicy } from '@kwiva/core'
+
+export default definePolicy('posts', (user, ability, resource) => {
+  if (user.role === 'admin') return true
+  switch (ability) {
+    case 'read':      return true
+    case 'create':    return user.id != null
+    case 'update':
+    case 'delete':    return resource ? resource.authorId === user.id : false
+    case 'publish':   return user.role === 'editor'
+    default:          return false
+  }
+})
+```
+
+One file per resource namespace, and the policy takes effect everywhere the resource appears. Generated routes read the model's `permission` option, controllers declare the same namespace, and Studio hides the buttons this policy would reject.
+
+### Wiring the namespace [#wiring-the-namespace]
+
+The policy takes effect through two attachments:
+
+1. **On the model** — `defineModel('posts', ..., { permission: 'posts' })` gates every generated route by namespace.
+2. **On controllers** — the `permission` route option names the exact ability, including custom actions like `publish`.
+
+Wire the same namespace in both places and the two halves of the API surface — generated and authored — resolve through one policy.
+
+## Defense in Depth [#defense-in-depth]
+
+Authorization is layered, and the layers run in a deliberate order:
+
+1. **Authentication** — the session middleware resolves who is making the request.
+2. **Policy checks** — in the route lifecycle, before the handler.
+3. **Handler logic** — explicit `ctx.can` / `authorize` for decisions the generic checks do not cover.
+4. **Data-level scoping** — tenant field auto-scoping constrains even permitted requests to their own tenant's rows.
+
+Each layer assumes the ones before it ran, and every layer reads from the same policy source. See the [Enforcement](/docs/authorization/enforcement) page for the ordering in depth and the [Tenancy scoping](/docs/tenancy/scoping) page for the data boundary that runs after authorization.
+
+> \[!NOTE]
+> The layered model is what makes authorization safe to reason about incrementally. A route you add later is protected the moment it declares a `permission`, regardless of what authorization has already been added elsewhere — the layers compose by construction, not by remembering to wire them.
+
+## Related Reading [#related-reading]
+
+* [Policies](/docs/authorization/policies) — writing `definePolicy` and `defineGate`
+* [Permissions](/docs/authorization/permissions) — the `{resource}.{action}` grammar and check helpers
+* [RBAC](/docs/authorization/roles) — storing roles on users and interpreting them in policies
+* [Enforcement Points](/docs/authorization/enforcement) — the full list of surfaces that check policies
+
+## What's Next [#whats-next]
+
+* [Policies](/docs/authorization/policies) — the factory function and its signature
+* [Permissions](/docs/authorization/permissions) — `ctx.can`, `useCan`, and route gating
+* [Enforcement Points](/docs/authorization/enforcement) — defense-in-depth through every surface
+* [Authentication](/docs/auth) — where identity feeding these checks comes from
+* [Models](/docs/data/models) — the `permission` option that ties models to policies

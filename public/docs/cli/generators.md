@@ -1,0 +1,171 @@
+# Generators (/docs/cli/generators)
+
+
+
+Generators are how new code enters a Kwiva project the right way. Every `kwiva make:*` command writes a file — or a set of files — following the framework's conventions: lowercase names, correct placement, and typed stubs that pass `kwiva check` before you write a single line. Generators are not snippets dropped on the filesystem; each maps one-to-one to a `defineX` construct, so the generated file is a faithful starting point for the real thing.
+
+## Full Reference [#full-reference]
+
+| Command                        | Creates                                               |
+| ------------------------------ | ----------------------------------------------------- |
+| `kwiva make:model <name>`      | `src/app/models/<name>.ts` plus migration and factory |
+| `kwiva make:controller <name>` | `src/app/http/controllers/<name>.ts`                  |
+| `kwiva make:middleware <name>` | `src/app/http/middleware/<name>.ts`                   |
+| `kwiva make:auth`              | `src/app/http/auth.ts` plus a users-model check       |
+| `kwiva make:service <name>`    | `src/app/services/<name>.ts`                          |
+| `kwiva make:job <name>`        | `src/app/jobs/<name>.ts`                              |
+| `kwiva make:event <name>`      | `src/app/events/<name>.ts`                            |
+| `kwiva make:policy <name>`     | `src/app/policies/<name>.ts`                          |
+| `kwiva make:task <name>`       | `src/app/tasks/<name>.ts`                             |
+| `kwiva make:command <name>`    | `src/app/console/<name>.ts`                           |
+| `kwiva make:page <path>`       | `src/ui/pages/<path>.tsx`                             |
+| `kwiva make:seeder <name>`     | `src/database/seeders/<name>.ts`                      |
+| `kwiva make:module <name>`     | `modules/<name>/` scaffold                            |
+| `kwiva make:test <name>`       | Matching test file                                    |
+
+## How Generators Work [#how-generators-work]
+
+Generators share one pipeline. The `kwiva` CLI resolves the requested name, validates it against the naming conventions, computes the target path from the file type's home directory, and writes a typed stub. The stub imports from the correct `@kwiva/*` package, declares the expected `defineX` call, and wires options with sensible defaults. Because the output is typed and convention-shaped, a freshly generated file compiles and lints immediately — you extend it rather than fix it.
+
+The placement rules mirror the [defineX convention](/docs/core-concepts/definex):
+
+```text title="how-generators-work.txt"
+src/app/models/posts.ts            ← defineModel, singular filename
+src/app/http/controllers/posts.ts  ← defineController, plural filename
+src/app/jobs/send-welcome.ts       ← defineJob, kebab-case filename
+src/ui/pages/posts.$id.tsx         ← definePage, dot.route filename
+```
+
+Two properties make the pipeline deterministic: the target path is always derived from the file type's home directory, and every generator runs through the same validation step before writing anything. Interrupted a generation halfway? Rerun it — the output is identical, because generators are idempotent.
+
+## Naming Rules [#naming-rules]
+
+Generator arguments follow the naming conventions, and the CLI enforces them:
+
+* All lowercase, kebab-case: `make:job send-welcome`, not `SendWelcome`.
+* Models and policies use singular names (`post`, `user`); controllers use plural (`posts`, `users`).
+* Pages use the dot-route form (`posts.$id`, `settings.profile`) and land under `src/ui/pages/`.
+* The generated file name determines discoverability — the framework scans directories by name, so a correctly named file is automatically registered.
+
+Names that violate the conventions are rejected by the generator rather than producing a file that will fail the gate later. This is the mechanical edge of the framework's conventions: the folder structure, the keep, and the naming are not guidance, they are the surface the framework scans.
+
+## The Generators in Detail [#the-generators-in-detail]
+
+### Model — `make:model` [#model--makemodel]
+
+```bash title="terminal"
+kwiva make:model post
+```
+
+Generates the model file plus a model-diff migration and a factory:
+
+```ts title="src/app/models/posts.ts"
+// src/app/models/posts.ts
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  // add fields with the field DSL
+}), {
+  timestamps: true,
+})
+```
+
+The migration is derived from the model definition — add fields to the model and regenerate. The factory gives you `Post.factory().count(10).create()` in tests and seeders. Because the model is the single source of truth, everything derived — routes, types, Studio screens, OpenAPI, and the typed client — recomputes from the DSL as you extend it. See [Models](/docs/data/models), [Migrations](/docs/data/migrations), and [Factories](/docs/data/factories).
+
+### Controller — `make:controller` [#controller--makecontroller]
+
+```bash title="terminal"
+kwiva make:controller post
+```
+
+Generates `src/app/http/controllers/posts.ts` with a `defineController` scaffold — resource handler stubs ready to be filled with `c.get`, `c.post`, and friends. The scaffold includes the controller options block (`prefix`, `tags`, `permission`), so a generated controller is already discoverable, documented, and gated before you add a handler. See [Controllers](/docs/http/controllers).
+
+### Middleware and Auth — `make:middleware` / `make:auth` [#middleware-and-auth--makemiddleware--makeauth]
+
+`make:middleware auth` writes `src/app/http/middleware/auth.ts` with a `defineMiddleware` scaffold. `make:auth` sets up the auth surface in `src/app/http/auth.ts` and checks that a users model exists to back sessions. Together they are the fastest path from a fresh scaffold to authenticated pages. See [Middleware](/docs/http/middleware) and [Authentication](/docs/auth/).
+
+### Service — `make:service` [#service--makeservice]
+
+```bash title="terminal"
+kwiva make:service billing
+```
+
+Generates `src/app/services/billing.ts` with a `defineService` scaffold for business logic that does not belong in a controller. Services are declared values — plain functions closed over their dependencies — so the generated shape is trivially unit-testable. See [Services](/docs/core-concepts/services).
+
+### Job and Event — `make:job` / `make:event` [#job-and-event--makejob--makeevent]
+
+```bash title="terminal"
+kwiva make:job send-welcome
+kwiva make:event user-signed-up
+```
+
+Job stubs include the handler context, payload schema, and options block — `queue`, `attempts`, `backoff`, and so on — ready to configure. Event stubs declare the event's payload shape through the field DSL, so validation flows from field types at emit time. See [Jobs](/docs/background-work/jobs) and [Realtime Events](/docs/realtime/events).
+
+### Policy — `make:policy` [#policy--makepolicy]
+
+```bash title="terminal"
+kwiva make:policy post
+```
+
+Generates `src/app/policies/posts.ts` with a `definePolicy` scaffold. The policy namespace matches the model's `permission` option, so generated routes and screens enforce it immediately — write the ability checks, and the routes that reference the namespace inherit them. See [Authorization](/docs/authorization/).
+
+### Task — `make:task` [#task--maketask]
+
+```bash title="terminal"
+kwiva make:task cleanup-sessions
+```
+
+Generates `src/app/tasks/cleanup.ts` with a `defineTask` scaffold — handler, `timeout`, and `retries`. Register its cadence later in `src/config/schedule.ts`. See [Scheduled Tasks](/docs/background-work/scheduling).
+
+### Command — `make:command` [#command--makecommand]
+
+```bash title="terminal"
+kwiva make:command import-legacy
+```
+
+Generates `src/app/console/import-legacy.ts` with a `defineCommand` scaffold including `signature`, `description`, and `handle`. The command joins the CLI surface automatically under its signature. See [CLI](/docs/cli/).
+
+### Page — `make:page` [#page--makepage]
+
+```bash title="terminal"
+kwiva make:page posts.$id
+```
+
+Generates `src/ui/pages/posts.$id.tsx` — a `definePage` with `loader`, `component`, and error scaffolding. The dot-route filename determines the URL: `posts.$id` expresses a page under the `posts` route with an `id` parameter. See [Pages](/docs/frontend/pages).
+
+### Seeder — `make:seeder` [#seeder--makeseeder]
+
+```bash title="terminal"
+kwiva make:seeder posts
+```
+
+Generates `src/database/seeders/posts.ts` with a `defineSeeder` scaffold for idempotent, ordered data seeding. See [Seeders](/docs/data/seeders).
+
+### Module — `make:module` [#module--makemodule]
+
+```bash title="terminal"
+kwiva make:module analytics
+```
+
+Scaffolds `modules/analytics/` — an installable, composable unit with slots for its own models, controllers, pages, config, and migrations. The scaffold includes a `defineModule` entry with `name`, `version`, and `requires` slots, so a generated module is immediately composable and publishable. See [Modules](/docs/modules-plugins/defining-modules).
+
+### Test — `make:test` [#test--maketest]
+
+```bash title="terminal"
+kwiva make:test post
+```
+
+Generates a matching test file for the named construct, placed alongside the test suite layout for unit and integration tests. See [Testing](/docs/testing/).
+
+## Generators Upstream of the Details [#generators-upstream-of-the-details]
+
+The one pattern to remember across every generator: **each `make:*` maps to one `defineX` construct**, and the generated file is the best wiring the framework knows for that construct. When a generator creates multiple files — `make:model` emits model + migration + factory — those files stay in sync by construction because they derive from the same definition as you extend it.
+
+## What's Next [#whats-next]
+
+* [Project & Lifecycle Commands](/docs/cli/project-commands) — run the gate on generated output
+* [The defineX Convention](/docs/core-concepts/definex) — the grammar every generator emits
+* [Models](/docs/data/models) — extend a generated model with the field DSL
+* [Controllers](/docs/http/controllers) — extend a generated controller with routes
+* [Addon Commands](/docs/cli/addon-commands) — install capabilities that bring their own files

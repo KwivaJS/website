@@ -1,0 +1,194 @@
+# Jobs (/docs/background-work/jobs)
+
+
+
+A job is the unit of background work. One `defineJob` call declares what the work does, how the queue should treat it, and what kind of payload it accepts. Jobs live one per file in `src/app/jobs/` and are auto-discovered — no registration required. The factory comes from `@kwiva/queue`, and the queue transport it runs on is framework-owned: Redis or a database table, declared in config rather than treated as external middleware.
+
+Jobs are the workhorse of the background layer. Anything slow, unreliable-if-inline, batch-shaped, or time-dependent fits here, and the framework's reliability guarantees — retries, backoff, delays, priority, and idempotency — apply to every job uniformly.
+
+## Defining a Job [#defining-a-job]
+
+`defineJob` takes three arguments: a name, an async handler, and an options object. The handler receives the validated payload plus a context with the current `job` record and a `logger` bound to this job:
+
+```ts title="src/app/jobs/send-welcome.ts"
+// src/app/jobs/send-welcome.ts
+import { defineJob } from '@kwiva/queue'
+import { WelcomeMail } from '../mail/welcome'
+
+export default defineJob('send-welcome', async ({ payload, job, logger }) => {
+  const user = await User.findOrFail(payload.userId)
+  await mail.send(WelcomeMail(user))
+  job.progress(50)
+  await client.track({ event: 'welcome_sent', userId: user.id })
+  return { delivered: true }
+}, {
+  queue: 'emails',                     // declared in src/config/queue.ts
+  schema: { userId: 'uuid' },          // payload validated (typed from model IR where referenced)
+  attempts: 5,
+  backoff: 'exponential',              // 'fixed' | 'exponential' | fn(attempt)
+  priority: 10,
+  rateLimit: { max: 100, per: 60 },    // v1.x
+  idempotencyKey: (p) => `welcome:${p.userId}`,
+})
+```
+
+| Argument  | Type                        | Description                                          |
+| --------- | --------------------------- | ---------------------------------------------------- |
+| `name`    | `string`                    | Unique job name, e.g. `'send-welcome'`               |
+| `handler` | `(ctx) => Promise<unknown>` | The work to run; receives `{ payload, job, logger }` |
+| `options` | `JobOptions`                | Queue, schema, and execution behavior                |
+
+The handler's return value is the job result — available to observability tooling and to chain and batch callbacks. Throwing inside the handler marks the attempt as failed and triggers the retry policy.
+
+## Handler Context [#handler-context]
+
+The handler receives a single context object:
+
+| Property  | Type                | Description                                                |
+| --------- | ------------------- | ---------------------------------------------------------- |
+| `payload` | typed from `schema` | The validated payload passed to `dispatch`                 |
+| `job`     | `JobHandle`         | Runtime handle for the running attempt, with `progress(n)` |
+| `logger`  | `Logger`            | Structured logger correlated with the job                  |
+
+## Payload Typing From the Model IR [#payload-typing-from-the-model-ir]
+
+Every job defines its payload with a `schema` option. The schema is a single source for both validation and types. When a payload field references an entity that is backed by a model — a `userId` for a user model, for example — the field's type and validation rules flow from that model's definition through the model IR. There is no second schema to keep in sync, and no drift between what a route accepts, what the model stores, and what a job receives.
+
+```ts title="payload-typing-from-the-model-ir.ts"
+export default defineJob('process-invoice', async ({ payload }) => {
+  const invoice = await Invoice.findOrFail(payload.invoiceId)
+  // ...
+}, {
+  queue: 'invoices',
+  schema: { invoiceId: 'uuid', tier: 'string' },
+})
+```
+
+Because jobs are files discovered by convention, the payload contracts of every job in the app are inspectable — `kwiva` tooling and Studio can enumerate exactly what each job expects. See [Model IR](/docs/advanced/model-ir) for the intermediate representation these types flow from.
+
+## Dispatch [#dispatch]
+
+Dispatch is how work enters the queue. Every job object exposes a `dispatch` factory; the queue object exposes the same operation for explicit queue routing.
+
+```ts title="dispatch.ts"
+import SendWelcome from '../app/jobs/send-welcome'
+import { queue } from '@kwiva/queue'
+
+await SendWelcome.dispatch({ userId: user.id })              // default queue
+await SendWelcome.dispatch({ userId }, { delay: 60 })        // 60s from now
+await SendWelcome.dispatch({ userId }, { queue: 'nightly' }) // named queue
+
+// equivalent explicit form
+await queue.dispatch(SendWelcome, { userId: user.id })
+```
+
+Dispatch-time options override the job definition. In particular, `{ delay }` schedules later execution and `{ queue }` routes the payload to a specific named queue for this run.
+
+| Dispatch option | Type                                | Description                     |
+| --------------- | ----------------------------------- | ------------------------------- |
+| `delay`         | `number` (seconds) or absolute time | Run the job later               |
+| `queue`         | `string`                            | Override the queue for this run |
+
+Dispatch is callable anywhere — a controller handler, a service, a page loader, and synchronously inside tests. Jobs dispatched inside a `db.transaction` are held until the commit, so a rolled-back transaction never leaks work into the queue (the same mechanism as the event outbox).
+
+## Job Options [#job-options]
+
+| Option           | Type                                      | What it controls                                                                 |
+| ---------------- | ----------------------------------------- | -------------------------------------------------------------------------------- |
+| `queue`          | `string`                                  | Which named queue (declared in `src/config/queue.ts`) handles the job            |
+| `schema`         | object                                    | Payload shape — validation and types, derived from the model IR where referenced |
+| `attempts`       | `number`                                  | Total attempts before the job is marked failed                                   |
+| `backoff`        | `'fixed' \| 'exponential' \| fn(attempt)` | Wait between retries                                                             |
+| `priority`       | `number`                                  | Relative priority inside the queue                                               |
+| `rateLimit`      | `{ max, per }`                            | Throughput cap for this job type (v1.x)                                          |
+| `idempotencyKey` | `(payload) => string`                     | Deduplication key for repeated dispatch                                          |
+
+## Retries and Exponential Backoff [#retries-and-exponential-backoff]
+
+Failures are expected; jobs retry them by default. `attempts` sets the ceiling — `attempts: 5` means the initial run plus four retries. `backoff` controls the pause between attempts:
+
+| Value           | Behavior                                                                                        |
+| --------------- | ----------------------------------------------------------------------------------------------- |
+| `'fixed'`       | A constant delay between attempts                                                               |
+| `'exponential'` | The wait grows exponentially with the attempt number, giving transient failures time to resolve |
+| `fn(attempt)`   | Full control, computing the delay in seconds from the attempt count                             |
+
+> \[!NOTE]
+> Jitter within the exponential strategy, to desynchronize retry waves across many jobs that failed at once, is on the roadmap (v1.x). Until then, the function form of `backoff` lets you mix in your own jitter per attempt.
+
+A job that exhausts its attempts moves to the dead-letter queue and shows up in `kwiva queue:failed`. From there `kwiva queue:retry <id>` (or `--all`) republishes it.
+
+## Delays [#delays]
+
+A job can be scheduled for the future without a separate scheduling primitive:
+
+```ts title="delays.ts"
+await SendWelcome.dispatch({ userId }, { delay: 60 })
+```
+
+`delay` is expressed in seconds — the job is not visible to workers until the delay elapses. This pairs cleanly with scheduled tasks: a task that decides "this should happen in an hour" dispatches a delayed job rather than managing its own timer.
+
+## Priority [#priority]
+
+`{ priority: 10 }` declares how the worker should order pending work. Higher-priority jobs are picked up before lower-priority ones within the same queue, while `attempts` and `rateLimit` shape throughput. In practice, priority suits queues that mix interactive side effects with heavy batch work — a password-reset email should not queue behind a thousand-row import.
+
+## Idempotency Keys [#idempotency-keys]
+
+Repeated dispatch of the same logical work should not produce duplicate side effects. `idempotencyKey` accepts a function of the payload and returns a stable string:
+
+```ts title="idempotency-keys.ts"
+idempotencyKey: (p) => `welcome:${p.userId}`,
+```
+
+If a job with the same key is already pending or processed, the duplicate dispatch is dropped. This is the framework's answer to at-least-once delivery: the transport may deliver more than once, but the application dedupes. Deriving the key from the payload is the reliable pattern — never from volatile state.
+
+## Job Progression and Result Typing [#job-progression-and-result-typing]
+
+A long-running job can report progress via the `job` object:
+
+```ts title="job-progression-and-result-typing.ts"
+job.progress(50)
+```
+
+Progress is surfaced in observability — Studio and queue tooling can show how far a multi-step job has come. Progress is advisory; it does not affect retries or scheduling, but it makes long jobs auditable in production.
+
+The handler's return value is the job result, and that result is typed: chain callbacks and batch outcomes receive it, and observability records it. A chain member's output being available type-safely to the next member is what makes multi-phase pipelines testable and inspectable.
+
+## Chains and Batches [#chains-and-batches]
+
+Two composition primitives (v1.x) let a single dispatch drive a sequence or a fan-out:
+
+```ts title="chains-and-batches.ts"
+// run in order, each following the previous
+await queue.chain([ImportRows, BuildReport, NotifyDone]).dispatch()
+
+// run concurrently, then inspect outcomes
+await queue.batch(rows.map(r => ImportRows.dispatch(r)))
+  .then(({ successes, failures }) => ...)
+```
+
+`queue.chain` guarantees ordering; `queue.batch` fans out concurrently and reports on the aggregate outcome. Both compose with the per-job options above — a member of a chain can still have its own `attempts`, `backoff`, and `delay`. Both treat promise-based offloading to the transport the same way single dispatch does, so the transactional guarantees apply evenly.
+
+## Events and Jobs [#events-and-jobs]
+
+Jobs and events share the transport. A listener on a `defineEvent` runs through the queue by default, so reacting to an event never blocks the request that raised it. If background work is really a reaction — "when a user signs up, send a welcome" — prefer an event listener over a hand-dispatched job. The pattern is identical, but the coupling lives in the event, not in the caller. See [Realtime Events](/docs/realtime/events).
+
+## Testing Jobs [#testing-jobs]
+
+Jobs are plain functions of their payload, which makes them easy to test against a fake queue:
+
+```ts title="testing-jobs.ts"
+queue.fake()
+await SendWelcome.dispatch({ userId })
+expect(queue.assertPushed('send-welcome', { userId })).toBe(true)
+```
+
+`queue.fake()` swaps the transport for an in-memory recording, and `assertPushed` verifies dispatch without running the handler. Run the handler directly to test its logic; run it through the fake to test dispatch. See [Testing](/docs/testing/).
+
+## What's Next [#whats-next]
+
+* [Queues & Workers](/docs/background-work/queues) — transport, concurrency, and the dead-letter queue
+* [Scheduled Tasks](/docs/background-work/scheduling) — cron-driven work with `defineTask`
+* [Job Observability](/docs/background-work/observability) — progress, failures, and queue depth
+* [Testing](/docs/testing/) — fake the queue and assert on dispatch
+* [Realtime Events](/docs/realtime/events) — listeners that run through the queue by default

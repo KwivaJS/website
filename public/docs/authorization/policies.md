@@ -1,0 +1,139 @@
+# Policies (/docs/authorization/policies)
+
+
+
+A policy is a pure decision: given a user, an ability, and the resource being acted on, should this be allowed? In Kwiva, policies are written once as `definePolicy` files and executed everywhere — API routes, Studio screens, background jobs, realtime channels, and MCP tools — so the answer to "can this user publish this post?" never depends on which door they walked through.
+
+## The Factory [#the-factory]
+
+Policies live in `src/app/policies/`, one file per resource namespace, named `singular.ts` like the models they protect:
+
+```plaintext title="the-factory.txt"
+src/app/policies/posts.ts      →  definePolicy('posts', ...)
+src/app/policies/users.ts      →  definePolicy('users', ...)
+src/app/policies/tenants.ts    →  definePolicy('tenants', ...)
+```
+
+```ts title="src/app/policies/posts.ts"
+// src/app/policies/posts.ts
+import { definePolicy } from '@kwiva/core'
+
+export default definePolicy('posts', (user, ability, resource) => {
+  if (user.role === 'admin') return true
+  switch (ability) {
+    case 'read':      return true
+    case 'create':    return user.id != null
+    case 'update':
+    case 'delete':    return resource ? resource.authorId === user.id : false
+    case 'publish':   return user.role === 'editor'
+    default:          return false
+  }
+})
+```
+
+The namespace string is the resource half of every permission: a policy named `posts` decides `posts.read`, `posts.create`, and any custom ability like `posts.publish`. Matching models and controllers to the same namespace is what wires the policy onto every enforcement surface.
+
+## The Signature [#the-signature]
+
+Every policy is a function with three parameters:
+
+```ts title="the-signature.ts"
+(user, ability, resource?) => boolean | Promise<boolean>
+```
+
+* **user** — the authenticated session user, typed from your model's fields.
+* **ability** — the action being requested, one of the standard `read`, `create`, `update`, `delete` set or a custom ability from a controller action.
+* **resource** — the record being acted on, `undefined` for resource-less checks like pure create or publish decisions.
+
+Policies may return a plain boolean or a promise, so async decisions — checking a related record, calling a service, reading a flag — are first-class. A reject is the default: the `default: return false` branch is the correct way to close every policy, because anything unlisted should fail closed.
+
+### Evaluating a policy [#evaluating-a-policy]
+
+Evaluation follows the order written:
+
+1. **Admin short-circuit** — trusted roles return before the switch runs.
+2. **Ability switch** — the requested ability is matched against its case.
+3. **Fail closed** — anything unlisted falls to the `default: return false` branch.
+
+The order is deliberate. Fast, broad rules run first; specific ownership rules run next; unknown abilities never pass by accident. Because the code is ordinary JavaScript, you can reason about it line by line — including which branches return for which inputs.
+
+## Deciding by Ability [#deciding-by-ability]
+
+The two idioms every policy uses are the **admin short-circuit** and the **ability switch**:
+
+* **Admin short-circuit** — `if (user.role === 'admin') return true` skips the switch for trusted roles. It is fast to read and expresses hierarchy in one line, and because it lives inside the policy, it applies uniformly to every enforcement surface.
+* **Ability switch** — each case handles exactly one ability. Grouping related abilities on the same case — `update` and `delete` both requiring ownership above — keeps policy behavior obvious.
+
+Custom abilities fall through the same switch. When a controller action registers `publish` as a permission, the policy's `publish` case decides it, and the route manifest carries it into OpenAPI, client types, and MCP tool metadata.
+
+## Resource Binding [#resource-binding]
+
+The `resource` argument is where ownership rules live. The classic pattern — users can update or delete only their own records — binds the decision to the record's fields:
+
+```ts title="resource-binding.ts"
+case 'update':
+case 'delete':    return resource ? resource.authorId === user.id : false
+```
+
+Without a resource there is no ownership to assert, and a false return forces callers to resolve the record first. That is deliberate: resource-less checks are for abilities that do not need one (create, publish), and the policy makes the requirement explicit by how it handles `undefined`.
+
+The resource check is what turns a coarse RBAC boolean into fine-grained control. `posts.update` with a resource consults the actual post; `posts.create` without one asks a different question. Both are legitimate — they are simply different abilities, decided by the same policy.
+
+## Pure Logic, Everywhere [#pure-logic-everywhere]
+
+Policies are pure logic — no HTTP concerns. They never read `ctx`, never return responses, never touch the filesystem or the network beyond what the decision requires. That purity is exactly what lets one file gate every surface:
+
+| Surface                | How the policy runs                                    |
+| ---------------------- | ------------------------------------------------------ |
+| Generated model routes | `{permission}.{action}` checked in the route lifecycle |
+| Controller routes      | `permission` option resolves the policy                |
+| Studio screens         | Actions hidden or disabled per ability                 |
+| Realtime channels      | Subscribe policy decides membership                    |
+| MCP tools              | Per-tool ability checks                                |
+| Jobs and seeders       | Explicit `authorize()` calls                           |
+
+A job that fails a policy behaves identically to a route that fails it — same decision, same semantics, no second implementation to drift.
+
+> \[!TIP]
+> Because policies are pure, they are trivially testable: call the exported function with a fixture user, an ability, and a resource, and assert the boolean. No request setup, no database — the policy's own signature is its test harness.
+
+## Gates: One-Off Abilities [#gates-one-off-abilities]
+
+Not every decision is a full resource policy. `defineGate` creates a single, composable check for repeated one-off rules:
+
+```ts title="src/app/policies/gates.ts"
+// src/app/policies/gates.ts
+import { defineGate } from '@kwiva/core'
+
+export const onlyEditors = defineGate((user) => user.role === 'editor')
+export const tenantOwner = defineGate((user, tenant) => tenant.ownerId === user.id)
+```
+
+Gates are used directly on routes and pages via the `gate` key — `gate: onlyEditors` — a small, forgettable capability that does not deserve a namespace of its own. They compose: any number of gates can be attached to a route, and each must pass.
+
+### Gates vs policies [#gates-vs-policies]
+
+|           | `definePolicy`                         | `defineGate`                     |
+| --------- | -------------------------------------- | -------------------------------- |
+| Scope     | One resource namespace, all abilities  | One single-purpose check         |
+| Signature | `(user, ability, resource)`            | `(user, ...args)`                |
+| Used by   | Routes, Studio, channels, MCP, jobs    | Routes and pages via `gate`      |
+| Example   | `posts` deciding every posting ability | `tenantOwner` deciding one thing |
+
+Reach for a policy when a resource has multiple abilities to decide; reach for a gate when a single rule repeats across routes and does not belong to a resource namespace.
+
+## Wildcards and Inheritance (v1.x) [#wildcards-and-inheritance-v1x]
+
+Two conveniences arrive in v1.x:
+
+* **Ability wildcards** — a `posts.*` ability in a policy covers every action in the namespace, for broad grants written once.
+* **Role matrices** — role-to-ability maps are generated from policies, so Studio can render a role matrix screen that shows at a glance which roles hold which abilities — always derived from the policy source, never a duplicated table.
+
+Both conveniences lean on the same source of truth. A wildcard is shorthand for "every ability this policy decides", and the role matrix is a projection of the same decisions — so neither can drift from what actually gates requests.
+
+## What's Next [#whats-next]
+
+* [Permissions](/docs/authorization/permissions) — the `{resource}.{action}` grammar policies decide on
+* [Enforcement Points](/docs/authorization/enforcement) — every surface that runs your policies
+* [RBAC](/docs/authorization/roles) — storing the roles policies interpret
+* [Models](/docs/data/models) — the `permission` option wiring models to policies

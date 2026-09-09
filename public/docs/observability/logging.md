@@ -1,0 +1,170 @@
+# Logging (/docs/observability/logging)
+
+
+
+Kwiva logs are structured and JSON-formatted by default, produced by a framework-owned `logger` that you import from `@kwiva/core`. Every major boundary in the framework — middleware, controllers, model queries, jobs, tasks, and events — emits log lines through the same pipeline, so a request and everything it touches share one consistent schema.
+
+## Structured Logs by Default [#structured-logs-by-default]
+
+A single log line looks like this:
+
+```jsonc title="structured-logs-by-default.jsonc"
+{
+  "ts": 0,
+  "level": "info",
+  "msg": "request",
+  "requestId": "req_01J...",
+  "traceId": "...",
+  "spanId": "...",
+  "route": "/api/posts",
+  "method": "GET",
+  "status": 200,
+  "durationMs": 12,
+  "tenantId": "tnt_...",
+  "userId": "usr_..."
+}
+```
+
+JSON output means logs are trivially queryable by field in any log aggregator — filter by `requestId`, roll up by `route`, chart by `status`, without parsing free text. In development, the pretty printer renders the same data as readable lines; in production you get raw JSON suitable for forwarding. The two are the same events: only the rendering changes, never the schema.
+
+## Request and Tenant Correlation [#request-and-tenant-correlation]
+
+Correlation is automatic. Every log line emitted within a request scope is enriched with:
+
+* **`requestId`** — derived from the `x-request-id` header or generated when the header is absent. This is your user-facing correlation hook: it survives into error pages and support conversations.
+* **`traceId`*&#x2A; and &#x2A;*`spanId`** — the tracing runtime's identifiers linking the log line to its place in the span tree.
+* **`tenantId`*&#x2A; and &#x2A;*`userId`** — attached by the tenant and session middleware, so multi-tenant log queries are scoped by default.
+
+This means you can correlate a log line to a specific request, to a specific tenant, and to the specific user who triggered it without writing any middleware. The correlation fields are attributes you did not add: they arrive on every line that falls inside the scope.
+
+## Log Levels [#log-levels]
+
+The framework logs at standard severity levels, and the default minimum level is `info`:
+
+| Level   | Typical content                                            |
+| ------- | ---------------------------------------------------------- |
+| `trace` | Verbose diagnostic detail                                  |
+| `debug` | Cache decisions, query shape, resolved state               |
+| `info`  | Requests, jobs dispatched, events emitted                  |
+| `warn`  | Recoverable anomalies, retries, rate-limit near-thresholds |
+| `error` | Exceptions, failed jobs, exporter failures                 |
+
+The minimum level and formatting are configured per environment:
+
+```ts title="src/config/telemetry.ts"
+// src/config/telemetry.ts
+export default defineConfig('telemetry', {
+  defaults: {
+    logs: { level: 'info', pretty: true },
+  },
+})
+```
+
+`pretty: true` is the typical dev value; production defaults to raw structured output.
+
+## Levels by Environment [#levels-by-environment]
+
+The default minimum level is environment-aware in practice: development runs at the configured level with pretty printing, while production typically stays at `info` and above, letting the collector and dashboard handle verbosity. Bumping a staging instance to `debug` is a one-line telemetry override and the fastest way to see cache decisions and query shape while reproducing a report.
+
+The level gate applies per line, and child loggers inherit the gate — so a `debug`-level override on an environment changes what every framework boundary emits without touching a single call site.
+
+## Writing Your Own Logs [#writing-your-own-logs]
+
+The logger is importable anywhere in app code:
+
+```ts title="writing-your-own-logs.ts"
+import { logger } from '@kwiva/core'
+
+logger.info('cleanup finished')
+logger.warn({ route: '/api/posts' }, 'slow request')
+```
+
+The first argument is optional structured context; the message follows. Errors carry their exception data as context automatically, so an `error` line emitted from a catch block includes the exception without extra plumbing.
+
+## Adding Context [#adding-context]
+
+The same logger supports child instances that freeze context onto every line they emit. This is the idiomatic way to scope a logger to a tenant, a job run, or a request:
+
+```ts title="adding-context.ts"
+logger.child({ tenantId }).info({ deleted: 3 }, 'cleanup done')
+```
+
+The per-request logger is derived from the request store, so even your own handler logs automatically carry the request ID:
+
+```ts title="adding-context-2.ts"
+// derived in the app bootstrap
+resolve: [
+  ['logger', ({ store }) => logger.child({ requestId: store.requestId })],
+],
+```
+
+Once that resolver is wired, `ctx.logger` inside any handler is a child logger pre-bound to the request's correlation IDs.
+
+## Logging from Handlers [#logging-from-handlers]
+
+The per-request logger is the tool you reach for in normal handler code. It requires no context plumbing — the request store already carries the correlation IDs — and every line you write joins the request's log stream automatically:
+
+```ts title="logging-from-handlers.ts"
+export default defineController('posts', (c) => ({
+  create: c.post('/', async ({ body, session, logger }) => {
+    const post = await Post.create({ ...body, authorId: session.user.id })
+    logger.info({ postId: post.id }, 'post created')
+    return post
+  }),
+}), { prefix: '/posts' })
+```
+
+The rule to remember: if you have `logger` in scope from a handler, job, task, or event listener context, every line you emit is already correlated. Adding the request ID to a duplicate log in the same scope would be redundant — the child logger does it.
+
+## Logging from Background Work [#logging-from-background-work]
+
+Jobs and tasks get the same treatment as requests. A dispatched job's logger is a child logger scoped to the run, so a failure deep inside queued work is correlated to the exact job instance that produced it — which is what makes `requestId` plus `traceId` powerful: an event whose handler runs on the queue still resolves to the trace that emitted it.
+
+```ts title="logging-from-background-work.ts"
+export default defineJob('send-welcome', async ({ payload, logger }) => {
+  logger.info({ userId: payload.userId }, 'sending welcome')
+})
+```
+
+The same applies to tasks and event listeners, so background log lines are never orphaned from the work that caused them. See [Background Work](/docs/background-work/observability) for the job and queue surface in depth.
+
+## Default Log Fields [#default-log-fields]
+
+| Field        | Meaning                                       |
+| ------------ | --------------------------------------------- |
+| `ts`         | Epoch timestamp in milliseconds               |
+| `level`      | Severity of the line                          |
+| `msg`        | Human-readable message                        |
+| `requestId`  | Correlation ID from the `x-request-id` header |
+| `traceId`    | Tracing runtime trace identifier              |
+| `spanId`     | Tracing runtime span identifier               |
+| `route`      | Matched route pattern                         |
+| `method`     | HTTP method                                   |
+| `status`     | Response status code                          |
+| `durationMs` | Handler duration in milliseconds              |
+| `tenantId`   | Resolved tenant identifier                    |
+| `userId`     | Authenticated user identifier                 |
+
+Fields arrive only when they apply — a cron task run has no `method` or `status`, but carries task and run identifiers instead.
+
+## Reading Logs in Development [#reading-logs-in-development]
+
+The `kwiva console` REPL exposes the last log lines directly:
+
+```text title="reading-logs-in-development.txt"
+app.logs.tail(20)
+```
+
+Combined with the in-dev overlay, this makes most debugging a matter of reading two or three correlated lines rather than stitching together framework internals. The overlay surfaces the same lines beside the app, and the REPL reads them programmatically — between the two, a local investigation rarely needs a log file. See [Dev Overlay](/docs/observability/dev-overlay).
+
+## Observability Principles in Logging [#observability-principles-in-logging]
+
+Logging inherits the framework's three observability rules. Zero-code: the fields above exist because you used the framework's request, job, or task surfaces. Never break the app for telemetry: a log sink that fails is counted, never fatal to the request. PII discipline: correlation uses identifiers, not personal data — and your own handler logs should follow the same rule, logging `userId` rather than an email when a line leaves the process.
+
+## What's Next [#whats-next]
+
+* [Tracing](/docs/observability/tracing) — see how logs attach to span trees
+* [Metrics](/docs/observability/metrics) — the counters and series recorded alongside logs
+* [Dev Overlay](/docs/observability/dev-overlay) — read logs in the development overlay
+* [Context](/docs/core-concepts/context) — how request state and the logger are resolved
+* [Background Work](/docs/background-work/observability) — log correlation for jobs and tasks
