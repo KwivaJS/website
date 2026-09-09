@@ -1,0 +1,13 @@
+{
+  "title": "Architecture",
+  "root": true,
+  "pages": [
+    "index",
+    "design-principles",
+    "request-lifecycle",
+    "model-derivation",
+    "frontend-architecture",
+    "deployment-architecture",
+    "package-boundaries"
+  ]
+}

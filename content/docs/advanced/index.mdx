@@ -1,0 +1,87 @@
+---
+title: Advanced
+description: "Architecture internals, the request lifecycle, the model IR, package boundaries, and performance — what happens under the hood of a Kwiva application."
+---
+
+This section takes you beneath the `defineX` surface. The rest of the documentation tells you how to write models, controllers, and pages; this section explains how those declarations become a running, deployable application. If you are building on Kwiva at scale, contributing to the framework, or debugging a subtle production issue, start here.
+
+The throughline of every page in this section is the core architectural rule: the application depends only on the framework, the framework depends on sealed internal engines and a Rust-speed toolchain, and application code never imports an engine by name. Building everything on top of one convention — and one intermediate representation — is what makes Kwiva's guarantees possible: no drift between types, API, and database; a single mental model for every construct; and deployable, observable output from one codebase.
+
+## What "Advanced" Covers
+
+| Page | What it explains |
+|---|---|
+| [Architecture Internals](/docs/advanced/architecture-internals) | Layering — application, `@kwiva/*` framework APIs, sealed internal engines, toolchain, runtime — and how each layer stays in its lane |
+| [Request Lifecycle](/docs/advanced/request-lifecycle) | The exact ordered sequence a request travels, from pipeline entry to the final response, and every place you can hook into it |
+| [Model IR](/docs/advanced/model-ir) | The single intermediate representation derived from `defineModel` and the "no drift" guarantee it gives your whole stack |
+| [Package Boundaries](/docs/advanced/package-boundaries) | The dependency graph among `@kwiva/*` packages, what each one owns, and where application code may and may not import |
+| [Performance](/docs/advanced/performance) | The Rust-speed static machinery, the native TypeScript runtime, streaming-first SSR, and layered caching |
+
+## The Mental Model
+
+Every Kwiva application — and the framework itself — is organized in four layers:
+
+```
+Application (src/)
+  ↓
+Framework APIs (@kwiva/*)
+  ↓
+Internal engines (hidden, framework-owned)
+  ↓
+Runtime (Bun, Node, Edge)
+```
+
+You write application code against the framework APIs only. The framework wires the internal engines and the toolchain. The runtime executes the result, with deploy differences contained in the engine layer so the application sees the same API surface everywhere.
+
+Deriving from this is the second mental model: everything your app ships is produced from shared intermediate representations. Models are the single source of truth; the model IR feeds the database, the REST API, the typed RPC client, Studio, the OpenAPI spec, and MCP tools. There is never a second source of truth to drift against — just one IR and the artifacts it compiles to.
+
+These two mental models make the entire section predictable:
+
+1. **Layering** — every construct has exactly one home (in the app, in a framework package, or behind a sealed engine), and every dependency arrow points one way.
+2. **Single intermediate representation** — the model IR and the route manifest are the only inputs the derived outputs are allowed to read.
+
+## How These Pages Fit Together
+
+| Page | Question it answers | Foundation it draws on |
+|---|---|---|
+| Architecture Internals | Where does my code live, and who is allowed to touch what? | Layering, sealed engines, auto-discovery, module boundaries |
+| Request Lifecycle | What happens, in order, when a request arrives? | The 14-step sequence, hook scoping, context assembly, error mapping |
+| Model IR | How does one model definition become the whole stack? | The derivation pipeline from `defineModel` to every output |
+| Package Boundaries | Which package may depend on which, and why does it matter? | The strict, acyclic package graph and the engine-sealing rule |
+| Performance | Why is Kwiva fast, and how do I keep it fast in production? | The toolchain, native runtime, streaming SSR, and caching layers |
+
+## The Core Architectural Rule in Practice
+
+The rule restated for the debugging scenarios this section serves:
+
+- **A type error across model and client?** It cannot drift — both compile from the same IR. Look at the derivation pipeline, not for a phantom second schema.
+- **A slow request?** The pipeline is a span tree with budgeted stages (`under 1 ms` adapter, `under 2 ms` session, `under 0.5 ms` validation, `under 5 ms` handler, `under 15 ms` full API, `under 50 ms` SSR shell). Trace it, then look at the layer the span points at.
+- **Who is allowed to import what?** The package graph is acyclic and lint-enforced; the answer to "may I import this?" is always derivable from the layered diagram.
+
+## Key Terms in One Place
+
+The advanced pages use a small vocabulary precisely. A quick reference before you dive in:
+
+| Term | Meaning |
+|---|---|
+| `defineX` | The convention of one factory per file type — `defineModel`, `defineController`, `definePage`, and so on. Every app-facing construct is one of these. |
+| Model IR | The typed intermediate representation derived from `defineModel` files, written to `src/.kwiva/model-ir.json`. |
+| Route manifest | The route IR derived from controllers, generated model routes, and server routes — the input to the client, OpenAPI, and MCP outputs. |
+| Sealed engine | Internal infrastructure the framework configures and owns: the server carrier, the SQL engine, the auth engine, and the client-cache engine. Never imported by app code. |
+| Adapter / preset | The build-time packaging of `.output/` for a target — Node, Bun, serverless, edge, static, or binary. |
+| Toolchain | The Rust-speed development and build machinery bound into the `kwiva` CLI: bundler, transformer, resolver, minifier, linter, formatter, declarations. |
+| `.kwiva/` | The generated directory — IR artifacts and types. A build product; never hand-edited. |
+
+Every page in this section explains one of these terms in depth and shows how it connects to the others. The model IR is the connective tissue: it is what turns `defineModel` into the database, the API, the client, Studio, OpenAPI, and MCP with one derivation pass.
+
+## When to Read This Section
+
+A quick orienting note: if you have not yet created a project, read [Getting Started](/docs/getting-started) first, and skim [Core Concepts](/docs/core-concepts) for the `defineX` convention and auto-discovery. The Advanced section assumes you already understand those. If you are reading this to debug a specific production symptom, jump straight to [Request Lifecycle](/docs/advanced/request-lifecycle) or [Performance](/docs/advanced/performance); both pages include the concrete budgets and checklists you will need.
+
+## What's Next
+
+- [Architecture Internals](/docs/advanced/architecture-internals) — Start with the layered model and the sealed-engine rule
+- [Package Boundaries](/docs/advanced/package-boundaries) — Understand the dependency graph before you add a dependency
+- [Request Lifecycle](/docs/advanced/request-lifecycle) — Trace a single request through the whole stack
+- [Model IR](/docs/advanced/model-ir) — See how one definition becomes the entire data plane
+- [Core Concepts](/docs/core-concepts) — Revisit the `defineX` convention that makes all of this consistent

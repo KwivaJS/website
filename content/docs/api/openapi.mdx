@@ -1,0 +1,151 @@
+---
+title: OpenAPI
+description: "Auto-generation from the route manifest, endpoints, spec shaping, and build artifacts."
+---
+
+Kwiva produces an OpenAPI 3.1 specification automatically — no annotations, no per-route plugins, no hand-written spec files. The document renders from the route manifest at boot, so it is correct by construction for every route your app exposes.
+
+The spec is a projection, not a maintenance burden. Every path, schema, and error response in the document is derived from declarations that already exist, which is why the document cannot drift from the running API.
+
+## Where the Spec Comes From
+
+The route manifest is the intermediate representation of every route: path, method, request and response schemas, permission, tags, and summary. `@kwiva/http` renders the OpenAPI document from it once at boot, not by visiting each route. Model schemas, enums, relations, pagination shapes, and error responses all derive from the same representation.
+
+```
+route manifest ──► OpenAPI 3.1 ──► /openapi.json ──► /docs
+```
+
+Because rendering happens from the IR rather than by inspecting live routes, the document is complete, stable, and identical across worker restarts.
+
+## Endpoints
+
+| Path | Purpose |
+|---|---|
+| `/openapi.json` | the generated specification |
+| `/docs` | interactive API documentation (optional) |
+
+The interactive docs render against the generated spec with no additional setup. Paths in the document are relative to the API prefix.
+
+### What the document contains
+
+Because the document renders from the full route manifest, it is complete rather than minimal. For every operation it includes:
+
+- **Request schemas** — body, query, params, headers, and cookies from route validation.
+- **Response schemas** — the model shapes each route returns, including the paginated list envelope.
+- **Enums and relations** — model field types and declared relations as reusable components.
+- **Error responses** — the error taxonomy mapped onto the status codes each operation can produce.
+- **Metadata** — `summary`, `tags`, and `description` from controller and route options.
+
+## A Generated Path
+
+A `posts` model and controller produce entries like this:
+
+```json
+{
+  "/posts": {
+    "get": {
+      "tags": ["posts"],
+      "summary": "List posts",
+      "responses": {
+        "200": { "description": "Paginated list of posts" }
+      }
+    }
+  }
+}
+```
+
+Every property in the document flows from an actual declaration — nothing is guessed and nothing is hard-coded.
+
+## Shaping the Spec
+
+The spec improves as you add metadata to declarations:
+
+- **Controller level** — `tags` and `prefix` from `defineController` organize operations.
+- **Route level** — `summary`, `tags`, and `description` on a handler flow directly into OpenAPI.
+- **Model level** — field `description()` flows into the schema descriptions.
+
+```ts
+defineController('posts', (c) => ({
+  publish: c.post('/:id/publish', async ({ params }) => {
+    // ...
+  }, {
+    summary: 'Publish a post',
+    description: 'Transitions a draft post to published.',
+    permission: 'posts.publish',
+  }),
+}), { prefix: '/posts', tags: ['posts'] })
+```
+
+Descriptions are worth writing well: they are the copy human readers of your API documentation see. Model fields without a `description()` still appear in the spec, typed from the field DSL — metadata only ever enriches the document, never gates it.
+
+> [!TIP]
+> Write the `description` next to the route — it rides the same option object as permission and schemas — rather than in a separate file. The declaration is where you will find it six months later, and the spec inherits it without any republishing step.
+
+## Error Responses in the Spec
+
+Each operation documents the failure codes its stage can produce. Validation-bearing routes declare the 422 `VALIDATION` response with the field-mapped `issues` shape; permission-bearing routes declare `UNAUTHORIZED` and `FORBIDDEN`. Consumers of the document get the same taxonomy contract the typed client enforces at compile time. See [API Errors](/docs/api/errors).
+
+## Build Artifact
+
+Emit the spec as a build artifact for external consumers:
+
+```bash
+kwiva build --docs
+```
+
+The produced OpenAPI document can be checked into a contract registry, fed into API testing, or handed to consumer tooling that expects a static spec.
+
+## Zero Maintenance
+
+Because the document is derived, it can never drift:
+
+- Add a field to a model → schemas and responses update.
+- Add a route → a path object appears.
+- Change validation → request schemas follow.
+- Remove a route → the path object disappears.
+
+Nothing in the OpenAPI spec is ever hand-edited, and there is no separate spec file to remember to update. The model and controller declarations are the single source of truth.
+
+## OpenAPI, Client, and MCP
+
+The same manifest that renders the spec also types the client and drives MCP tools. A change to a route lands in `/openapi.json`, in the RPC client's method signatures, and in the exposed agent tools simultaneously — three surfaces, one upstream declaration.
+
+## OpenAPI 3.1
+
+The emitted document targets OpenAPI 3.1, which brings JSON Schema 2020-12 semantics: nullable fields, single-type arrays, and `oneOf` unions render from the model IR without the 3.0 workarounds older tooling needed.
+
+## Security Schemes
+
+Authentication surfaces appear in the document. Cookie-based session auth is declared for the routes it protects and bearer auth for `jwt`-strategy APIs, so consumers can see which operations require a session and which are public. See [API Authentication](/docs/api/authentication).
+
+## Reusable Components
+
+Model schemas, enums, and relation shapes are emitted as components and referenced by operations, which keeps the document small and the schemas consistent. The paginated list envelope is a shared component too, so every list endpoint references one definition instead of repeating it.
+
+## Tags and Grouping
+
+`tags` from controllers and models organize operations in both `/docs` and external tooling. A controller's `tags` option groups its routes; model routes group under the model name. See [Controllers: per-route options](/docs/http/controllers).
+
+## Programmatic Consumption
+
+Because `/openapi.json` is a static document, any OpenAPI tool — client generators, contract testing, gateway configuration, mock servers — reads it directly. `kwiva build --docs` emits the same document as a file for registries and CI checks. See [API Testing](/docs/testing/api-testing).
+
+## OpenAPI and the Rest
+
+The specification describes REST first — generated CRUD, custom actions, and pure REST controllers — plus streaming operations where the handler declares them, and WebSocket handshakes as upgrade operations. Each operation is tagged by its controller or model, so grouping is consistent from the CLI to `/docs`. See [API Overview](/docs/api).
+
+## The Document Is Reproducible
+
+The document is fully derived from code and config: identical inputs produce an identical spec. That reproducibility is what lets CI compare a committed spec against a regenerated one — a diff means a route, schema, or tag changed somewhere. Teams that gate on the spec can fail the build when the diff is unplanned. See [API Testing](/docs/testing/api-testing).
+
+## Your Schema vs OpenAPI
+
+Your schema declarations are the source for components. `defineModel` field types, enum values, `min`, `max`, `optional`, and relation shapes are the only vocabulary OpenAPI needs — there is no parallel spec-authoring step. Custom types surface as referenceable components rather than inline copies. See [Models](/docs/data/models).
+
+## What's Next
+
+- [Generated Endpoints](/docs/api/generated-endpoints) — the routes described by the spec
+- [REST Conventions](/docs/api/rest) — the contract the spec documents
+- [Model IR](/docs/advanced/model-ir) — the representation behind the document
+- [Controllers](/docs/http/controllers) — `summary`, `tags`, and `description`
+- [Models](/docs/data/models) — field `description()` and schema derivation

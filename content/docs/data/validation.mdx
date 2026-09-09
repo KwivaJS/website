@@ -1,0 +1,146 @@
+---
+title: Validation
+description: "Field-level rules, request-layer schemas, Standard Schema, custom rules, and the validation error shape."
+---
+
+Validation in Kwiva is enforced at multiple layers, all derived from the same model definitions. The field DSL is the source of truth: a rule declared on a field flows into the database column, the generated route schemas, the typed client, and Studio. On top of that, every HTTP request goes through an independent schema stage that validates body, query, params, headers, and cookies before your handler runs. The two layers share the same error shape and the same Standard Schema foundation.
+
+## The Layered Stack
+
+| Layer | Scope | Source |
+|---|---|---|
+| Field DSL | Column-level rules and types | `validation()` on a field |
+| Route schemas | One request in, one response out | `body` / `query` / `params` per route |
+| Query-param schemas | List endpoints | `where` and `orderBy` shapes checked against the model |
+| Client and Studio | Typed input | Compiled from the same model IR |
+
+## Field-Level Validation
+
+```ts
+export default defineModel('posts', (f) => ({
+  title: f.string().validation((s) => s.min(1).max(200)),
+  email: f.string().validation((s) => s.email()),
+  age: f.integer().validation((s) => s.min(0).max(150)),
+}), { timestamps: true })
+```
+
+The `validation()` callback receives the Standard Schema builder for that field type and returns constraints. The schema is compiled once at scan time and reused by the generated routes, the client, and Studio — so a change to the rule changes every entry point in one place.
+
+> [!NOTE]
+> Standard Schema is the interface; Valibot is the documented default validator. The implementation is switchable in `src/config/app.ts` under the `validator` key without changing any model code.
+
+## Request-Layer Validation
+
+Controllers attach schemas per route for the parts of the request they care about:
+
+```ts
+c.post('/', handler, {
+  body: v.object({
+    title: v.string().min(1),
+    body: v.optional(v.string()),
+  }),
+  query: v.object({ draft: v.optional(v.string()) }),
+  params: v.object({ id: v.string().uuid() }),
+})
+```
+
+| Part | Validates | Fails when |
+|---|---|---|
+| `body` | Parsed JSON/form payloads | Required field missing, wrong type |
+| `query` | Query string values | Unknown shape or malformed value |
+| `params` | Path parameters | Wrong format, for example non-UUID id |
+| `headers` | Request headers | Missing required header |
+| `cookies` | Cookie values | Wrong shape |
+
+Validation runs **before** guards and before the handler, so by the time your code executes the input is known-good. See [HTTP: Validation](/docs/http/validation) for the request-layer pipeline in depth.
+
+## Query Parameter Validation on Generated Routes
+
+Generated list endpoints validate their query input against the model. The `where`, `orderBy`, and `with` parameters are schema-checked against field names and types, meaning a client cannot inject an arbitrary filter column, order by a hidden field, or request a non-existent relation. This is the same discipline as model-level validation, applied to today's most common injection vector.
+
+```ts
+GET /api/posts?where[status]=published&orderBy[createdAt]=desc
+GET /api/posts?where[secretField]=x      // 400 — not a queryable field
+GET /api/posts?with[0]=nonexistent       // 400 — relation does not exist
+```
+
+Only `orderable` fields may be ordered, only real relation names may be eager-loaded, and field names must exist on the model. The generated endpoint is a strict client of the model IR.
+
+## Custom Rules
+
+For rules that do not fit the built-in set, define a reusable rule once and attach it anywhere:
+
+```ts
+import { defineValidationRule } from '@kwiva/data'
+
+export const strongPassword = defineValidationRule('strongPassword', (value) => {
+  if (!/[A-Z]/.test(value)) return 'Must contain uppercase'
+  if (!/[0-9]/.test(value)) return 'Must contain number'
+  return null
+})
+```
+
+```ts
+password: f.string().validation((s) => s.rule(strongPassword)),
+```
+
+| Behavior | Detail |
+|---|---|
+| Namespaced | Rules are registered by name and reusable across fields |
+| Path reporting | The returned message is attached to the field's issue path |
+| Typed | The rule's value type is bound to the field it is used on |
+
+A rule returns `null` when valid and a message when invalid; the framework collects every failing rule into one response.
+
+## The Error Shape
+
+Validation failures share the framework's error response shape:
+
+```json
+{
+  "code": "VALIDATION",
+  "message": "Validation failed",
+  "issues": [
+    { "path": ["title"], "message": "Minimum length is 1" }
+  ]
+}
+```
+
+| Key | Description |
+|---|---|
+| `code` | `VALIDATION` — the stable error taxonomy code |
+| `message` | Human-readable summary |
+| `issues` | One entry per failing field, with the dotted `path` |
+
+Multiple failures are reported together, never fail-fast, so clients can render all problems at once. The shape maps to the framework's error taxonomy — see [API: Errors](/docs/api/errors) and [HTTP: Errors](/docs/http/errors).
+
+## Definitive vs. Coercive Validation
+
+The field DSL knows the schema, so it also knows how to coerce inputs to the right type:
+
+| Input | Field | Coerced value |
+|---|---|---|
+| `"2026-09-09T10:00:00Z"` | `f.timestamp()` | Timestamp value |
+| `"{\"readingTime\": 4}"` | `f.json<...>()` | Typed JSON object |
+| `"42"` | `f.integer()` | Number `42` |
+| `"draft"` | `f.enum('draft', 'published')` | Literal member |
+
+Coercion happens in the same validation stage as the checks, so the client contract stays strict without forcing callers to hand-build typed objects. A value that cannot coerce fails with the same `issues` shape as any rule violation — coercion errors are reported per field, never swallowed.
+
+## Where Validation Runs in the Request
+
+Validation is a dedicated stage of the request pipeline, after parsing and before guards:
+
+```
+parse body/query → validate → guards (auth, tenant, policy) → handler
+```
+
+Guards therefore see validated values, and handlers see guarded, validated values. The ordering is a guarantee, not an accident — see [HTTP: Request Lifecycle](/docs/http/lifecycle) for the full pipeline. Field-level rules additionally run at **model write time** on `create`/`update`, so even non-HTTP paths (jobs, seeders, workers, direct RPC) cannot bypass the contract.
+
+## What's Next
+
+1. [Models](/docs/data/models) — where field rules are declared
+2. [Fields & DSL](/docs/data/fields) — the modifier chain including `validation()`
+3. [HTTP: Validation](/docs/http/validation) — the request-layer schema stage
+4. [Security: Input Validation](/docs/security/input-validation) — validation as a security boundary
+5. [Guides: Validate Input](/guides/validate-input) — end-to-end walkthrough

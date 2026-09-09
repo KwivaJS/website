@@ -1,0 +1,171 @@
+---
+title: Data Hooks
+description: "useResource, useList, useMutation, useInfiniteList, useApi, and cache invalidation."
+---
+
+Data hooks are the client-side face of the data plane. They expose the full query/mutation feature set — caching, invalidation, optimistic updates, prefetch, infinite lists, suspense — with keys derived automatically from **model and controller identity**. You never hand-build a query key, and you never duplicate a loader's fetch: hooks read the same cache loaders already populated.
+
+The hook engine is a framework-owned query engine (ADR-0016): the full query feature surface is passed through, but the engine itself is internal and never imported by application code. What you interact with is the `@kwiva/react` hook surface.
+
+## The Hook Model
+
+Every hook is keyed by its model (or controller) plus its arguments. `useList(Post, { where: ... })` builds a cache entry whose identity is derived from the `Post` model and that exact query — so `invalidate(Post)` knows precisely which entries to clear. Loader-dehydrated results use identical keys, which is why entering a page from SSR never refetches what the loader already delivered:
+
+```
+loader (server)  → dehydrated into stream     → client cache key = Post + query
+useResource/useList (client) → same key       → reads the entry, never refetches
+```
+
+## Hook Reference
+
+| Hook | Purpose | Typical signature |
+|---|---|---|
+| `useResource` | Single record by id | `useResource(Post, id)` |
+| `useList` | Query a list with where/order/pagination | `useList(Post, { where, orderBy, page })` |
+| `useMutation` | Create/update/delete with optimistic support | `useMutation(Post.update, { optimistic, onSuccess })` |
+| `useInfiniteList` | Infinite, cursor-based lists | `useInfiniteList(Post, { cursor, limit })` |
+| `useApi` | Escape hatch for ad-hoc keyed queries | `useApi([key], fetcher)` |
+
+## useResource
+
+```tsx
+import { useResource } from '@kwiva/react'
+
+const { data: post, isPending, error } = useResource(Post, id)
+```
+
+Reads a single record by model identity and id. The same cache entry the detail loader dehydrated into — navigating from a list to a detail page shows instant data when the record is already present. Returns the standard query result shape: `data`, `isPending`, `isFetching`, `error`, and the rest of the pass-through option surface.
+
+## useList
+
+```tsx
+const { data, isFetching } = useList(Post, {
+  where: { status: 'published' },
+  orderBy: { createdAt: 'desc' },
+  staleTime: 30_000,
+})
+```
+
+List queries pass through the full option surface, including `staleTime`, `gcTime`, `refetchOnWindowFocus`, `refetchInterval`, `select`, `placeholderData`, and `enabled`. The `where` clause is typed against the model IR — a filter on a field the model does not declare is a type error, and pagination keys compose with `invalidate(Post)` scoping.
+
+## useMutation
+
+Mutations are model-scoped and automatically invalidate what they touch:
+
+```tsx
+import { useMutation, invalidate } from '@kwiva/react'
+
+const save = useMutation(Post.update, {
+  optimistic: (input, current) => ({ ...current, ...input }),
+  onSuccess: () => invalidate(Post),
+})
+
+await save.mutate({ title: 'New title' })
+```
+
+The `optimistic` helper applies the input to the current cache entry immediately, giving an instant UI response; the call itself goes through the typed RPC client; on success, model-scoped invalidation refreshes every list and detail that depends on the model:
+
+```tsx
+const { mutate, isMutating } = useMutation(Post.create, { input })
+```
+
+Mutations accept the model methods — `Post.create`, `Post.update`, `Post.delete` — and custom controller actions, typed from the same route manifest the client is. Errors map through the typed error contract, so an `errorComponent` or a form can render per-field issues from the mutation's result. See [RPC Client](/docs/frontend/rpc-client).
+
+## useInfiniteList
+
+```tsx
+const feed = useInfiniteList(Post, { cursor: 'createdAt', limit: 20 })
+```
+
+Infinite lists page by cursor. Keep loading the next page as the user scrolls; each page is cached under the same model identity, so revisiting a feed does not reset the scroll position or refetch history. Cursor choice is typed against the model's fields — any sortable field works as the pagination key.
+
+## Prefetching
+
+Warm the cache ahead of a render from a loader or from code:
+
+```tsx
+// inside a loader, via the typed client
+loader: async ({ client }) =>
+  client.prefetch(['reports', 'summary'], () => client.reports.summary())
+```
+
+```tsx
+// prefetchQuery from application code
+const { prefetchQuery } = usePrefetch()
+await prefetchQuery(useList(Post, { page: 1 }))
+```
+
+Prefetched entries share keys with loader and hook results — preloading, navigating, and rendering all hit one cache. The `usePrefetch` surface is also what intent preloading drives under the hood, so `<Link preload="intent">` and explicit prefetches land in the same entries. See [Navigation & Link](/docs/frontend/navigation).
+
+## Cache Control
+
+Cache semantics are passed through per query:
+
+| Option | Effect |
+|---|---|
+| `staleTime` | How long a fresh result is considered current before a background refetch |
+| `gcTime` | How long an unused entry is retained before garbage collection |
+| `refetchOnWindowFocus` | Refetch inactive data when the tab regains focus |
+| `refetchInterval` | Polling interval for live data |
+| `retry` | Retry policy for failed queries |
+| `select` | Derived, memoised projection of the data |
+| `placeholderData` | Value shown while the query is pending |
+| `suspense` | Drive rendering from wrapping suspense instead of `isPending` |
+| `enabled` | Gate a query on a condition (e.g. a selected id) |
+
+These are the query engine options passed through unchanged — the cache behavior is the full query-engine model, keyed the Kwiva way.
+
+## Invalidation
+
+Invalidation is **model-scoped** by default. Keys derive from model identity plus arguments, so a single call clears every derived key:
+
+```tsx
+invalidate(Post)
+```
+
+clears every list, detail, and custom entry touching the `Post` model. On the server side, `invalidateTags` clears route-rule caches (see [Caching Strategies](/docs/rendering/caching)). The two layers are separate: hooks refresh client cache, tags purge server route cache. Model writes also purge the server-side **model cache** automatically, so reads never go stale after a write on the same model.
+
+## Suspense
+
+```tsx
+const { data } = useResource(Post, id, { suspense: true })
+```
+
+With suspense enabled, hooks throw to the nearest boundary while pending — the same boundaries that render streamed `loaderData` segments. Error boundaries and deferred segments share one pattern across loaders and hooks, so a page can mix a blocking loader value, a streamed deferred value, and a suspense-enabled hook under the same boundary tree. See [Streaming SSR](/docs/rendering/streaming).
+
+## Real-Time Subscriptions
+
+Live data flows through the same hook surface. Channel subscriptions consume the typed client's realtime endpoints, and updates key into the shared cache like any query. See [Channels](/docs/realtime/channels) and [Real-Time Data on the Client](/docs/realtime/client-usage).
+
+## The Escape Hatch
+
+When you need a custom, non-model query — a report, an aggregation, a controller-only endpoint — key it explicitly:
+
+```tsx
+const report = useApi(['report', id], () => client.reports.get(id))
+```
+
+The key participates in cache and invalidation like any other: its identity is explicit where model hooks are derived. Use it sparingly — the derived keys of the model hooks are usually sufficient.
+
+## Forms & Mutations
+
+Schema-driven forms are built on the same cache. `useForm(Post.create)` derives fields from the model's validation rules, maps server-side errors per field through the typed client's error contract, and submits through the mutation pipeline — no separate form library required (v1.x). See [Data Validation](/docs/data/validation) for the field rules forms derive from.
+
+## Devtools
+
+`@kwiva/react/devtools` ships a skinned Query devtools panel — inspect cache entries, replay invalidations, and watch query states during development.
+
+## Rules
+
+- Components use data hooks over model identity — no hand-built query keys
+- Mutations go through the typed client, with invalidation on success
+- Loaders prefetch into the same cache; clients never double-fetch what a loader supplied
+- No engine imports — the query engine is internal
+
+## What's Next
+
+- [RPC Client](/docs/frontend/rpc-client) — the typed transport behind the hooks
+- [Loaders & Data](/docs/frontend/loaders) — the server side population of the same cache
+- [Caching Strategies](/docs/rendering/caching) — client cache, route cache, and model cache together
+- [Real-Time Data](/docs/realtime/client-usage) — `useChannel` for channel subscriptions
+- [Data Models](/docs/data/models) — the model identity hooks are keyed by

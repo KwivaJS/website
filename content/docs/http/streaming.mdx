@@ -1,0 +1,183 @@
+---
+title: Streaming & SSE
+description: "Response streaming across the pipeline — new Response(stream) passthrough, the SSE helper, and client consumption."
+---
+
+Streaming is a native part of the response path. The pipeline treats a response body as an opaque stream: whatever your handler returns with a body is passed through — chunked, flushed, and never buffered whole. That makes streaming responses a matter of returning a stream, and server-sent events a small step on top.
+
+Streaming routes are regular routes. They run through the same middleware, guards, validation, and error handling as any JSON endpoint; only the body handling changes. The pipeline starts writing headers as soon as the handler returns, then pulls the stream to the client.
+
+## Response Passthrough
+
+The rule is simple: return a web `Response` and the pipeline passes it through. A stream body flows to the client as it is produced:
+
+```ts
+c.get('/export', () => {
+  const stream = new ReadableStream({
+    async start(controller) {
+      for (const row of await collectRows()) {
+        controller.enqueue(new TextEncoder().encode(JSON.stringify(row)))
+      }
+      controller.close()
+    },
+  })
+
+  return new Response(stream, {
+    headers: { 'content-type': 'application/x-ndjson' },
+  })
+})
+```
+
+Because the pipeline does not buffer the body, backpressure flows to your producer: the client's consumption speed controls how fast the stream yields. Long-running exports, generated reports, and large datasets stream naturally.
+
+## The SSE Helper
+
+Event-stream endpoints can use the SSE helper on the context, which owns framing, heartbeat, and cleanup for `text/event-stream` responses. A hand-built event stream works identically through the passthrough:
+
+```ts
+c.get('/export.csv', () => {
+  const encoder = new TextEncoder()
+
+  const stream = new ReadableStream({
+    async pull(controller) {
+      const row = await nextRow()          // yields rows from your source
+      if (row === null) controller.close()
+      else controller.enqueue(encoder.encode(row + '\n'))
+    },
+  })
+
+  return new Response(stream, {
+    headers: { 'content-type': 'text/csv' },
+  })
+})
+```
+
+Whether you use the helper or hand-roll the read stream, the pipeline treats both as the same kind of return value.
+
+## Streaming in the Lifecycle
+
+A stream body is a normal handler return. The pipeline runs the middleware and guard stages exactly as it would for a JSON response — session, tenant, rate limiting all apply — then returns the stream without buffering it. The distinction matters for caching: a response served from a route-rule cache is the stored body, so streaming routes stay dynamic. See [Response Caching](/docs/http/caching).
+
+## SSE Event Endpoints
+
+For ongoing event delivery, an event-stream endpoint frames `data:` lines on an interval:
+
+```ts
+c.get('/events', () => {
+  const events = new ReadableStream({
+    start(controller) {
+      const timer = setInterval(() => {
+        controller.enqueue(
+          new TextEncoder().encode(`data: ${JSON.stringify({ at: Date.now() })}\n\n`)
+        )
+      }, 1000)
+
+      events.cancel = () => clearInterval(timer)
+    },
+  })
+
+  return new Response(events, {
+    headers: {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+    },
+  })
+})
+```
+
+The framework's SSE helper handles the same framing, heartbeat, and cleanup so you do not manage the interval yourself. The event-stream wire contract applies: `data:` lines separated by blank lines, and clients reconnect to continue receiving events.
+
+> [!NOTE]
+> For realtime application messages — typed payloads validated by the runtime — prefer the [Realtime](/docs/realtime) channels, which layer on top of WebSockets with a streaming fallback. Plain SSE is the right tool for server-originated streams like progress and feeds.
+
+## Cancellation and Cleanup
+
+Streams are pull-based: when the client disconnects, the pipeline stops pulling. Long-running producers should observe cancellation to release timers, close cursors, and stop work:
+
+```ts
+const stream = new ReadableStream({
+  async pull(controller) {
+    // yield the next item, or close when exhausted
+  },
+  cancel(reason) {
+    // the client went away — clean up timers and handles here
+  },
+})
+
+return new Response(stream)
+```
+
+Because the stream is never buffered whole, cancellation propagates promptly: the producer stops as soon as the client does, rather than producing rows nobody reads.
+
+## Streaming and Observability
+
+Streaming routes are observable like any other route. The request ID assigned at pipeline entry covers the whole stream — an error thrown mid-stream after headers have been sent is logged against the same `requestId`, `tenantId`, and trace. The headers-finalization and span-close work happens at the response stage even when the body is still flowing, so the framework reports the connection, not a buffered completion. See [Observability](/docs/observability).
+
+## Chunked Responses
+
+Chunked transfer flows through the pipeline untouched. A handler that returns a body stream after an initial flush produces headers immediately and streams the remainder — the same mechanism powers streaming SSR, where the shell flushes before the data resolves. See [Rendering: streaming](/docs/rendering/streaming).
+
+## Client Consumption
+
+On the client, consume streams with the standard reader interface:
+
+```ts
+const res = await fetch('/api/export')
+const reader = res.body.getReader()
+const decoder = new TextDecoder()
+
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+  processByLine(decoder.decode(value))
+}
+```
+
+The typed client passes responses through unchanged, so streams and event sources work identically whether called in-process or over the network.
+
+## When to Stream
+
+| Task | Approach |
+|---|---|
+| Large exports | Streamed NDJSON or CSV through `new Response(stream)` |
+| Generated reports | Stream rows as they are produced |
+| Ongoing updates | SSE event stream or a WebSocket route |
+| Real-time app messages | [Realtime channels](/docs/realtime/channels) |
+
+Cached route responses are not streamed — a response served from a route-rule cache is the stored body. Streaming and caching are mutually exclusive per route; see [Response Caching](/docs/http/caching).
+
+## Errors After the First Byte
+
+Once headers have been sent, a thrown error cannot produce a new status. The connection stays open, the remaining stream is terminated, and the failure is logged against the request ID. Design producers so that validation and data acquisition happen before the first enqueue — the pre-commit window — and keep events after it idempotent. See [Error Handling](/docs/http/errors) for how the taxonomy behaves on API routes.
+
+## Heartbeats and Dying Connections
+
+SSE clients and proxies drop idle connections. The SSE helper sends periodic heartbeat comments to keep the connection alive and detect dead peers early. For a hand-built stream, emit a ping comment on an interval and observe `cancel` to stop production when the connection closes.
+
+## Choosing Between SSE and WebSockets
+
+| Need | Transport |
+|---|---|
+| Server pushes events to the client | SSE |
+| Client and server exchange messages | WebSocket |
+| Typed, validated application messages | [Realtime channels](/docs/realtime/channels) |
+| Maximum browser and proxy compatibility | SSE (single direction) |
+
+WebSockets add a second direction at the cost of transport complexity; channels add validation and policy on top. SSE is the conservative default whenever the flow is one-directional.
+
+## Backpressure and Slow Consumers
+
+When a consumer falls behind, naive producers buffer unboundedly. Write producers that respect the pull — check the current backpressure and pause or drop with a policy you control — instead of emitting into the void. The request lifecycle observes the connection state, so a closed socket stops the generator cleanly rather than leaving it to spin.
+
+## Fan-Out
+
+One upstream source can feed many streams. A shared producer — a ticker, a job-progress feed, a telemetry bus — distributes the same events to every open stream while each consumer filters, throttles, or transforms independently. Because the framework monitors each socket's cancel signal, a slow consumer is released without blocking the others. See [Realtime: events](/docs/realtime/events) for the publish/subscribe primitives.
+
+## What's Next
+
+1. [Rendering: streaming](/docs/rendering/streaming) — streaming SSR and suspense-aware shells
+2. [Realtime](/docs/realtime) — channels and client subscriptions
+3. [WebSockets](/docs/http/websockets) — bidirectional routes for full-duplex messaging
+4. [Response Caching](/docs/http/caching) — rules that bypass the pipeline and cache
+5. [Controllers](/docs/http/controllers) — returning streams from route handlers

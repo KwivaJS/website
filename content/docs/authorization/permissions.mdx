@@ -1,0 +1,142 @@
+---
+title: Permissions
+description: "The {resource}.{action} permission grammar, model and route gating, and the ctx.can, authorize, useCan, and whereCan helpers."
+---
+
+Permissions are how authorization is addressed. Every access decision in Kwiva is expressed as a `{resource}.{action}` string, checked against a policy, and surfaced to the user with the same grammar on the server and the client. Get the naming right and the rest of the system — route gating, Studio screens, MCP tools, documentation — falls into place.
+
+Permissions are strings, but they are contracts, not ad-hoc labels. A permission names one decision: "may this user perform this action on this resource?". Because every layer of the framework reasons in the same grammar, writing `posts.publish` once wires the same ability into a controller route, a Studio button, client types, and OpenAPI metadata.
+
+## The Permission Grammar
+
+A permission string has exactly two parts:
+
+```
+{resource}.{action}
+```
+
+`posts.publish`, `users.create`, `projects.archive` — all follow the shape. The resource is the policy namespace, and the action is an ability the policy decides:
+
+| Permission | Resource | Action |
+|---|---|---|
+| `posts.read` | posts | read |
+| `posts.create` | posts | create |
+| `posts.update` | posts | update |
+| `posts.delete` | posts | delete |
+| `posts.publish` | posts | publish (custom) |
+| `users.create` | users | create |
+
+The framework's standard actions are `read`, `create`, `update`, and `delete` — the four verbs every generated model route uses. Custom actions such as `publish` or `archive` come from controller routes; because the route manifest registers every controller action as an ability, a custom permission is discoverable in client types, OpenAPI, and MCP tools the moment it is declared.
+
+### Where the verbs map
+
+| Generated route | Permission checked |
+|---|---|
+| `list` | `{permission}.read` |
+| `get` | `{permission}.read` |
+| `create` | `{permission}.create` |
+| `update` | `{permission}.update` |
+| `delete` | `{permission}.delete` |
+
+The resource half of the string is the namespace declared on the model (`permission: 'posts'`) or controller. The action half is the verb being attempted. Joining them names the exact decision the policy has a case for.
+
+## Granting Permissions
+
+Permissions are granted two ways, both stored on the user record through its `permission` field:
+
+- **Directly** — a user's `permission` list names exact abilities they hold.
+- **By role** — the `role` field implies a bundle of expected abilities, which policies interpret.
+
+Granting is data, not code. There is no special `grant` call in application logic; a permission is granted by assigning it to the field and revoked the same way. Policies remain the sole interpreter of what any grant means.
+
+> [!NOTE]
+> The `permission` field and the `role` field feed policies, but they are not interpreted by the data layer. A grant sitting in a field does nothing until a policy reads it — which is exactly why revoking policy meaning is one file edit, not a data migration.
+
+## Model-Level Gating
+
+The strongest enforcement point is the model itself. A model declared with the `permission` option gates every generated route by namespace:
+
+```ts
+defineModel('posts', (f) => ({
+  // ...
+}), { timestamps: true, permission: 'posts' })
+```
+
+With `permission: 'posts'` declared, the model's generated `list/get/create/update/delete` routes check `posts.read`, `posts.create`, `posts.update`, and `posts.delete` respectively — resolved against the `posts` policy in the route lifecycle before any handler runs. Studio screens and MCP tools generated from the same model inherit the identical gating, so one option keeps the whole surface consistent.
+
+The check runs at the guard stage of the pipeline, after the session has been loaded, so the policy receives a real session and can make per-user decisions. A rejected check raises a typed error before the handler executes — no handler-level `if` noise.
+
+## Route-Level Gating
+
+Hand-written controllers gate individual actions with the same grammar. The `permission` route option names the exact ability a handler requires:
+
+```ts
+export default defineController('posts', (c) => ({
+  publish: c.post('/:id/publish', async ({ params }) => {
+    const post = await Post.findOrFail(params.id)
+    return post.update({ status: 'published', publishedAt: new Date() })
+  }, {
+    permission: 'posts.publish',
+  }),
+}))
+```
+
+The check runs in the route lifecycle before the handler, alongside auth and tenant middleware. A missing or insufficient permission raises the same typed error the rest of the pipeline uses — no handler-level `if` noise.
+
+Route-level gating is how custom actions get enforced. Anything beyond the four CRUD verbs — `publish`, `archive`, `invite`, `transfer` — is a controller route with a `permission` option, and the manifest carries the custom ability into client types, OpenAPI, and MCP tool metadata automatically.
+
+## Checking in Application Code
+
+Most checks never need explicit code — model and route options handle them. When you do check, three helpers mirror the same grammar:
+
+```ts
+// server: does the current user hold this ability?
+ctx.can('posts.publish')                        // ability check (resource-less)
+ctx.can('posts.update', post)                   // resource check
+
+// server: check or throw
+await authorize('posts.update', post)           // throws ForbiddenError
+
+// client: reactive ability
+const canPublish = useCan('posts.publish')
+```
+
+- **ctx.can** — the boolean question, optionally against a concrete resource. Use it to conditionally render, branch, or short-circuit.
+- **authorize** — the enforcing variant. It throws a `ForbiddenError` that the error taxonomy maps to a typed response; prefer it in jobs, seeders, and anywhere a silent `false` would be dangerous.
+- **useCan** — the reactive client twin, returning `true` or `false` for the current session. It drives conditional UI — hide the publish button, not just reject the request.
+
+### Resource checks
+
+The two-argument form binds the decision to a specific record. `ctx.can('posts.update', post)` hands the policy the concrete resource, so ownership cases like `resource.authorId === user.id` can decide. Without a resource, the policy's `undefined` branch answers — the right shape for create and publish decisions where there is nothing to own yet.
+
+### Where each helper belongs
+
+| Helper | Surface | Use for |
+|---|---|---|
+| `ctx.can` | Server, in handlers | Branching and short-circuits |
+| `authorize` | Server, jobs/seeders | Enforcing decisions that must not be silent |
+| `useCan` | Client, components | Conditional rendering of actions |
+| `whereCan` | Server, query layer (v1.x) | Scoping result sets by policy |
+
+## Query-Level Scoping (v1.x)
+
+For query-level scoping, v1.x adds policy-filtered result sets:
+
+```ts
+Post.query().whereCan('posts.update')           // policy-filtered result set (v1.x)
+```
+
+`whereCan` narrows the returned rows themselves, so users only ever receive records their policy would grant — defense at the data layer, not the render layer. It composes with tenant scoping: a `whereCan` query is still tenant-scoped first, then ability-filtered, so the result set satisfies both boundaries.
+
+## Keep the Grammar Consistent
+
+Because permissions are strings, they are also contracts. The framework enforces consistency by deriving everything from the same source: policies declare the namespaces, controllers register the custom abilities into the manifest, and generated routes read the model option. When your docs, Studio screens, and OpenAPI spec all agree on `posts.publish`, authorization stays legible at every layer.
+
+The consistency is what makes a permission safe to reason about. When `posts.publish` appears in a route option, a policy case, a Studio rule, a client type, and an MCP tool resolver, it is the same ability in every one of them — there is no dialect to translate between surfaces.
+
+## What's Next
+
+- [Policies](/docs/authorization/policies) — what a `posts.publish` string actually resolves to
+- [RBAC](/docs/authorization/roles) — where permission grants and roles are stored
+- [Enforcement Points](/docs/authorization/enforcement) — where these checks run, in depth
+- [Controllers](/docs/http/controllers) — route options including `permission`

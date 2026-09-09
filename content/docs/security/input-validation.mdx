@@ -1,0 +1,132 @@
+---
+title: Input Validation
+description: "Typed validation at every boundary — models, controllers, jobs, events, channels, MCP tools, uploads, and search params."
+---
+
+Kwiva's model is that **input is validated where input enters**, and every executor type ships with a schema slot for its inputs. There is no conventional "unvalidated code path": a value that reaches a model write, a job payload, or a channel handler has already passed a schema, so the code that receives it is allowed to trust its shape.
+
+## Validation Is a Default
+
+Validation is not an opt-in middleware you remember to apply. Every boundary validates by construction:
+
+- Controllers validate the route schema before the handler runs
+- Models validate typed field definitions before writes, and dynamic path/lookup validation up front
+- Job payloads, event payloads, channel messages, MCP tool inputs, uploads, and search params each have their own schema slot
+
+The symmetry is deliberate: inputs are dense inside work items and sparse across web boundaries, and Kwiva validates at the exact point the data arrives rather than deferring the check to when it is used.
+
+## Standard Schema
+
+Kwiva's validation functions are **Standard Schema compliant**, which means the ecosystem of Standard Schema adapters is interchangeable — Valibot, Zod, and any other compliant library can be dropped into any boundary without friction. The framework does not transport bespoke validation; it transports the shared contract.
+
+```ts
+// which adapter doesn't matter — every boundary accepts a Standard Schema
+import { x } from 'valibot'
+
+export default defineValidation('createPost', {
+  body: {
+    title: x.string(x.minLength(1), x.maxLength(200)),
+    published: x.optional(x.boolean(), false),
+  },
+})
+```
+
+The practical benefit: your team's schema library, wherever it lives, plugs into controllers, models, jobs, channels, and MCP tools alike, with the same error mapping in every surface.
+
+## Field-DSL Derived Schemas
+
+Models define their types with a typed field DSL, and the field definitions generate the schema that validates every operation. This is the tightest loop in the framework: the schema and the model cannot disagree, because one is derived from the other.
+
+```ts
+export default defineModel('post', {
+  fields: {
+    title: f.string().validation((s) => s.min(1).max(200)),
+    id: f.string().cuid2(),
+  },
+})
+```
+
+Dynamic validation functions like `validation((s) => s.min(1).max(200))` operate on the framework's string schema surface, so the constraints live in one place and apply to every write path — controllers, seeders, and application code all converge on the same rules.
+
+## Validation at the Model Boundary
+
+Model operations validate before they write. `.create()` and `.update()` validate typed field definitions against the data, and dynamic path and lookup parameters are validated up front:
+
+```ts
+await Post.create({ title: '' })  // throws: title must satisfy min(1)
+```
+
+Type-level and runtime checks compose — the typed layer catches the shape at compile time and the validation layer catches the values at runtime. This is where the model, controller, job, and channel boundaries all agree: anything that writes validated, and anything that writes validly is already typed.
+
+## Validation at the Controller Boundary
+
+Controllers validate the route schema before the handler runs. The request body is checked against the schema, and search params and headers are validated when declared:
+
+```ts
+import { defineController } from '@kwiva/http'
+
+export default defineController('posts', (c) => ({
+  list: c.get('/', {
+    schema: {
+      searchParams: { page: x.numeric() },
+      headers: { 'x-session-id': x.string() },
+    },
+    run: async ({ body, searchParams }) => {
+      return await Post.all({ limit: 20 })
+    },
+  }),
+}))
+```
+
+Validation failures become **field-mapped 422 responses** — the response shape indicates which fields failed and why — and never reach the handler. Repeating the same checks by hand inside the handler is redundant work the schema already did.
+
+## What Counts as Input
+
+The boundary model earns its name by being exhaustive about what can enter. In a Kwiva application, input is:
+
+- The **request body, search params, and declared headers** of a controller route
+- The **typed field values** written through model operations
+- The **payload** of a job or event, however it arrives
+- A **channel message** before broadcast
+- The **arguments and results** of an MCP tool call
+- **Uploaded files** and **search parameters** on their own schemas
+
+Anything that did not originate inside your own validated code is input, and everything in that list has a schema slot by default. The converse is what makes the model comfortable: once a value has crossed a validated boundary, application code treats it as trustworthy, because trusting untested shape is precisely what the schema layer exists to prevent.
+
+## Beyond Requests
+
+The other boundaries follow the same rule with their own schema slots:
+
+| Boundary | What is validated |
+|---|---|
+| Jobs | The job's payload against its declared schema before the payload is processed |
+| Events | The event payload against its schema for each listener |
+| Channels | The message content before it is broadcast |
+| MCP tools | Tool input and output against their schemas |
+| Uploads | File type and size against the upload definition |
+| Search params | Route search parameters when declared in the route schema |
+
+The consistency is the point: an event emitted by a controller and consumed by a listener already validated both sides of the hop, and an MCP tool invocation is validated before any side effect, the same as a controller route.
+
+## Server-Side and Client-Side Alignment
+
+Because the same schema definition is shared across server and client boundaries, the validation contract is one artifact. The client can preview constraints without re-implementing the rules, and the server remains the authority that enforces them. The framework never treats client-side checks as adequate — validation is always re-run server-side at the real boundary.
+
+## Best Practices by Boundary Kind
+
+The general rule — validate at the boundary, trust inside the executor — produces different habits per surface:
+
+- **Controllers**: declare body, search params, and headers; let 422 mapping be your API contract
+- **Models**: put the constraint in the field DSL once; never write a second, divergent check at the write site
+- **Jobs and events**: schema the payload, because the sender and consumer may live in different code that autoload independently
+- **MCP tools**: validate input and output — the tool contract is a feature of the MCP surface, not an afterthought
+
+Unicode and max-length normalization is a constant across database-facing boundaries, ensuring cross-platform input never wedges persistence.
+
+## What's Next
+
+- [Default Protections](/docs/security/default-protections) — how typed validation composes with the rest of the posture
+- [HTTP Validation](/docs/http/validation) — schemas, errors, and field-mapped 422 responses
+- [Data Validation](/docs/data/validation) — model-level rules, unicode checks, and best practices
+- [Jobs](/docs/background-work/jobs) — payload validation inside queued work
+- [Realtime Channels](/docs/realtime/channels) — validation before broadcast

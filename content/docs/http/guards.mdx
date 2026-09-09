@@ -1,0 +1,181 @@
+---
+title: Guards
+description: "c.guard — nestable, composable checks that scope schema, middleware, and beforeHandle to groups of routes."
+---
+
+Guards are the mechanism for scoping authorization and validation requirements to a group of routes. A guard applies a schema, a middleware list, and a `beforeHandle` check to everything declared inside it. Guards nest and compose, so a mounted guard can assert general requirements while nested guards assert resource-specific ones.
+
+Guards are how you avoid repeating the same authentication and authorization wiring across routes. Instead of listing middleware and checks on every handler, you declare the group's requirements once — in one place, next to the routes they protect.
+
+## Anatomy of a Guard
+
+```ts
+c.guard({ schema, middleware, beforeHandle }, (g) => ({...routes}))
+```
+
+The first object declares the requirements. The second argument is a builder that receives a guarded builder — routes declared inside it are protected. Unlike a plain controller, a guarded builder does not expose the unprotected surface.
+
+| Guard key | Role |
+|---|---|
+| `middleware` | Named stages run for every route inside |
+| `beforeHandle` | A check that can short-circuit with an error response |
+| `schema` | A shared schema validated for every route inside |
+
+The first object and the builder are the entire surface. Everything a guard can do reduces to middleware, a pre-handler check, or a shared schema — the three keys above.
+
+## A Mount-Level Guard
+
+The most common pattern is a controller that requires authentication and tenant resolution for every route:
+
+```ts
+import { defineController, error } from '@kwiva/http'
+
+defineController('admin', (c) => c.guard({
+  middleware: ['auth'],
+  beforeHandle: ({ session, error }) => {
+    if (session.user?.role !== 'admin') return error('FORBIDDEN')
+  },
+}, (g) => ({
+  dashboard: g.get('/dashboard', dashboardHandler),
+  settings:  g.get('/settings', settingsHandler),
+})))
+```
+
+Every route inside the guard inherits the `auth` middleware, and the `beforeHandle` check runs before the handler. If the check returns an error response, the handler never runs.
+
+## Nesting Guards
+
+Guards compose: wrap one guard inside another, and the inner requirements layer on top of the outer ones.
+
+```ts
+defineController('projects', (c) => c.guard({
+  beforeHandle: ({ session, error }) => {
+    if (!session.user) return error('UNAUTHORIZED')
+  },
+}, (g) => g.guard({
+  beforeHandle: async ({ params, session, error }) => {
+    const project = await Project.findOrFail(params.id)
+    if (!project.members.some((m) => m.id === session.user.id)) {
+      return error('FORBIDDEN')
+    }
+    return
+  },
+}, (gg) => ({
+  detail: gg.get('/:id', projectDetailHandler),
+  update: gg.put('/:id', projectUpdateHandler),
+}))))
+```
+
+The inner guard sees the same request, minus the routes it was not given — `detail` and `update` run through both checks, while any sibling routes declared only under the outer guard skip the ownership check.
+
+The outer check runs first: if there is no session, the inner ownership check never executes. This layering is what makes guards read like policy: broad requirements first, narrow ones closer to the route.
+
+## Guard Schema
+
+A guard can also declare a schema that applies to every route inside it:
+
+```ts
+c.guard({
+  schema: { params: { id: 'string' } },
+  middleware: ['tenant'],
+}, (g) => ({
+  show: g.get('/:id', showHandler),
+}))
+```
+
+This validates the parameter once for the whole group rather than repeating it per route. Route-level schemas still override additions — a route may validate more, but it cannot loosen the guard's schema.
+
+Guard schema and guard `beforeHandle` cover different work: the schema guarantees *shape*, the check guarantees *who*. A route can redeem the group's schema with its own fields, but the group's authorization check is unconditional.
+
+## Guards and the Request Lifecycle
+
+Guards run during `onBeforeHandle`, after validation. The ordering guarantee matters: `beforeHandle` receives validated `body`, `query`, and `params`, so policy checks can inspect what the handler is about to receive. Guards also run after the middleware stack, meaning `session` and `tenant` are already resolved when the guard reads them. See [Request Lifecycle](/docs/http/lifecycle).
+
+## Auth Guards
+
+Authentication guards check that a session exists before any route logic runs:
+
+```ts
+c.guard({
+  beforeHandle: ({ session, error }) => {
+    if (!session.user) return error('UNAUTHORIZED')
+  },
+}, (g) => ({ ... }))
+```
+
+The `requireAuth` middleware serves the same purpose without a custom function, and page routes apply the same check through route guards before load — see [Auth: protecting routes](/docs/auth/protecting-routes).
+
+## Permission Guards
+
+At the route level, the `permission` option gates enforcement through policies, which is where the real authorization surface lives:
+
+```ts
+c.patch('/:id', handler, { permission: 'posts.update' })
+```
+
+Policies are `defineX` factories evaluated against the session user, ability, and resource — see [Authorization: policies](/docs/authorization/policies) and [Authorization: enforcement](/docs/authorization/enforcement). A guard is the group-level assertion; a permission is the granular per-route assertion, and they compose.
+
+## Route Permissions Inside a Guard
+
+A mount guard asserts group requirements; the `permission` option asserts per-operation abilities. The two compose routinely — the guard establishes who is allowed in, the permission decides what each route may do:
+
+```ts
+defineController('posts', (c) => c.guard({
+  middleware: ['auth'],
+  beforeHandle: ({ session, error }) => {
+    if (!session.user) return error('UNAUTHORIZED')
+  },
+}, (g) => ({
+  create: g.post('/', createHandler, { permission: 'posts.create' }),
+  update: g.patch('/:id', updateHandler, { permission: 'posts.update' }),
+  publish: g.post('/:id/publish', publishHandler, { permission: 'posts.publish' }),
+})))
+```
+
+The `beforeHandle` answers "is there a session"; the permission answers "may this actor perform this operation". If the guard fails, no permission is even evaluated. If the guard passes but the permission is denied, the handler still never runs — `FORBIDDEN` returns before the route executes.
+
+## Guards on WebSocket Routes
+
+Guards apply to WebSocket routes declared inside them. The mounted guard's middleware and `beforeHandle` run during the handshake, so an unauthenticated client is rejected at upgrade time rather than after connecting and sending a first message. Channel subscriptions enforce their own policies independently of the route guard. See [WebSockets](/docs/http/websockets).
+
+## What a Guard Returns
+
+A guard's `beforeHandle` either returns `undefined` to continue, or returns a response to short-circuit. The `error` helper returns a typed error response, which is what produces `UNAUTHORIZED` and `FORBIDDEN`:
+
+```ts
+beforeHandle: ({ session, error }) => {
+  if (!session.user) return error('UNAUTHORIZED')
+}
+```
+
+Returning `undefined` implicitly continues to the next check and eventually the handler. Returning any other value — an error or a full response — stops the guard chain for that request.
+
+## Relating Guards to the Route Schema
+
+Decide between guard schema and route schema by scope:
+
+| Concern | Where it belongs |
+|---|---|
+| Shape of one route's input | Route schema |
+| Shape shared by every route in a group | Guard schema |
+| Session or ownership check | Guard `beforeHandle` |
+| Fine-grained ability check | Route `permission` option |
+| Middleware shared by a group | Guard `middleware` list |
+
+Guard schema validates at the group level; guard `beforeHandle` is the declarative check for who may run the group; route `permission` enforces the ability model per operation.
+
+## Order of Checks Within a Guard
+
+Inside one guard the order is fixed: middleware first, then schema validation (as part of the request's validation stage), then `beforeHandle`. Controller middleware runs before guards; guard middleware runs before guard `beforeHandle`. A guard's own middleware list therefore runs ahead of its check, which is how the `auth` middleware and an ownership check compose inside the same declaration.
+
+## Guards and Development
+
+Guards participate in the dev overlay: a `beforeHandle` that returns an error is visible in the request waterfall with the code it produced (`UNAUTHORIZED`, `FORBIDDEN`). Policies and guard checks appear as distinct stages, so deciding where a request was denied is a matter of reading the request trace rather than adding logging. See [Request Lifecycle](/docs/http/lifecycle).
+
+## What's Next
+
+1. [Request Lifecycle](/docs/http/lifecycle) — where guards run in the pipeline
+2. [Middleware](/docs/http/middleware) — the middleware list guards can attach
+3. [Authorization: policies](/docs/authorization/policies) — defining the policy namespace
+4. [Authorization: enforcement](/docs/authorization/enforcement) — how permissions gate routes
+5. [Auth: protecting routes](/docs/auth/protecting-routes) — `requireAuth` and page guards

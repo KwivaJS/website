@@ -1,0 +1,135 @@
+---
+title: Tenant Resolution
+description: "Resolve the tenant per request from domain, path, or header through the tenant middleware, which injects tenant context and storage keys."
+---
+
+Before a request can be scoped, the framework must know which tenant it belongs to. Tenant resolution is the answer to that question, and it happens exactly once per request. Whatever mode is configured, resolution terminates in the same thing: a typed `ctx.tenant` supplied to the request context, which every downstream system — query scoping, cache keys, storage paths, queue payloads — then reads.
+
+## The Resolution Pipeline
+
+Resolution runs in the `tenant` middleware. The flow is:
+
+1. The middleware reads the current mode from the tenancy configuration
+2. It extracts the tenant identity from the request — the subdomain, the first path segment, or the `x-tenant-id` header
+3. It looks up the matching tenant record
+4. It injects the tenant into the request context as a typed value
+5. The same tenant flows downstream into storage keys, cache keys, and queue payloads
+
+The middleware sits in the middleware stack configured in `src/config/app.ts`, alongside the other built-ins such as request id and session. Because middleware is scoped per route or controller when needed, tenant resolution can be applied globally, or restricted to the segments of the app that deal with tenant data.
+
+Resolution is timed against the rest of the pipeline: session and tenant resolution together target under 2ms on a warm database or Redis hit. Route-cached responses short-circuit before resolution entirely, so public cached pages never pay for a tenant lookup.
+
+## The Typed Tenant Context
+
+Once resolved, the tenant is available on the request context with full type inference:
+
+```ts
+// ctx.tenant is typed as { id, name, ownerId }
+app.get('/account', async ({ tenant }) => {
+  return tenant  // { id, name, ownerId }
+})
+```
+
+The typed surface is deliberately small — `id` for scoping, `name` for display, `ownerId` for ownership checks. Policies receive what they need to decide, and queries receive the `id` they need to scope. The context type flows from the tenant model definition, so new fields on the tenant model surface in the context type with zero extra wiring.
+
+## Resolution Strategies in Detail
+
+### Domain mode
+
+```
+acme.app.dev  ──►  tenant with slug 'acme'
+```
+
+The subdomain is the tenant identity. The tenant model carries a unique `slug` for this lookup, and the framework resolves the first subdomain segment against it. This is the default: each customer gets a subdomain, and all requests under it are scoped to that customer.
+
+### Path mode
+
+```
+/t/acme/...  ──►  tenant with slug 'acme'
+```
+
+The first path segment is the tenant identity. Workspaces on a shared host use this shape, and the path structure keeps tenant context visible in URLs and shareable routes.
+
+### Header mode
+
+```
+x-tenant-id: acme  ──►  tenant identified by header value
+```
+
+API clients and internal tools pass the tenant identity explicitly. This mode suits machine-to-machine traffic where hosts and paths carry no tenant meaning, and it pairs naturally with the typed client.
+
+### Fixed mode
+
+```
+fixed: 'acme'  ──►  every request is tenant 'acme'
+```
+
+A single configured tenant. A single-tenant deployment still gets the full isolation guarantees — scoped storage, tenant-prefixed cache, tenant-aware queueing — without paying resolution cost per request.
+
+### Org mode (v1.x)
+
+Authenticated organization membership resolves to a tenant. The org the user belongs to becomes the tenant, which is a natural fit when organizations and tenants are the same concept in the domain. Combining org mode with auth scopes the tenant to the user's membership — admin in one tenant, standard user in another.
+
+### None mode
+
+`solo app — no tenant resolution, no scoping`. Mode `none` disables the machinery entirely, giving solo applications zero resolution overhead.
+
+## Once Per Request
+
+Resolution is a one-shot operation per request. The middleware resolves the tenant once and the result is reused by everything downstream — scoping rules, storage keys, caching, and queue payloads all read from the same context. There is no per-query re-resolution, no repeated lookups inside a handler that already holds the tenant.
+
+This also means tenant context is stable across internal RPC: the typed client called from a handler inherits the request's tenant, and in-process test clients scope every call against the tenant they were constructed with.
+
+## Lookup Caching
+
+Tenant lookups are memoized for the lifetime of the request. The record is fetched once, and the resolved tenant is reused wherever context flows. Across requests, correctness takes precedence over speculative caching: the tenant record is read through the standard data layer at resolution time, and cache scoping is applied to the tenant's derived state rather than to the tenant lookup itself.
+
+In production, the expectation is the same as the rest of the framework: instances are stateless and interchangeable, so tenant resolution never depends on which instance served the request.
+
+## Lookup Performance
+
+Resolution stays fast because the tenant model is shaped for lookup:
+
+- `slug` is unique — the domain and path lookups hit a unique index
+- The tenant record is small (id, name, slug, owner, plan) — a single indexed read
+- Resolution is memoized per request — one lookup regardless of downstream consumers
+
+Keep the tenant model lean and the unique indexes intact, and resolution cost stays in the sub-millisecond range even as the tenant table grows. Indexing applies the same way to the `tenantId` column on scoped models: the injected predicate in every scoped query is only fast when the column it filters on is indexed, which the migration generates automatically.
+
+## Fallback and No-Tenant Behavior
+
+What happens when no tenant can be resolved depends on mode and intent:
+
+- **`none` mode** — nothing resolves and nothing is scoped; tenant context is simply absent
+- **`fixed` mode** — every request resolves to the configured tenant, so there is no unknown state
+- **`domain`, `path`, and `header` modes** — a request without a resolvable tenant does not get scoped access; the request does not proceed as an unscoped cross-tenant call
+
+The safe default is that an unresolvable tenant is a failed resolution, not an anonymous wide-open one. Applications that deliberately expose unscoped routes — such as a public signup endpoint that creates the first tenant — should mount those routes outside the tenant middleware or in a controller that handles the tenantless case explicitly.
+
+Missing tenant context is a **hard failure for tenant-scoped operations**: the data layer raises an integrity error rather than silently running an unscoped query. A tenantless request can never reach scoped data by default; it must be routed around the middleware on purpose and designed to handle the tenantless case.
+
+## Resolution Errors
+
+Tenant lookup failures follow the normal error semantics of the framework. Because scoping treats absence conservatively, the practical effect for callers is a clear failure rather than silent data exposure. In tests, resolution behavior is exercised explicitly — see below.
+
+## Testing Resolution
+
+The test harness drives resolution deterministically:
+
+```ts
+withApp(async (app) => {
+  const acme = app.asTenant('acme')
+  const client = createTestClient(app, { tenant: acme })
+  // requests are scoped to acme; a cross-tenant call asserts 404
+})
+```
+
+`app.asTenant` selects the tenant, the test client binds to it, and every request through the client resolves to that tenant. This makes resolution behavior — including the cross-tenant 404 rule — a first-class test concern, not an afterthought. The tenancy invariant suite (`kwiva test --tenancy`) runs the same assertions across two tenants end-to-end.
+
+## What's Next
+
+- [Configuration](/docs/tenancy/configuration) — choosing the resolution mode
+- [Scoping](/docs/tenancy/scoping) — what the resolved tenant applies to every query
+- [Isolation](/docs/tenancy/isolation) — how the tenant flows into storage, cache, and queue
+- [Middleware](/docs/http/middleware) — where the `tenant` middleware sits in the stack
+- [Policies](/docs/authorization/policies) — how the resolved tenant reaches policy checks

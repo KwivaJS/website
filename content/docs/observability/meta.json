@@ -1,0 +1,10 @@
+{
+  "title": "Observability",
+  "pages": [
+    "index",
+    "logging",
+    "tracing",
+    "metrics",
+    "dev-overlay"
+  ]
+}

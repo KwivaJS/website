@@ -1,0 +1,189 @@
+---
+title: API Errors
+description: "The error taxonomy, envelope shape, validation issues, custom codes, and client-side typed handling."
+---
+
+Kwiva has one error taxonomy with two renderers: JSON for API responses and HTML for pages. The same taxonomy surfaces on the client as a typed, discriminated union, so error handling never relies on string matching.
+
+Everything that can go wrong in a request resolves to one of eight codes. API consumers learn one taxonomy, one envelope, and one typing model — then apply them to every endpoint in the system.
+
+## The Taxonomy
+
+Every resolution is a code; seven are error codes, and one is the success resolution:
+
+| Code | HTTP | Meaning | Produced by |
+|---|---|---|---|
+| `OK` | 200 | Success — the request was handled | Pipeline |
+| `UNAUTHORIZED` | 401 | No session or invalid credentials | Auth, guards |
+| `FORBIDDEN` | 403 | Policy denial | Policies, `permission` |
+| `NOT_FOUND` | 404 | Missing resource or route | `findOrFail`, router |
+| `CONFLICT` | 409 | Uniqueness or optimistic-concurrency violation | Model layer |
+| `VALIDATION` | 422 | Schema failures | Validation stage |
+| `TOO_MANY_REQUESTS` | 429 | Rate limit tripped | Middleware |
+| `INTERNAL_ERROR` | 500 | Unhandled error | Catch-all |
+
+On the client this is not a convention you memorize — it is the literal type. `res.ok` narrows to the success payload; `res.error.code` narrows to the failure codes.
+
+## Authoring Errors
+
+Handlers prefer the `error` helper — a return value, not a throw:
+
+```ts
+import { error } from '@kwiva/http'
+
+return error('NOT_FOUND', { message: 'no such post' })
+return error('VALIDATION', { issues: [{ path: 'title', message: 'too long' }] })
+```
+
+Services and models use typed exceptions:
+
+```ts
+import { NotFoundError, ForbiddenError } from '@kwiva/http'
+
+throw new NotFoundError('post', id)
+throw new ForbiddenError('posts.publish')
+```
+
+Unknown errors map to `INTERNAL_ERROR`: details are hidden in production and the full stack is shown in development.
+
+## Custom Codes
+
+The taxonomy is extensible from configuration — extend it, never bypass it:
+
+```ts
+// src/config/app.ts
+export default defineConfig('app', {
+  defaults: {
+    errors: {
+      PAYMENT_REQUIRED: { status: 402 },
+      TOO_LARGE: { status: 413 },
+    },
+  },
+})
+```
+
+Registered custom codes join the client's discriminated union, so a `PAYMENT_REQUIRED` response is as type-safe as a built-in code.
+
+In-scope `onError` hooks can translate domain exceptions into custom codes before mapping — for example a payment failure mapped to the `PAYMENT_REQUIRED` code. See [Error Handling](/docs/http/errors) for the full `onError` stage.
+
+## The Response Envelope
+
+```json
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "no such post",
+    "requestId": "req_..."
+  }
+}
+```
+
+`requestId` always equals the `x-request-id` header, so any reported error can be correlated back to its request.
+
+## Validation Errors
+
+Validation failures add field-mapped `issues`:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION",
+    "message": "validation failed",
+    "requestId": "req_...",
+    "issues": [
+      { "path": "title", "message": "must be at least 1 character" }
+    ]
+  }
+}
+```
+
+Forms can render these directly — `path` names the field and `message` is user-facing. The `issues` array carries one entry per offending field, so a single request surfaces every problem instead of stopping at the first.
+
+## The Error Path
+
+Any throw in any lifecycle stage enters the `onError` stage:
+
+1. Mapping order: typed exception → registered custom code → `INTERNAL_ERROR`.
+2. `onError` hooks (app- or controller-scoped) translate domain exceptions first.
+3. The mapped code records a trace span and counts a metric per code and route.
+4. The response renders as JSON for API routes or the error page otherwise.
+
+The pipeline degrades, never loops: if the error handler itself throws, the response is a plain 500; if an error page render throws, a minimal built-in fallback page is used.
+
+## Model-Layer Integration
+
+Common database cases map automatically:
+
+| Situation | Result |
+|---|---|
+| `findOrFail` | `NOT_FOUND` |
+| unique constraint violation | `CONFLICT` with the offending field |
+| soft-deleted row accessed by a default query | `NOT_FOUND` |
+
+Handlers rarely map errors manually because the layer below already speaks the taxonomy. See [Models](/docs/data/models) and [Data: soft deletes](/docs/data/soft-deletes).
+
+## Client-Side Handling
+
+The client returns the discriminated union, so branches are checked at compile time:
+
+```ts
+const res = await client.posts.get(id)
+
+if (res.ok) {
+  // res.data is the fully typed payload
+} else {
+  switch (res.error.code) {
+    case 'NOT_FOUND':
+      // render a missing-resource state
+      break
+    case 'FORBIDDEN':
+      // render an access-denied state
+      break
+    case 'TOO_MANY_REQUESTS':
+      // render a retry-later state
+      break
+  }
+}
+```
+
+Because the union derives from the taxonomy, a new custom code extends the switch options the compiler knows about — there is no string matching to miss.
+
+## Correlation and Logs
+
+Every error response carries `requestId`, and the structured log line includes `code`, `route`, `requestId`, and `tenantId` (when tenancy is in use). You can move from a customer report to the failing span in one hop. See [Observability](/docs/observability).
+
+## Message Copy
+
+`message` is the user-visible text. Write it for a person reading an error log, a support ticket, or a form. `issues[].message` is the field-level copy forms display. Keep both short and specific — "no such post" is actionable, and the code is machine-readable regardless.
+
+## Production Sanitization
+
+For `INTERNAL_ERROR`, production replaces internals with a generic message while full detail goes to logs and traces. Development surfaces the full stack. The two modes share the same envelope, so client code branches on codes, never on stack text. See [Error Handling](/docs/http/errors).
+
+## Correlation With Tenancy
+
+When tenancy is enabled, `tenantId` rides the structured log line and trace attributes alongside `requestId`. Support can move from a tenant report to the failing request to the trace — and back — without string guessing. See [Tenancy](/docs/tenancy) and [Observability](/docs/observability).
+
+## Failures Beyond the Handler
+
+The `onError` stage catches throws from middleware, guards, parsing, and validation — not just handler bodies. A rate-limit short-circuit, a rejected upgrade, or a malformed multipart body all resolve through the same mapping. See [Request Lifecycle](/docs/http/lifecycle).
+
+## Differences From HTTP Pages
+
+The same taxonomy drives HTML error pages on the navigation side, so a `NOT_FOUND` renders as the 404 page and a `FORBIDDEN` as the 403 page. The difference is the renderer only: API routes return the `error` envelope, non-API routes return HTML. Codes and mapping are shared. See [Error Handling](/docs/http/errors).
+
+## Errors in Development
+
+In development, `INTERNAL_ERROR` includes the stack trace, and the request ID links to the trace timeline in the dev overlay. `VALIDATION` responses show the schema that produced the issue, and custom codes are listed with their registered status. The goal: an error reported during development is fixable from the error screen alone.
+
+## Rate Limiting and the 429 Path
+
+`TOO_MANY_REQUESTS` carries the retry-after guidance the limiter configured, and the typed client exposes it. The limiter keys by identity when available and by IP otherwise, so shared egress does not exhaust a tenant's budget. See [Rate Limiting](/docs/http/routes).
+
+## What's Next
+
+- [Error Handling](/docs/http/errors) — the lifecycle `onError` stage in depth
+- [Typed RPC](/docs/api/rpc) — the typed result contract
+- [Observability](/docs/observability) — tracing, logs, and metrics
+- [Validation](/docs/http/validation) — where `VALIDATION` comes from
+- [Policies](/docs/authorization/policies) — where `FORBIDDEN` comes from

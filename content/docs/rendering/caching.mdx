@@ -1,0 +1,165 @@
+---
+title: Caching Strategies
+description: "Route rules for cache, SWR, ISR, static, prerender — plus model cache and client cache layers."
+---
+
+Caching in Kwiva is **per route, declared once, and layered**. Route rules shape the HTTP response cache for a path or pattern; a server-side model cache holds derived values with TTL and tags; and the client's data-hook cache keeps the browser in sync. The three layers compose, and invalidation flows down the stack. The cache engine is framework-owned (hidden behind the route-rule surface); what you interact with is the rule surface, the `cache` API, and the tag invalidation contract.
+
+## The Layers
+
+| Layer | Answers | Surface |
+|---|---|---|
+| Route rules | "How old may the response be?" | `cache`, `swr`, `isr`, `static`, `prerender` |
+| Model cache | "How long may this derived value live?" | `defineModel` `cache` option, `cache` API |
+| Client cache | "When should the browser re-pull?" | data-hook `staleTime` / `gcTime` |
+
+Each layer answers a different question, and they compose: a route rule can cache a page while its model cache makes repeated reads cheap and its client cache keeps data fresh for interactive users.
+
+## Route Rules
+
+Route rules are declared on server routes and apply to every page under the path:
+
+```ts
+// src/routes/rules.ts
+import { defineServerRoute } from '@kwiva/http'
+
+export default [
+  defineServerRoute('/products/**', { isr: 300, cache: { tags: ['catalog'] } }),
+  defineServerRoute('/pricing/**', { static: true }),
+  defineServerRoute('/legacy/**',  { redirect: { to: '/new/**', status: 308 } }),
+  defineServerRoute('/api/**',     { cors: true, rateLimit: { max: 600, per: 60 } }),
+  defineServerRoute('/healthz',    { handler: () => new Response('ok') }),
+]
+```
+
+The full rule surface — caching, static, prerender, redirect, proxy, headers, cors, rate limiting — maps onto the framework-owned server engine. This page covers the caching rules; the rest of the surface lives under [Routes & Routing](/docs/http/routes).
+
+## The Cache Rules
+
+| Rule | Behavior | Fits when |
+|---|---|---|
+| none (default) | Dynamic SSR on every request | Session-scoped or volatile content |
+| `cache: n` | Full response cached for `n` seconds | Public payloads on a known window |
+| `swr: n` | Serve cached (`n` seconds), then revalidate in the background | Read-heavy, mutable data that tolerates staleness |
+| `isr: n` | Static page regenerated on interval — or on demand | Public pages that change slowly |
+| `static` | Built once at `kwiva build` | Content fixed at build time |
+| `prerender: true` | Crawled and prerendered at build | Every route the crawler can reach |
+
+Rules apply **before** context assembly — a cache hit serves the response and bypasses the pipeline, including session loading. That makes cached routes fast even under load, and it means only public, non-personalized routes belong here. The framework refuses to cache responses that set `Set-Cookie`. See [Static Generation](/docs/rendering/prerendering) for `static` and `prerender` at build time.
+
+## Per-Path Configuration
+
+Rules are path-scoped, so the same application mixes strategies: a marketing site renders statically, product pages regenerate incrementally, and an account section is always dynamic.
+
+```
+/products/**   → isr: 300            (regenerate every 5 minutes)
+/pricing/**    → static: true        (built once)
+/account/**    → (no rule)           (dynamic SSR per request)
+```
+
+Glob patterns cover families of pages with a single declaration, and more specific rules win over broader ones.
+
+## Layer 1 — Route Rules (HTTP)
+
+This layer decides what the response cache stores, and for how long. On-demand invalidation reaches into it from anywhere with server authority — jobs, tasks, event handlers:
+
+```ts
+invalidateTags(['catalog'])
+```
+
+purging the cached responses tagged `catalog`. Head and meta serialize per route inside these responses, so cached pages keep correct SEO tags without re-rendering. Because the cached unit is the **full response** — shell and streamed segments together — a cached page's parts can never drift. See [Streaming SSR](/docs/rendering/streaming).
+
+## Layer 2 — Model Cache (Server Values)
+
+Below HTTP responses, the model cache stores computed values with TTL and tags. Models can declare caching directly — list and get responses cached per query signature:
+
+```ts
+defineModel('products', (f) => ({ ... }), {
+  cache: { ttl: 120, tags: ['catalog'], swr: true },
+})
+```
+
+The cache key combines the model, the query signature, and the tenant. Model writes — create, update, delete — invalidate the model's keys automatically, so reads never go stale after a write on the same model. See [Models](/docs/data/models).
+
+The explicit cache API covers keyed values no other layer owns:
+
+```ts
+import { cache } from '@kwiva/core'
+
+const summary = await cache.wrap('dashboard.summary', () => computeSummary(), { ttl: 60 })
+
+await cache.set('key', value, { ttl: 30 })
+await cache.get('key')
+await cache.invalidate('key')
+await invalidateTags(['posts'])
+```
+
+- `set` stores a value with TTL and tags
+- `get` reads a value
+- `wrap` memoizes a computation — on a miss, runs it, stores it, returns it
+- `invalidateTags` purges every tagged entry across layers
+
+Backends are mounted in `src/config/cache.ts`: memory in development, a shared store in production, a distributed key-value mount on the edge. See [Response Caching](/docs/http/caching) for the API-layer view.
+
+## Layer 3 — Client Cache (Data Hooks)
+
+On the browser, data hooks manage freshness with `staleTime` (how long a value is considered current) and `gcTime` (how long unused entries are retained):
+
+```tsx
+const { data } = useList(Post, { where: { status: 'published' }, staleTime: 30_000 })
+```
+
+Loader-dehydrated values enter this cache on hydration, and `invalidate(Model)` refreshes every key derived from the model. See [Data Hooks](/docs/frontend/data-hooks) and [Hydration](/docs/rendering/hydration).
+
+## Invalidation
+
+Invalidation is the contract that keeps layers consistent:
+
+| Trigger | Effect |
+|---|---|
+| Model write (automatic) | Purges that model's cache keys |
+| `invalidateTags([...])` | Purges tagged keys and tagged route-rule caches (calls the engine purge) |
+| `invalidate(Model)` on the client | Refreshes data-hook queries for the model |
+| Deploy | Build ID busts static assets |
+
+Same-named tags connect the layers: a model update tags its route responses and cache values, and a single invalidation reaches both the server's response store and the browser's next refetch. The two invalidation directions are separate — hooks refresh the client cache, tags purge server caches — and both are covered in [Data Hooks](/docs/frontend/data-hooks).
+
+## Personalization with Cached Shells
+
+Caching does not have to exclude logged-in users. The split pattern keeps the public shell cacheable and the private content fresh:
+
+```
+/products/** isr cached shell        → same for every visitor
+session-scoped fragments            → loaded client-side via useResource
+                                     → keyed per user, never cached
+```
+
+The shell regenerates on interval; personal fragments hydrate per session from session-scoped endpoints. Session-dependence is what always forces a route back to dynamic SSR — and the framework enforces it by refusing to cache `Set-Cookie` responses. See [Hydration](/docs/rendering/hydration).
+
+## Development Behavior
+
+- Dev default: no route caching; model cache logs each decision (`cache:miss` / `cache:hit`)
+- `kwiva dev --cache` simulates production caching locally
+- The dev overlay shows per-request cache decisions (v1.x)
+
+## Metrics
+
+Every layer reports into observability: hit and miss ratios per layer, invalidation counts, and purge latency. See [Observability: Metrics](/docs/observability/metrics).
+
+## Deciding Between Layers
+
+| Situation | Reach for |
+|---|---|
+| Entire page rarely changes | `static` or `isr` at the route |
+| Page changes frequently, reads dominate | `swr` |
+| Session-dependent regions | dynamic SSR + client-side hooks |
+| Expensive derived values | model cache with TTL and tags |
+| Client freshness | data-hook `staleTime` and model invalidation |
+
+## What's Next
+
+- [Static Generation](/docs/rendering/prerendering) — build-time output vs cache rules
+- [HTTP Caching](/docs/http/caching) — response caching at the API layer
+- [Server Routes](/docs/http/routes) — where route rules are declared
+- [Data Hooks](/docs/frontend/data-hooks) — the client cache layer
+- [SSR](/docs/rendering/ssr) — what happens when no rule matches

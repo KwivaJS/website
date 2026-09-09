@@ -1,0 +1,21 @@
+{
+  "title": "API Reference",
+  "root": true,
+  "pages": [
+    "index",
+    "core",
+    "config",
+    "data",
+    "http",
+    "router",
+    "react",
+    "client",
+    "auth",
+    "queue",
+    "events",
+    "services",
+    "cli",
+    "studio",
+    "mcp"
+  ]
+}

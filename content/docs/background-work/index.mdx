@@ -1,0 +1,118 @@
+---
+title: Background Work
+description: "Jobs, queues, scheduled tasks, and job observability — the work Kwiva runs reliably, off the request path."
+---
+
+Kwiva's background work layer covers everything an application must do that does not belong inside a single request: sending email, pushing webhooks, generating reports, importing data, syncing with third-party services, and anything that should survive a failure and retry. The framework groups these concerns under four primitives — jobs, queues and workers, scheduled tasks, and job observability — all built on the same `defineX` convention as the rest of the framework, so background code feels identical to foreground code.
+
+There is nothing special to install and no external scheduler to babysit. A job is a file in `src/app/jobs/`, a queue is a named pipeline declared in `src/config/queue.ts`, a task is a file in `src/app/tasks/` scheduled from `src/config/schedule.ts`, and observability falls out automatically. Discovery is by convention; retries, backoff, and the dead-letter queue are built in.
+
+## When to Use Background Work
+
+Move work off the request path when it is:
+
+- **Slow** — an email send, a report render, or a bulk import could add seconds to a response that should take milliseconds.
+- **Reliable-by-requirement** — a payment confirmation webhook that must eventually be delivered, even after a network failure.
+- **Batch-shaped** — work that processes hundreds or thousands of rows and must survive a crash partway through.
+- **Time-dependent** — nightly aggregation, session cleanup, digest generation, or recurring maintenance.
+- **Fan-out** — one action that must trigger several independent side effects.
+
+The framework provides three execution models for this work: **jobs** (`defineJob`) for queue-backed units of work, **scheduled tasks** (`defineTask`) for cron-driven execution, and **events** (`defineEvent`) for decoupled reactions that run through the queue by default. Each model shares the same transport underneath, which is why reliability, observability, and failure handling do not reshuffle between them.
+
+## The Four Pieces
+
+| Topic | Purpose |
+|---|---|
+| [Jobs](/docs/background-work/jobs) | `defineJob` — the unit of work, its payload schema, retries, delays, priority, and idempotency |
+| [Queues & Workers](/docs/background-work/queues) | Queue transport, concurrency control, the dead-letter queue, and running workers in production |
+| [Scheduled Tasks](/docs/background-work/scheduling) | `defineTask` plus the cron table in `src/config/schedule.ts` and the scheduler runners |
+| [Job Observability](/docs/background-work/observability) | Queue depth, failed jobs, progress, structured logs, and correlation IDs |
+
+## One Mental Model
+
+The background layer lives in exactly two app-facing directories plus two config modules:
+
+```
+src/app/jobs/           ← defineJob — one file per unit of work
+src/config/queue.ts     ← transport driver + named queues
+src/app/tasks/          ← defineTask — cron-driven unit of work
+src/config/schedule.ts  ← cron table, overlap control, timezone
+```
+
+A job declares what it does and how the queue should treat it. The queue config declares where work lives (a transport driver and which named queues exist). A task declares work that is run on a schedule rather than dispatched on demand. Nothing is registered by hand — both directories are auto-discovered, and the schedule is read from typed config.
+
+## The Primitives at a Glance
+
+| Primitive | Export | Runs when | Reliability |
+|---|---|---|---|
+| Job | `defineJob` | Dispatched on demand | Retries + backoff, DLQ, idempotency |
+| Task | `defineTask` | On a cron schedule | Timeout, retries, overlap locks |
+| Event listener | `defineEvent` | When the event emits | Queued execution, retries via queue |
+
+The boundaries are intentionally porous. A task can dispatch a job when heavy work needs queue semantics, and an event listener is itself a job under the hood. Pick the primitive that matches how the work is triggered — on demand, on a cron, or as a reaction — and let the transport own the rest.
+
+## How Background Work Fits Together
+
+- **Events run through the queue by default.** A listener on a `defineEvent` is pushed onto the queue, so side effects stay off the request path without extra wiring. Sync execution is an opt-out.
+- **Dispatch is transaction-aware.** A job dispatched inside a database transaction is held until the commit — the same mechanism as the event outbox — so you never enqueue work from a transaction that later rolls back.
+- **Tasks can dispatch jobs.** A scheduled task that detects heavy work hands off to `queue.dispatch` so the queue owns reliability and batching.
+- **Everything is typed from the model IR.** When a job payload references an entity backed by a model, the payload schema and types flow from that model's definition — no duplicate type declarations.
+- **Failures have a home.** Every exhausted job lands in the `failed_jobs` table, where `kwiva queue:failed` and `kwiva queue:retry` manage it, and the DLQ size is a first-class metric.
+
+## The Reliability Story
+
+Background work is where an application's promises are kept. The framework makes the delivery guarantees explicit and consistent across all three execution models:
+
+- **At-least-once delivery.** Jobs dispatched to the queue are delivered to a worker, and delivery is retried until the handler reports success. A worker crash mid-run does not lose the job.
+- **Retries with backoff.** A job that fails is retried according to its `attempts` and `backoff` configuration — linear or exponential — before any human involvement. Transient failures resolve themselves; persistent ones become visible.
+- **A dead-letter queue.** A job that exhausts every attempt does not disappear. It lands in the `failed_jobs` table, listed by `kwiva queue:failed` and republishable with `kwiva queue:retry`. The DLQ is both a safety net and an early-warning metric.
+- **Idempotency where it matters.** Dispatch with an `idempotencyKey` so a duplicate dispatch — a double-submitted webhook, a retried request — enqueues once, not twice. See [Jobs](/docs/background-work/jobs) for the full option surface.
+- **Transaction-aware dispatch.** Dispatch inside a database transaction is held until commit, using the same mechanism as the event outbox. Work is never enqueued from a transaction that later rolls back.
+
+None of these are features you bolt on per job type; they are the baseline of the layer. A job that retries with exponential backoff and lands in the DLQ when it has had enough is the default posture, not a configuration you are responsible for remembering.
+
+Reliability would be unmanageable without observability, and the two ship together: every job produces a trace spanning wait time and execution, a structured log entry with a correlation id, and the four queue-level metrics — depth, throughput, failure rate, and DLQ size. See [Job Observability](/docs/background-work/observability).
+
+## Development Experience
+
+Background work is developed with the same loop as the rest of the framework:
+
+- **Generate a job** with `kwiva make:job` and get a typed stub in `src/app/jobs/`.
+- **Typed payloads** — when a payload references a model-backed entity, its schema and types flow from the model IR. No duplicate type declarations to keep in sync.
+- **Run the worker in development** with `kwiva queue:work` or the verbose `kwiva queue:listen`, watching jobs as they poll and run.
+- **Test with a fake queue** — `queue.fake()` swaps the transport for an in-memory recorder and `assertPushed` verifies dispatch without running handlers. See [Testing](/docs/testing/).
+- **Manually trigger tasks** with `kwiva task:run name --payload='{"dry":true}'` to exercise scheduled work on demand.
+
+Because discovery is by convention and configuration is typed, the background layer is legible from the first job: the directories say what work exists, the config files say how it runs, and the CLI says what is happening right now.
+
+## Quick Start
+
+Scaffold a job with the CLI generator:
+
+```bash
+kwiva make:job send-welcome
+```
+
+This creates `src/app/jobs/send-welcome.ts` with a typed stub. Fill in the handler, then dispatch from anywhere in the app:
+
+```ts
+import SendWelcome from '../app/jobs/send-welcome'
+
+await SendWelcome.dispatch({ userId: user.id })
+```
+
+Start the built-in queue worker to process it:
+
+```bash
+kwiva queue:work --queue=emails,default --concurrency=5
+```
+
+The job runs, failures retry with exponential backoff, and a failed job lands in the dead-letter queue where `kwiva queue:retry` can push it back. Scheduling a recurring version of the same work is a `defineTask` plus one entry in `src/config/schedule.ts` — see [Scheduled Tasks](/docs/background-work/scheduling). Testing the whole loop with a fake queue is covered on the [Jobs](/docs/background-work/jobs) page and in [Testing](/docs/testing/).
+
+## What's Next
+
+- [Jobs](/docs/background-work/jobs) — define work, dispatch it, and control retries
+- [Queues & Workers](/docs/background-work/queues) — transport, concurrency, and production workers
+- [Scheduled Tasks](/docs/background-work/scheduling) — cron-driven execution with `defineTask`
+- [Job Observability](/docs/background-work/observability) — understand what your queues are doing
+- [Data Layer](/docs/data/) — the models your jobs read and write

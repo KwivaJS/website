@@ -1,0 +1,9 @@
+{
+  "title": "Modules & Plugins",
+  "pages": [
+    "index",
+    "defining-modules",
+    "addons",
+    "composition"
+  ]
+}

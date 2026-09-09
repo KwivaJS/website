@@ -1,0 +1,143 @@
+---
+title: Tool Generation
+description: "How models generate list, get, create, update, and delete tools; how controller actions become tools; custom tools; and how model IR shapes their schemas."
+---
+
+The MCP server's tool list is derived, not authored. Every opted-in model contributes a standard set of CRUD tools, every opted-in controller contributes one tool per action, and `defineMcpTool` adds anything the route surface cannot express. All of it inherits the schemas and descriptions already present in your model IR and route manifest.
+
+There are exactly three ways a tool comes into existence:
+
+1. **From a model** — five standard tools per opted-in model
+2. **From a controller action** — one tool per action on an opted-in controller
+3. **From `defineMcpTool`** — an explicit custom tool declaration
+
+Everything an agent can call is one of these three. That trivially answers the questions operations people actually ask — what can an agent do, and where did that tool come from? — because every tool points back at a model, a controller, or a deliberate declaration in code.
+
+## From Model to Tools
+
+Each model listed in the `models` config generates five tools. For an `invoices` model the surface is:
+
+| Tool | Maps to | Tool input |
+|---|---|---|
+| `invoices_list` | The list route | `where`, `page`, `orderBy` parameters |
+| `invoices_get` | The get route | Record identifier |
+| `invoices_create` | The create route | The validated body schema as the tool input schema |
+| `invoices_update` | The update route | Identifier plus the validated update body |
+| `invoices_delete` | The delete route | Record identifier |
+
+The names are deterministic — `{model}_{action}` — which makes the tool list predictable for agents and for the tooling that documents it. The deterministic five-route shape your models already have in the REST API is exactly what the agent sees, so there is no separate convention to learn on the MCP side.
+
+The full surface is generated only when both conditions hold: the model is in the `models` allowlist, and `readOnly` is `false`. With `readOnly: true`, only the read tools are generated:
+
+| Tool | Maps to |
+|---|---|
+| `invoices_list` | The list route |
+| `invoices_get` | The get route |
+
+Every other tool is withheld, even though the underlying routes exist. `readOnly` is a surface-level throttle on your entire agent exposure, independent of per-tool abilities — a model can be read-only for every token without touching a single policy.
+
+## The List Tool's Shape
+
+`invoices_list` is the richest tool of the family because it inherits the query surface of the list route. The agent can filter, page, and order the same way an HTTP client can:
+
+```ts
+// invoices_list — the tool input the agent sees
+{
+  where: {
+    status: { equals: 'overdue' },
+    total: { greaterThan: 1000 },
+  },
+  page: 1,
+  orderBy: { dueDate: 'desc' },
+}
+```
+
+The `where` shape is the same filter grammar the list route accepts, so agents can ask precise questions — "list overdue invoices above 1000" — instead of fetching and filtering client-side. Because the grammar is the route's grammar, the answer is the route's answer: same scoping, same pagination, same field rules.
+
+## Controller Actions as Tools
+
+Custom controller actions become tools with their exact input and output types. If a controller exposes a summary action, the agent gets a `reports_summary` tool that accepts the action's typed inputs and returns its typed output:
+
+```ts
+// src/app/http/controllers/reports.ts
+export default defineController('reports', (c) => ({
+  summary: c.get('/summary', async ({ query }) => {
+    return { totals: await Invoice.summarize(query.period) }
+  }, {
+    query: { period: 'string' },
+    permission: 'reports.summary',
+  }),
+}))
+```
+
+The `controllers` option in the MCP config opts this controller in:
+
+```ts
+defaults: {
+  models: ['invoices', 'customers'],
+  controllers: ['reports'],   // → reports_summary tool
+}
+```
+
+Because the tool reuses the controller's own types, an agent can discover the summary's input shape and expected return without any additional documentation. The tool name is `{controller}_{action}` — `reports` plus `summary` — mirroring the model convention, so the agent's registry reads uniformly.
+
+Controller action tools are how a generated surface stays small while still expressing real business operations. A model tool mutates rows; an action tool runs the business logic you wrote — recomputing a total, triggering a workflow, calling a provider — with the action's permission and the caller's session intact.
+
+## Custom Tools
+
+For behavior that does not map to a route — composing data, calling out to a provider, generating content — define a tool directly:
+
+```ts
+// src/app/mcp/tools.ts
+import { defineMcpTool } from '@kwiva/mcp'
+
+export const draftInvoiceEmail = defineMcpTool('draft_invoice_email', {
+  description: 'Draft a collection email for an overdue invoice',
+  input: { invoiceId: 'uuid' },
+  handler: async ({ invoiceId, session }) => {
+    const invoice = await Invoice.findOrFail(invoiceId)
+    return draftEmail(invoice)             // agent gets structured data, composes the text
+  },
+  ability: 'invoices.read',
+})
+```
+
+Custom tools follow the same `defineX` conventions as everything else — one tool per file, discovered by location, typed inputs, and an explicit ability. The `ability` optionally narrows which policies must approve the call, and the handler receives the authenticated session so it can act as the calling identity.
+
+Custom tools are where the "agent reads, human writes" division of labor is expressed in code. The tool returns structured data the agent composes; the mutating act stays a controller action or a model tool, which carries the same audit and policy weight as an API call. Design custom tools to hand agents data, not delegation.
+
+## Schemas and Descriptions from the Model IR
+
+Every generated tool's input schema comes from the route schemas, converted from the framework's standard validation schema into the JSON Schema form MCP expects. There is no second schema written for the agent:
+
+- For generated model tools, the create and update inputs are the model's field-level validation — defaults, optionality, and constraints — with no duplication.
+- For controller-action tools, the body, query, and params schemas defined on the route become the tool's input schema.
+- Field descriptions declared on the model DSL flow through the IR into structured tool responses, so an agent gets meaningful descriptions rather than bare field names.
+
+The same derivation pipeline that feeds the REST API, typed client, Studio, and OpenAPI feeds the tools. When a validation chain changes on a model, the tool input schema changes with it in the same build. An agent that sends a malformed body learns precisely which field failed and why — the same field-mapped validation errors your API would return.
+
+## Permissions on Tools
+
+Tools stay inside the framework's authorization model. Model tools inherit the collection-level `permission` option declared on the model, so the same policy namespace that gates the generated routes gates the agent's calls. Controller-action tools carry their route's `permission`. Custom tools declare an `ability` explicitly, which routes the call through the corresponding policy check. A token with abilities that do not cover a tool simply cannot invoke it.
+
+This is the third and deepest layer of the defense in depth described on [MCP Server](/docs/ai-mcp/mcp-server): the allowlist decides whether a tool exists, `readOnly` decides whether it can mutate, and abilities decide whether a given identity can call it at all.
+
+## Generated Tool Checklist
+
+A quick way to reason about the surface your config produces:
+
+| Source | Tool registration | Schema source | Permission source |
+|---|---|---|---|
+| Model in `models` | `{model}_{action}` × 5 | Model / route schemas | Model `permission` |
+| Controller in `controllers` | `{controller}_{action}` × actions | Route body/query/params | Route `permission` |
+| `defineMcpTool` export | Declared name | Declared `input` | Declared `ability` |
+| `readOnly: true` | Only `{model}_list` and `{model}_get` | — | Model `permission` |
+
+If a tool appears in the agent's discovery that you did not expect, one of these four rows explains it — and each row is a one-line config or code change upstream.
+
+## What's Next
+
+- [MCP Server](/docs/ai-mcp/mcp-server) — Enable the server and choose transports and auth
+- [Agent Integration](/docs/ai-mcp/agent-integration) — How policies, tenants, and errors shape what an agent experiences
+- [Model IR](/docs/advanced/model-ir) — The single IR every tool is derived from
+- [Models](/docs/data/models) — The definitions that produce the CRUD tool surface

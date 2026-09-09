@@ -1,0 +1,149 @@
+---
+title: API
+description: "Complete API layer — REST, generated endpoints, typed RPC, client SDK, OpenAPI, authentication, and errors."
+---
+
+Kwiva's API layer turns one set of declarations into a complete, always-in-sync HTTP surface. From your `defineModel` and `defineController` files in `src/app/`, the framework derives a deterministic REST API, a fully typed RPC client, an OpenAPI 3.1 specification, Studio screens, and MCP tools — all through the same route manifest. The conventional REST surface, the generated model routes, and your own controller actions are not three separate systems. They are one system: deterministic model routes, custom controller actions, and a client that never drifts.
+
+Everything in this section is derived. You never write route files twice, hand-maintain a spec, or regenerate a client SDK. The declarations are the contract, and every exported surface is a projection of the same route manifest.
+
+## One Model, One Manifest
+
+```
+src/app/models/posts.ts       defineModel('posts', ...)
+src/app/http/controllers/     defineController('posts', ...)
+                 │
+                 ▼
+           route manifest (IR)
+                 │
+   ┌──────┬──────┼─────┬──────┬──────┐
+   ▼      ▼      ▼     ▼      ▼      ▼
+ REST   RPC   OpenAPI  Studio  MCP  validation
+```
+
+The route manifest records path, method, schemas, response type, permission, and tags for every route — generated model routes and authored controller routes alike. `@kwiva/http` renders OpenAPI from it, `@kwiva/client` derives method types from it, and `@kwiva/mcp` exposes tools from it. Because every consumer reads the same intermediate representation, there is no second source of truth to keep in sync and no drift to fix.
+
+## What the API Layer Includes
+
+| Page | Covers |
+|---|---|
+| [REST Conventions](/docs/api/rest) | URL patterns, method mapping, status codes, pagination, naming, error envelope |
+| [Generated Endpoints](/docs/api/generated-endpoints) | The deterministic 5 routes per model, custom actions, permission gating |
+| [Typed RPC](/docs/api/rpc) | End-to-end types from controllers and models, zero runtime codegen |
+| [Client SDK](/docs/api/client) | `@kwiva/client`, SSR-safe usage, `createTestClient` for in-process tests |
+| [OpenAPI](/docs/api/openapi) | The auto-generated spec, `/openapi.json`, build artifact |
+| [API Authentication](/docs/api/authentication) | Session cookies, token sessions, middleware, per-route protection |
+| [API Errors](/docs/api/errors) | The error taxonomy, envelope shape, client-side typed handling |
+
+The pages above read in two directions: conventions first for authors who shape the API, then the client and spec for consumers of it. Both directions meet in the manifest.
+
+## Quick Start
+
+Define a model once — the framework generates the five standard routes:
+
+```ts
+// src/app/models/posts.ts
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().validation((s) => s.min(1).max(200)),
+  status: f.enum('draft', 'published').default('draft'),
+}), { timestamps: true, permission: 'posts' })
+```
+
+Add custom behavior with a controller:
+
+```ts
+// src/app/http/controllers/posts.ts
+import { defineController } from '@kwiva/http'
+
+export default defineController('posts', (c) => ({
+  publish: c.post('/:id/publish', async ({ params }) => {
+    const post = await Post.findOrFail(params.id)
+    return post.update({ status: 'published', publishedAt: new Date() })
+  }, { permission: 'posts.publish' }),
+}), { prefix: '/posts', tags: ['posts'] })
+```
+
+Call the API with the typed client — every method, argument, and response type is inferred from the same definitions, with no codegen step:
+
+```ts
+import { createClient } from '@kwiva/client'
+
+export const client = createClient({ baseUrl: 'https://api.acme.dev' })
+
+const { data } = await client.posts.list({ page: 1 })
+const post = await client.posts.get('pst_123')
+await client.posts.publish('pst_123')
+```
+
+## The Endpoints
+
+- `/openapi.json` serves the generated OpenAPI 3.1 spec, with optional interactive docs at `/docs`.
+- `/mcp` exposes model and controller routes as agent-callable tools when MCP is enabled.
+- `/healthz` and `/readyz` provide liveness and readiness probes.
+
+All rendered from the same manifest, all consistent with the routes you declared. See [OpenAPI](/docs/api/openapi) and the [MCP server](/docs/ai-mcp/mcp-server) pages.
+
+## API and the HTTP Layer
+
+The API surface is the outward face of the HTTP layer. Controllers, middleware, guards, validation, and error mapping are declared in `@kwiva/http`; the API section documents the contract that surface produces — URLs, status codes, envelopes, and the typed client that consumes them. If you are writing routes, start with [Controllers](/docs/http/controllers); if you are designing the contract, start here.
+
+## Generated vs Authored
+
+Two things produce routes. Knowing which handles a given path tells you where to change it:
+
+| Path | Produced by | Change by editing |
+|---|---|---|
+| `/api/posts`, `/api/posts/:id` | `defineModel` | the model file |
+| `/api/posts/:id/publish` | `defineController` | the controller |
+| `/api/v1/...` | versioning config | `src/config/api.ts` |
+| `/openapi.json`, `/docs` | manifest renderer | nothing — automatic |
+| `/healthz`, `/readyz` | server routes | `src/routes/*.ts` |
+
+The line is stable: model files own CRUD, controller files own custom behavior, server routes own infrastructure. Change one and the projections follow; there is no cross-editing between them.
+
+## Conventions at a Glance
+
+- Collections are lowercase plural; custom segments are kebab-case; no verbs in paths.
+- Five deterministic routes per model, plus custom actions.
+- `PATCH` is partial, `DELETE` returns 204, lists use the paginated envelope.
+- All failures share one taxonomy and one envelope.
+- The typed client is the reference consumer; OpenAPI is the reference document.
+
+These are not preferences; they are the contract tooling depends on.
+
+## The API Lifecycle, End to End
+
+A call to `client.posts.list({ page: 1 })` travels the same pipeline as a raw `curl`: parse, validation, guards, handler, serialization. On the server the client skips the network hop but not the pipeline — policies and validation still run, which keeps in-process calls honest. See [Request Lifecycle](/docs/http/lifecycle) and [Generated Endpoints](/docs/api/generated-endpoints).
+
+## REST, Generated, and Custom Actions
+
+Routes fall into three authored shapes that stay consistent:
+
+- Model-generated CRUD — five routes per model, permissions from the model option
+- Custom actions — one route per action, declared in the controller
+- REST-only — plain paths, full control
+
+The three share validation, guards, the envelope, the client, and the spec. See [Generated Endpoints](/docs/api/generated-endpoints) and [REST Conventions](/docs/api/rest).
+
+## Auth and Permissions in One Sentence
+
+Authentication answers who is calling; authorization answers what they may do. The `auth` middleware asserts a session, guards assert specifics, and route `permission` keys assert ability. See [API Authentication](/docs/api/authentication) and [Authorization](/docs/authorization).
+
+## The Versioned Contract
+
+The API ships under a versioning policy you configure once. Public behavior that callers depend on — method names, request shapes, response envelopes, error codes — changes only across a version bump, never silently within one. See [REST conventions: versioning](/docs/api/rest).
+
+## What the Framework Enforces
+
+The manifest is the single source of truth for routes, schemas, permissions, and tags. Because every projection — client, OpenAPI, MCP, Studio, the dev overlay — derives from it, the framework enforces consistency at the architecture level: a route that contradicts the manifest, a client method that drifts from a route, or a policy that lacks a route cannot exist quietly. The section pages that follow are the detailed statements of that contract.
+
+## What's Next
+
+- [REST Conventions](/docs/api/rest) — the URL, status code, and envelope contract
+- [Typed RPC](/docs/api/rpc) — how types flow end-to-end without codegen
+- [Controllers](/docs/http/controllers) — the `defineController` surface
+- [Models](/docs/data/models) — the `defineModel` source of truth
+- [Your First API](/docs/getting-started/first-api) — build an API from scratch

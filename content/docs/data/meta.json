@@ -1,0 +1,19 @@
+{
+  "title": "Data",
+  "pages": [
+    "index",
+    "models",
+    "fields",
+    "relations",
+    "validation",
+    "queries",
+    "pagination",
+    "transactions",
+    "migrations",
+    "seeders",
+    "factories",
+    "soft-deletes",
+    "database-config",
+    "storage"
+  ]
+}

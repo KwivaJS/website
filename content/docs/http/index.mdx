@@ -1,0 +1,147 @@
+---
+title: HTTP
+description: "The complete HTTP layer — controllers, routes, middleware, guards, validation, errors, uploads, streaming, WebSockets, CORS, and response caching."
+---
+
+The HTTP layer is Kwiva's framework-owned request pipeline. Everything that happens between an incoming request and the response that leaves the server — routing, body parsing, validation, authorization, error mapping, caching, streaming, and WebSocket upgrades — is owned and executed by `@kwiva/http`. You describe the surface of your API with a small set of factories, and the framework compiles it into a typed route tree with an end-to-end typed client.
+
+Because the pipeline is framework-owned rather than vendored from an external server library, its evolution is not coupled to any upstream release. The internal layout of `@kwiva/http` mirrors a proven Web-Standard design: a flat core (`context`, `compose`, `cookies`, `error`, `manifest`, `parse-query`, `formats`, `trace`) plus runtime adapters for `bun`, `web-standard`, and `cloudflare-worker`. That structure keeps the HTTP surface portable across every deployment target while preserving one authoring grammar for app code.
+
+## What the HTTP Layer Includes
+
+The layer is organized around four app-facing factories:
+
+| Factory | Purpose | Location |
+|---|---|---|
+| `defineController` | Resource endpoints and custom actions | `src/app/http/controllers/*.ts` |
+| `defineMiddleware` | Reusable pipeline stages | `src/app/http/middleware/*.ts` |
+| `defineServerRoute` | Infrastructure routes and route rules | `src/routes/*.ts` |
+| `defineTask` | Background tasks | `src/app/tasks/*.ts` |
+
+Controllers declare routes with the full method surface, per-route option schemas, and custom actions. Middleware attaches at precise lifecycle events. Server routes apply engine-grade rules such as redirects, proxies, and caching. Tasks expose the same request pipeline to scheduled and manually invoked work.
+
+All four factories are discovered by convention. A controller named `posts.ts` in `src/app/http/controllers/` becomes the `posts` namespace, and a middleware named `request-id.ts` becomes the `request-id` stage — no registration list, no wiring step.
+
+## One Grammar
+
+Like every app-facing construct in Kwiva, controllers follow the `defineX` convention. A controller is a plain factory — no decorators, no classes:
+
+```ts
+// src/app/http/controllers/posts.ts
+import { defineController } from '@kwiva/http'
+
+export default defineController('posts', (c) => ({
+  list: c.get('/', async ({ query }) =>
+    Post.query()
+      .where('status', 'published')
+      .page(query.page ?? 1, 20)
+  ),
+
+  create: c.post('/', async ({ body, session }) =>
+    Post.create({ ...body, authorId: session.user.id })
+  , {
+    body: { title: 'string', body: 'string?' },
+    permission: 'posts.create',
+  }),
+}), {
+  prefix: '/posts',
+  tags: ['posts'],
+})
+```
+
+The builder `c` exposes `get`, `post`, `put`, `patch`, and `delete` for resources, plus `guard`, `macro`, and `ws` for composition, authorization, and realtime. Every route handler receives a typed context: `body`, `params`, `query`, `headers`, `cookies`, `session`, `tenant`, `store`, `set`, and `error` — all inferred from the route's own schemas.
+
+> [!NOTE]
+> Routes are declared declaratively. Handlers run only after parsing, session loading, validation, and authorization have all completed, and every return value is serialized into a response by the pipeline.
+
+## The Request Pipeline
+
+Every request flows through one ordered, 14-step pipeline. The same pipeline serves API routes, rendered pages, WebSocket upgrades, and infrastructure routes:
+
+```
+client request
+  → adapter normalization
+  → pipeline entry (request ID, trace span, onRequest middleware)
+  → route manifest match
+  → route rules (cache hit → serve + bypass pipeline)
+  → context assembly (parse, cookies, session, tenant, app context)
+  → onTransform
+  → validation
+  → onBeforeHandle (guards)
+  → handler (controller action or SSR render)
+  → onAfterHandle (response shaping, cache tags)
+  → onError (any throw → taxonomy mapping)
+  → onResponse (final headers, span close)
+  → engine writes response
+```
+
+Four ordering guarantees hold across every request:
+
+- Middleware runs in the `src/config/app.ts` stack order, before guards.
+- Guard `beforeHandle` runs after validation, so policies see validated input.
+- Route rules short-circuit before session loading — public cached pages skip auth entirely.
+- Error mapping is the only code that can run after `onResponse`, and it only records span error attributes.
+
+The pipeline is budgeted to stay cheap at every stage. Example p50 targets for a typical list endpoint: adapter to pipeline entry under 1 ms, session and tenant resolve under 2 ms, validation under 0.5 ms, handler under 5 ms, and a full local API round-trip under 15 ms. Each stage is a trace span, so the waterfall is observable end to end. See [Request Lifecycle](/docs/http/lifecycle) for the complete stage-by-stage reference.
+
+## Typed End to End
+
+Every authored and generated route contributes to the **route manifest** — a typed intermediate representation containing path, method, schemas, response type, permission, and tags. The same manifest drives three outputs:
+
+- `@kwiva/client` — end-to-end typed RPC methods, inferred at the type level with no codegen step
+- OpenAPI 3.1 — served at `/openapi.json`, with an optional Swagger UI at `/docs`
+- `@kwiva/mcp` — model and controller actions exposed as tools
+
+Because the manifest is a single source of truth, the API contract never drifts from the typed client. The route manifest also feeds Studio screens, so one declaration governs the API, the admin UI, and the agent surface simultaneously.
+
+## Errors and Security
+
+Errors map to a single eight-code taxonomy rendered two ways: JSON for API routes, HTML for pages. `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `VALIDATION`, and `TOO_MANY_REQUESTS` cover the common cases; `INTERNAL_ERROR` catches everything unhandled; `OK` is the success resolution. Every error carries a `requestId` that equals the `x-request-id` header, and the typed client surfaces the taxonomy as a discriminated union. See [Error Handling](/docs/http/errors).
+
+Security is wired into the same pipeline. Validation is schema-driven at every input boundary, the `security-headers` middleware applies `x-content-type-options`, `x-frame-options`, `referrer-policy`, HSTS, and a nonce-based CSP by default, and CORS presets are enforced by built-in middleware. See [CORS & Security Headers](/docs/http/cors) and [Security: input validation](/docs/security/input-validation).
+
+## Quick Start
+
+A controller and its typed client, end to end:
+
+```ts
+import { defineController } from '@kwiva/http'
+
+export default defineController('posts', (c) => ({
+  list: c.get('/', async ({ query }) =>
+    Post.query().page(query.page ?? 1, 20)
+  ),
+
+  publish: c.post('/:id/publish', async ({ params }) => {
+    const post = await Post.findOrFail(params.id)
+    return post.update({ status: 'published', publishedAt: new Date() })
+  }, { permission: 'posts.publish' }),
+}), { prefix: '/posts', tags: ['posts'] })
+```
+
+```ts
+import { createClient } from '@kwiva/client'
+
+export const client = createClient({ baseUrl: 'https://api.acme.dev' })
+
+const { data } = await client.posts.list({ page: 1 })
+await client.posts.publish('pst_123')
+```
+
+The generated model endpoints — five deterministic routes per model — and your custom controller actions appear in the same client with the same type guarantees. On the server the client executes in-process with no network round-trip; in the browser it becomes fetch requests authenticated by session cookies.
+
+## Where the HTTP Layer Fits
+
+- **API surface** — REST conventions, generated endpoints, and the RPC contract live in the [API](/docs/api) section.
+- **Security** — schema-driven validation and default protections are documented under [Security](/docs/security/input-validation).
+- **Observability** — every pipeline stage is a trace span and every error carries a `requestId`; see [Observability](/docs/observability).
+- **Realtime** — channels and client subscriptions build directly on the WebSocket routes defined here; see [Realtime](/docs/realtime).
+
+## What's Next
+
+1. [Controllers](/docs/http/controllers) — `defineController` and typed handlers
+2. [Routes & Routing](/docs/http/routes) — paths, params, generated routes, and the manifest
+3. [Middleware](/docs/http/middleware) — the global stack and lifecycle scoping
+4. [Request Lifecycle](/docs/http/lifecycle) — the full pipeline, stage by stage
+5. [Validation](/docs/http/validation) — schema-driven input validation
+6. [Error Handling](/docs/http/errors) — the eight-code taxonomy and typed errors

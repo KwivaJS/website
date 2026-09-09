@@ -1,0 +1,99 @@
+---
+title: How do I deploy?
+description: "Build once and deploy to a Node or Bun server, a serverless platform, containers, or a single binary with deploy-anywhere presets."
+---
+
+Kwiva builds to deploy-anywhere presets, so one codebase targets a Node.js or Bun server, serverless platforms, containers, or a single binary. Deployment is build-time only — no application code changes.
+
+## Prerequisites
+
+- A Kwiva project with a [mode](/docs/deployment/adapters) chosen at scaffold time
+- [Bun](/docs/getting-started) 1.2+ and Node.js 18+ available
+- Production environment variables set (`.env.production`)
+
+## Choose a mode and a target
+
+| Mode | What it produces |
+|---|---|
+| `fullstack` (default) | SSR pages + API, built for `node_server` |
+| `api+spa` | API server + static SPA, no SSR renderer |
+| `static` | Prerendered HTML — no server needed |
+| `standalone` | Single-file, zero-dependency binary |
+| `edge` | Optimized for edge runtimes |
+
+Then pick a runtime preset: `node_server`, `bun_server`, `vercel`, `netlify`, `cloudflare`, `aws-lambda`, or `standalone`.
+
+## Build for your target
+
+```bash
+kwiva build --preset node_server
+```
+
+`kwiva build` compiles the client with the Rust-speed toolchain and builds the server for the preset, emitting `.output/` with `server/` and `public/`. The preset comes from the `--preset` flag, `deploy.preset` in `kwiva.config.ts`, or CI auto-detection — on Vercel, Cloudflare, and Netlify no flag is needed.
+
+## Run a Node or Bun server
+
+Build and start the output for the runtime you chose:
+
+```bash
+kwiva build
+node .output/server/index.mjs
+```
+
+```bash
+kwiva build --preset bun_server
+bun .output/server/index.mjs
+```
+
+## Deploy to serverless
+
+| Platform | Preset |
+|---|---|
+| Vercel | `vercel` |
+| Netlify | `netlify` |
+| Cloudflare Workers | `cloudflare` |
+| AWS Lambda | `aws-lambda` |
+
+```bash
+kwiva build --preset vercel
+kwiva deploy vercel
+```
+
+`kwiva deploy` runs the provider's own deploy path, so nothing about your application code changes between targets.
+
+## Run in containers or ship a binary
+
+Container deployments use the `node_server` or `bun_server` preset. Build an image with a Bun runtime:
+
+```dockerfile
+FROM oven/bun:1 AS build
+WORKDIR /app
+COPY . .
+RUN bun install && kwiva build --preset bun_server
+
+FROM oven/bun:1
+COPY --from=build /app/.output /app/.output
+CMD ["bun", "/app/.output/server/index.mjs"]
+```
+
+Run it with Docker or orchestrate it with Kubernetes; it honors the `PORT` environment variable used by Railway, Render, and DigitalOcean. For a single-file artifact, compile the output into one executable:
+
+```bash
+kwiva build --binary
+./server
+```
+
+## Verify it works
+
+1. Preview the built output locally: `kwiva preview`.
+2. Run `kwiva build --preset node_server`, start the output, and fetch http://localhost:3000/healthz.
+3. Confirm the checklist first: all env vars set, `kwiva check` and `kwiva test` pass, `kwiva db:migrate` applied, queue workers running, Redis configured, an OTel exporter set, and secrets rotated.
+4. Build with the target preset, run `kwiva deploy <provider>`, and repeat the health check against the live URL.
+
+## Related Documentation
+
+- [Runtime Adapters](/docs/deployment/adapters) — Presets and mode presets
+- [Node/Bun Deployment](/docs/deployment/node-bun) — Server and single-binary targets
+- [Serverless Deployment](/docs/deployment/serverless) — Vercel, Netlify, Cloudflare, AWS
+- [Container Deployment](/docs/deployment/containers) — Docker and Kubernetes
+- [Production Checklist](/docs/deployment/production-checklist) — Pre-deploy checks

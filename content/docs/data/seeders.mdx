@@ -1,0 +1,130 @@
+---
+title: Seeders
+description: "Ordered, idempotent seed data — defineSeeder, factory-based seeding, CLI selectors, and fresh databases."
+---
+
+Seeders populate your database with initial or fixture data. They are the bridge between an empty schema and a usable environment: local development, preview deployments, and CI all start from the same seeding contract. Seeders are **ordered by filename**, **idempotent by contract** (safe to re-run), and **factory-powered**, so they share the model-aware data generation used by tests.
+
+## Defining a Seeder
+
+```ts
+// src/database/seeders/01-users.ts
+import { defineSeeder } from '@kwiva/data'
+
+export default defineSeeder('users', async ({ factory, db }) => {
+  await factory(User).count(10).create()
+  await factory(User).create({ email: 'admin@acme.dev', role: 'admin' })
+})
+```
+
+| Shape | Detail |
+|---|---|
+| Name | First argument, used by `--seeder` and status output |
+| Context | `{ factory, db }` — factories and the active database |
+| Body | Plain async code; run each seeder in filename order |
+
+## Running Seeders
+
+```bash
+kwiva db:seed                # run all seeders in order
+kwiva db:seed --seeder=users # run only the named seeder
+kwiva db:seed --fresh        # drop + migrate + seed
+kwiva db:reset               # drop + migrate + seed (equivalent fresh path)
+```
+
+| Flag | Effect |
+|---|---|
+| `--seeder=users` | Run a single seeder, named by its first argument |
+| `--fresh` | Drop all tables, re-migrate, then seed |
+| `db:reset` | The full reset command — sees seeders as the final step |
+
+> [!WARNING]
+> `db:reset` and `--fresh` are destructive: they drop every table. They belong in development, preview, and test environments — never against production data.
+
+## Ordering by Filename
+
+Seeders run in **lexicographic filename order**, so `01-users.ts` runs before `02-posts.ts`. Prefix numerically when a seeder depends on records created by an earlier one:
+
+```
+src/database/seeders/
+  01-users.ts        # tenants, users, roles
+  02-posts.ts        # authored content
+  03-tags.ts         # many-to-many links after both sides exist
+```
+
+The name argument and the filename work together: the filename sets the order, the name is the handle you pass to `--seeder`.
+
+## The Idempotency Contract
+
+Seeders are **safe to re-run**. The contract is anchored in upsert-based defaults: records with a stable identity (a unique email, slug, or code) are created when absent and updated when present, rather than appended on every run. This makes `db:seed` deterministic across runs — the tenth run leaves the same database as the first.
+
+Concretely, prefer stable identifiers when seeding:
+
+```ts
+export default defineSeeder('users', async ({ factory }) => {
+  await factory(User).create({ email: 'admin@acme.dev', role: 'admin' })
+  await factory(User).create({ email: 'editor@acme.dev', role: 'editor' })
+})
+```
+
+Re-running inserts these once, not twice. For ephemeral volume use factories with random data (see [Factories](/docs/data/factories)) — they are intended to vary per run.
+
+## Seeding Relations
+
+Because factories understand relations, seeders compose naturally:
+
+```ts
+export default defineSeeder('posts', async ({ factory }) => {
+  const admin = await User.first({ where: { email: 'admin@acme.dev' } })
+  await factory(Post).count(5).create({ author: admin })
+})
+```
+
+Relation arguments on a factory create resolve to real related rows, and many-to-many links are seeded the same way — create both sides, then attach. Prefer resolving related records by stable lookup (email, slug, code) over positional assumptions; filename ordering guarantees the lookup target exists.
+
+## Lookups Over Creation
+
+The idempotency contract rewards **lookups** over blind creation. When a seeder needs a record that may already exist from an earlier run or an upstream seeder, resolve it first:
+
+```ts
+export default defineSeeder('settings', async ({ db }) => {
+  const tenant = await Tenant.first({ where: { slug: 'acme' } })
+  const settings = await Settings.first({ where: { tenantId: tenant.id } })
+
+  if (settings) await settings.update({ plan: 'pro' })
+  // otherwise create; either way the end state is identical to a fresh run
+})
+```
+
+This is the shape that makes `db:seed` deterministic across runs and across environments — the end state is a function of the seed list, not of how many times it has run.
+
+## Environment-Aware Seeding
+
+Seeder code is just code, so it can read configuration and branch on environment when that is genuinely useful:
+
+| Pattern | Use case |
+|---|---|
+| Small canonical records in every environment | `db:seed` on fresh databases so apps boot with tenants, roles, admin accounts |
+| Larger fake volume in development | Factories with random data make preview UIs feel populated |
+| Production-first gating | Never seed throwaway volume into production data; seed only canonical records, if anything |
+
+Keep this split explicit in the seeder body and reserve heavy fake data for development and preview runs. After a fresh clone, `kwiva db:reset` is the one local command that puts a working, seeded database in front of you.
+
+> [!TIP]
+> Do not put credentials or secrets in seeders — `admin@acme.dev` style records with obviously fake, per-environment passwords belong in local dotenv, not in seed code that may be shared.
+
+## When Seeding Happens
+
+| Context | How |
+|---|---|
+| Fresh local dev | `kwiva db:reset` after `create-project` |
+| Preview deploys | `kwiva db:seed --fresh` in the deploy pipeline |
+| CI | Explicit `db:seed` against the disposable test database |
+| Tests — **not recommended** | Tests build their own fixtures via factories; seeders are coarse-grained by design |
+
+## What's Next
+
+1. [Factories](/docs/data/factories) — the generation engine inside every seeder
+2. [Migrations](/docs/data/migrations) — what runs before seeders
+3. [Testing](/docs/testing) — why tests use factories rather than seeders
+4. [CLI: Database Commands](/docs/cli/database-commands) — seed flags and output

@@ -1,0 +1,105 @@
+---
+title: Default Protections
+description: "CSP, CSRF, typed validation, cookie hardening, rate limits, and tenant isolation — what a fresh Kwiva app blocks out of the box."
+---
+
+A fresh Kwiva application is not blank-hardened but default-hardened. The following protections are active before you write application code, and each one blocks a specific, named class of attack. The practical effect: the framework boundary rejects what naive application code would have passed through.
+
+## Input Validation at Every Boundary
+
+Every executor in Kwiva validates its input through a typed schema — controllers, models, jobs, events, and channels all reject malformed or oversized input before any side effect runs. Validation is enforced at the boundary, so a value that was accepted into a controller is already trusted inside the executor.
+
+The implication for security is structural: there is no "unvalidated input reaches code" path in the framework's model. A crafted payload that targets a hole in your validation logic fails in the schema layer, before it reaches a query, a job, or a channel handler. See [Input Validation](/docs/security/input-validation) for how this works in each executor type.
+
+## CSRF Protection
+
+State-changing requests — anything that is not a verb-safe read — are protected by a double-submit token:
+
+- The CSRF cookie is set on the response that establishes the session
+- The token is submitted alongside the request, typically as a form field
+- The server rejects requests where the submitted token does not match the cookie value
+
+The design requires no per-session server state and no database lookups on mutation, which keeps performance flat while the protection stays active. Because the token rides in a cookie that is not allowed to be read by other origins, a cross-site request forged to your endpoint arrives without the token and is rejected.
+
+> [!NOTE]
+> CSRF applies to anything that mutates state — including route targets that are unusual but still write to storage. When in doubt, keep the ceremony on the request rather than expecting the server to infer intent.
+
+## Cookie Hardening
+
+Cookie settings default to the secure end of the spectrum:
+
+| Cookie | Setting | Why |
+|---|---|---|
+| Session | `HttpOnly`, `SameSite=lax`, `Secure` in production | JavaScript cannot read it; the browser restricts cross-site sending; transport is encrypted in production |
+| CSRF | Same, plus restricted further | The token is only ever sent alongside legitimate same-site requests |
+
+Even with an XSS-bisecting Content Security Policy active, the HttpOnly cookie means a script running in the same origin cannot read the session cookie, and SameSite blocks the browser from attaching the session on cross-site requests.
+
+## Content Security Policy
+
+A CSP is shipped by default, and it switches behavior by environment:
+
+- **Development** — report-only mode. Policy violations are reported (to the dev overlay while developing) but not enforced, so the loop stays fast while you build.
+- **Production** — strict enforcement with a nonce-based policy. Every response carries a one-time nonce, script and style sources require it, and `unsafe-inline` is not granted where it can be avoided.
+
+The nonce binds executed content to the response that delivered it, which is the defense that keeps a stored or reflected injection from being treated as trusted markup. The header set and per-route control live on [Headers](/docs/security/headers).
+
+## Authentication Hardening
+
+Sign-in and session endpoints get two protections by default:
+
+- **Rate limiting is strict.** Authentication routes have an aggressive default limit, tuned to slow credential stuffing while leaving legitimate users unaffected. The limit is adjustable, and the rate-limit event composes with notifications.
+- **Identical responses.** Attempting to sign in as an unknown user and attempting to sign in with a wrong password produce the same 401 response. There is no difference in status, timing, or body shape that an enumerator can use to learn which accounts exist.
+
+Password hashing uses Argon2id, the memory-hard algorithm selected by the auth layer, and session tokens are handled constant-time. These defaults mean credential-based attacks are slowed, non-enumerable, and safe against the common timing and enumeration probes.
+
+## Rate Limiting Beyond Auth
+
+Rate limiting is not an auth-only feature. Protection defaults by endpoint type:
+
+| Surface | Default posture |
+|---|---|
+| Authentication routes | Strict — slow credential stuffing and brute force |
+| Other API mutations | API default rate limit, tuned for legitimate application traffic |
+| Per-route tuning | Every route can raise or lower its limit |
+
+A route that floods, an endpoint that burns compute, or a webhook that retries in a tight loop all hit a limit before consuming the app's capacity. When a limit fires, the event is visible in logs as a recoverable anomaly and surfaces in the dev overlay during development.
+
+## Tenant Isolation and 404-Masking
+
+The tenant layer enforces scoping at the query level and masks failures at the response level:
+
+- Queries are scoped to the arranged tenant, so a lookup for a resource in another tenant returns nothing
+- Resource-lookup failures surface as **404**, not authorization errors
+
+Returning 404 rather than 403 for a missing or foreign resource is deliberate: an attacker probing IDs gets the same response for an ID that exists but belongs to someone else and for an ID that never existed. The endpoint cannot be used to enumerate tenant data. See [Tenancy Isolation](/docs/tenancy/isolation) for the full mechanism.
+
+## Secrets and the Public Prefix
+
+Secret-config values are gated by an allowlist prefix: only `KWIVA_PUBLIC_` variables are exposed client-side. Everything else in your environment stays server-side. This is a default that removes the most common secrets leak — a developer-ready environment variable finding its way into the client bundle because it was referenced in a page-adjacent file. See [Production](/docs/security/production) for the `key:generate` key rotation flow.
+
+## Request ID on Every Response
+
+Every response carries `x-request-id` — derived from the incoming header or generated when absent — which gives you a per-request thread to pull on throughout the middleware chain and across background work. It is listed here because correlation IDs are a security tool: an incident report that arrives with an ID resolves to its exact spans, logs, and metrics instead of a time-bounded search. See [Tracing](/docs/observability/tracing) for the distributed story, and [Logging](/docs/observability/logging) for the correlation fields.
+
+## Overriding a Default
+
+Defaults are safe because they are defaults, and each one has a documented override:
+
+```ts
+export default defineConfig('security', {
+  defaults: {
+    // overrides are explicit, intentional, and replacement-in-kind
+  },
+})
+```
+
+The security config uses the same `defineConfig` pattern as every other module, which means all protection toggles — CSP mode, cookie settings, rate limits, header sets — are configurable per environment and inline per request. The guidance for overrides is the same everywhere: do not disable a default unless you are simultaneously substituting a comparable control of your own.
+
+## What's Next
+
+- [Headers](/docs/security/headers) — the exact headers a fresh app sends, and per-route overrides
+- [Input Validation](/docs/security/input-validation) — typed validation on every boundary in depth
+- [Production](/docs/security/production) — keys, secrets, and the production checklist
+- [Tenancy Isolation](/docs/tenancy/isolation) — how scoping and 404-masking are enforced
+- [Auth and Sessions](/docs/auth) — how the session and rate-limit defaults compose with sign-in flows

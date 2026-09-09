@@ -1,0 +1,206 @@
+---
+title: REST Conventions
+description: "URL patterns, method mapping, status codes, response envelopes, pagination, naming, and versioning."
+---
+
+Kwiva's REST surface follows a small set of conventions you can predict from the model name alone. The conventions are deterministic on purpose: the URL for any resource is derivable, the method mapping is fixed, and the response envelope never varies between generated routes and hand-written controller actions.
+
+Predictability is the contract. Because the conventions are fixed, tooling — the typed client, OpenAPI, Studio, MCP — can derive everything, and a consumer who has seen one resource can navigate any other.
+
+## URL Patterns
+
+The API is mounted at the `/api` prefix, configured in `src/config/api.ts`.
+
+| Pattern | Meaning |
+|---|---|
+| `/api/{model}` | collection — a model name resolves to its lowercase plural |
+| `/api/{model}/:id` | single resource |
+| `/api/{model}/:id/{action}` | custom action (controller-defined) |
+| `/api/{controller}/...` | controller prefix — additional controller routes |
+| `/openapi.json` | generated OpenAPI specification |
+| `/docs` | interactive API documentation (optional) |
+| `/healthz` · `/readyz` | liveness and readiness |
+
+### Naming rules
+
+- **Collections** are lowercase and plural: `posts`, `users`, `blog-posts`.
+- **Custom path segments** are kebab-case.
+- **No verbs in paths.** The verb lives in the HTTP method; a verb in the path signals a custom action such as `/api/posts/:id/publish`.
+
+### Collections and fields
+
+| Construct | Convention | Example |
+|---|---|---|
+| Collection segment | lowercase plural | `posts` → `/api/posts` |
+| Multi-word collection | kebab-case | `blog-posts` → `/api/blog-posts` |
+| Field names | camelCase | `publishedAt`, `authorId` |
+| Custom action | kebab-case under the resource | `/api/posts/:id/publish` |
+
+### Versioning
+
+Versioning is configured in `src/config/api.ts`:
+
+```ts
+export default defineConfig('api', {
+  versioning: { strategy: 'url', default: 'v1' },
+})
+```
+
+With the `url` strategy every route mounts under a version: `/api/v1/posts`. Breaking changes require a new version; deprecation signals attach to routes via route rules and surface in the OpenAPI output. The typed client targets the configured version, so applications never hard-code the segment.
+
+## Method Mapping
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/posts` | list a collection |
+| `GET` | `/api/posts/:id` | fetch one resource |
+| `POST` | `/api/posts` | create a resource (201) |
+| `PATCH` | `/api/posts/:id` | partial update |
+| `DELETE` | `/api/posts/:id` | delete a resource (204) |
+| `POST` | `/api/posts/:id/publish` | custom action |
+
+`PATCH` accepts a partial body — send only the fields you change. `POST` to a collection creates; `POST` to a resource subpath runs a custom action. `DELETE` returns 204 with no body.
+
+## JSON Responses
+
+Single resources serialize to the model's shape directly. List endpoints use a paginated envelope:
+
+```json
+{
+  "data": [],
+  "total": 142,
+  "page": 3,
+  "lastPage": 8
+}
+```
+
+`data` holds the rows, `total` the count across all pages, `page` the current page, and `lastPage` the final page number. The envelope is identical for generated and controller list routes.
+
+## Pagination
+
+Offset pagination is the default contract:
+
+```
+GET /api/posts?page=3&limit=20
+```
+
+| Query | Meaning |
+|---|---|
+| `page` | 1-based page number |
+| `limit` | page size |
+| `orderBy` | model field to order the list by |
+| `where` | filter, schema-checked against the model |
+| `with` | relations to eager-load |
+| `q` | full-text search |
+
+Cursor mode uses `?cursor=...` and returns `nextCursor` in the response — designed to pair with infinite list hooks. See [Data: pagination](/docs/data/pagination).
+
+The `where` argument is schema-checked against the model: an unknown field produces a `VALIDATION` error. The `with` argument accepts only declared relations.
+
+## Dates and Identifiers
+
+Identifiers are opaque strings produced by the field DSL — `f.id()`, `f.uuid()`, `f.ulid()`. Throughout these docs you will see namespaced examples such as `pst_123` and `req_...`.
+
+Timestamps follow the model declaration: `timestamps: true` adds `createdAt` and `updatedAt`, and explicit `f.timestamp()` or `f.date()` fields honor their declared type in responses. See [Data: fields](/docs/data/fields).
+
+## Status Codes
+
+| Code | When |
+|---|---|
+| 200 / 201 / 204 | success |
+| 400 | malformed input that is not schema-validatable |
+| 401 | unauthenticated (session missing) |
+| 403 | policy denial |
+| 404 | not found |
+| 409 | conflict (unique violation, version) |
+| 422 | validation |
+| 429 | rate limit |
+| 500 | unhandled (sanitized in production) |
+
+Each failure status maps to one taxonomy code from the shared error model. See the taxonomy table in [API Errors](/docs/api/errors).
+
+## Error Envelope
+
+Every error response uses one envelope:
+
+```json
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "no such post",
+    "requestId": "req_..."
+  }
+}
+```
+
+The `code` comes from a single error taxonomy mapped to HTTP statuses. A `VALIDATION` error adds `issues` — field-mapped entries your forms can render directly. `requestId` always equals the `x-request-id` header, so any reported error correlates back to its request and trace.
+
+## Deriving a URL
+
+The derivation is mechanical. Take the model name, pluralize and lowercase it, mount under the API prefix, and append the version when versioning is on:
+
+```ts
+posts          →  /api/posts
+posts + id     →  /api/posts/:id
+posts + action →  /api/posts/:id/publish
+reports + get  →  /api/reports/:id
+```
+
+You never configure these paths individually — they are properties of the model and controller declarations.
+
+## A Full List Round-Trip
+
+A filtered, eager-loaded list call:
+
+```http
+GET /api/posts?where={"status":"published"}&with=["comments"]&page=2&limit=10
+```
+
+reads as published posts, comments eager-loaded, page 2 of 10. The response carries `data`, `total`, `page`, and `lastPage`, so pagination state comes back in the same payload as the rows. See [Data: pagination](/docs/data/pagination).
+
+## Versioning and Deprecation
+
+Versioning is a single config decision, not a copy of the API: `strategy: 'url'` puts every route under `/api/v1`, and a later `v2` mounts alongside it. Deprecation signals attach per route through rules and flow into the OpenAPI document. Breaking changes require a version bump — there is no silent redefinition of a path.
+
+## Backwards Compatibility of the Envelope
+
+The envelope is part of the public contract. List responses always use the paginated shape, single resources serialize directly, errors always use the `error` envelope, and cookie-based auth behaves the same across versions. Tools that parse the API can rely on these shapes across upgrades, not just within one release.
+
+## The Method at a Glance
+
+| Method | Contract |
+|---|---|
+| `GET` list | 200, paginated envelope |
+| `GET` one | 200, serialized record |
+| `POST` | 201, created record |
+| `PATCH` | 200, updated record |
+| `DELETE` | 204, no body |
+
+Every success status is deliberate: `201` means created, `204` means gone, and the client types distinguish them (`res.data` present or absent) without inspecting status codes by hand.
+
+## Query Strings and Casing
+
+Query parameters are camelCase: `page`, `limit`, `sort`, `with`, `where`. `where` takes JSON filter objects, `with` takes a JSON array of relations, and both are schema-checked before the query builder runs. The query contract is documented in OpenAPI, so a client generated from the spec already agrees on casing. See [Data: queries](/docs/data/queries).
+
+## Mutually Exclusive Shapes
+
+```ts
+// single record
+{ "id": "...", "title": "hello", "authorId": "..." }
+
+// list envelope
+{ "data": [...], "total": 12, "page": 2, "lastPage": 3 }
+
+// error envelope
+{ "error": { "code": "NOT_FOUND", "message": "no such post", "requestId": "req_..." } }
+```
+
+Errors never appear in a success payload slot, and payloads never appear in the error envelope. The three shapes are mutually exclusive by contract, which is what makes the typed client's discriminated union sound.
+
+## What's Next
+
+- [Generated Endpoints](/docs/api/generated-endpoints) — the five routes every model produces
+- [API Errors](/docs/api/errors) — the taxonomy and envelope contract
+- [Typed RPC](/docs/api/rpc) — the same surface, called through the typed client
+- [Validation](/docs/http/validation) — per-route schemas
+- [Controllers](/docs/http/controllers) — write custom actions with `defineController`

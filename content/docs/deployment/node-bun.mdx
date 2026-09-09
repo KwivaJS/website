@@ -1,0 +1,115 @@
+---
+title: Node/Bun Deployment
+description: "Run Kwiva on a Node or Bun runtime — build, start, configure environment variables, manage processes, and compile a single binary with kwiva build --binary."
+---
+
+## Overview
+
+The Node and Bun presets are the workhorses of Kwiva deployment. The Node preset ships the default production server; the Bun preset is the primary-runtime path and the foundation of single-binary output.
+
+Application code is written against Web Standards — `Request`, `Response`, `fetch`, `WebSocket` — so the runtime differences stay inside the framework. You can build the same `.output/` for a Node host, a Bun host, or a compiled binary without changing a single `defineX` file. The request pipeline, the context, the validation stage, and the handler contract are identical across all three; only the carrier differs.
+
+## System Requirements
+
+- **Bun** is the primary runtime: native TypeScript execution in development, fast startup, and the dev server (`kwiva dev`) are all Bun-based. Bun also powers the test runner and single-binary compilation.
+- **Node** is a compatible output target: the Node presets emit portable `.mjs` output that any Node-capable host can run, with no code changes at the runtime layer.
+- **Edge** is reached through the engine presets, which keep deploy differences contained so the application sees the same framework API surface everywhere.
+
+Because the app surface is runtime-agnostic, you can develop on Bun and deploy to Node, or compile a Bun binary for a target host, without branching your code. The compilation target is chosen at build time, never in the source.
+
+## Build for a Node or Bun Runtime
+
+```bash
+kwiva build                    # default preset for a Node runtime
+kwiva build --preset node_server
+kwiva build --preset bun-server
+```
+
+The build emits `.output/` containing `server/` and `public/`. The `server/` entry is a portable module that any compatible runtime can boot.
+
+## Run on Node
+
+```bash
+node .output/server/index.mjs
+```
+
+- `node_server` is the **default production preset**.
+- The `PORT` env var is respected by hosted platforms.
+- For multi-core hosts, use the cluster presets (`node`, `node_cluster`) so one process spreads across cores.
+- The Node output is the fallback path for environments that only support Node (npm- or bundled installs on Node-only consumers), because the framework ships web-standard code behind the node preset output.
+
+## Run on Bun
+
+```bash
+bun .output/server/index.mjs
+```
+
+The Bun preset uses the native Bun server with production features such as socket reuse across processes (`SO_REUSEPORT`). In development, `kwiva dev` runs the **same composed handler** in-process on the Bun dev server — no bundle step, native TypeScript execution. Only the carrier differs between dev and the Bun production preset.
+
+> [!NOTE]
+> The Bun runtime is where the framework's fast paths live. Because it executes TypeScript directly, development is a zero-transpile loop, and the production Bun preset reuses that native execution — which is why `kwiva dev` and a Bun-hosted production build behave identically.
+
+## The Single Binary
+
+```bash
+kwiva build --binary
+./server
+```
+
+That simple workflow is one of Kwiva's most distinctive deployment paths:
+
+1. `kwiva build --binary` runs the Bun compile step against the Bun server preset.
+2. The output is a single executable with zero external dependencies.
+3. Deployment becomes copying one file onto a host and running it.
+
+The `standalone` scaffold mode pairs with this path: a fullstack configuration compiled into a single artifact. Notes and gotchas for the binary path:
+
+- The binary requires a CPU capable of the **AVX2** instruction set.
+- Compile flags use **syntax-only minification** (not full minification) so function names survive for tracing and observability tooling. This matters when OpenTelemetry spans are enabled — stripped names would degrade the very traces you need in production.
+- When deploying to minimal images such as distroless or scratch bases, target the musl or generic flavors of the binary so it links cleanly against a bare runtime image.
+- Windows binary builds are limited — build for your target on Linux where possible.
+
+## Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `KWIVA_PRESET` | Force a deploy preset in CI |
+| `KWIVA_APP_BASE_URL` / `baseURL` | Serve under a subpath |
+| `PORT` | Port for hosted platforms |
+| `KWIVA_API_SECRET` | Runtime config override pattern for the app config channel |
+| `KWIVA_TENANT_MODE` | App-level tenancy default |
+| `KWIVA_DB_URL` | App-level database connection |
+| `KWIVA_CACHE_URL` | App-level cache connection |
+
+Kwiva provides typed env access through `env(...)` validated at boot, so configuration failures are caught at startup rather than mid-request. The configuration layer (defaults → `src/config` → inline `defineX` options) always applies, with inline options winning. A variable that is missing or malformed fails the boot loudly, before the first request can be served, instead of surfacing as an opaque mid-request error.
+
+## Process Management and Scaling
+
+| Deployment | How |
+|---|---|
+| Single process | Default presets |
+| Multi-core | `node_cluster` preset, or socket reuse across workers on the Bun preset |
+| Multiple instances | Stateless app + externalized state (database, shared cache/queue, object storage) — enforced defaults |
+| Edge | Edge worker presets with the edge-safe constraint set |
+| Binary | `kwiva build --binary` (Bun compile) |
+
+The scaling model assumes every process is disposable. Under the Bun preset, socket reuse (`SO_REUSEPORT`) lets multiple workers share the same port, so an orchestrator can run several processes per node and spread connections across cores; the Node cluster presets achieve the same with in-process worker pools. When you scale past one process, durability moves out of the process: sessions resolve from a shared store, cache hits come from shared cache mounts, and uploaded files live in object storage.
+
+Production servers are designed for orchestration: expose a health endpoint (`/healthz`) for liveness and readiness probes, respect `PORT`, and shut down gracefully. Graceful shutdown is driven by `defineApp` providers — on shutdown, providers stop, the queue drains, and the engine stops before the process exits.
+
+> [!TIP]
+> Treat your process as ephemeral even on a single long-lived VM. If you can `kill` the process and have the fleet recover — via an orchestrator restart, a process manager, or a health-checked supervisor — then your production setup is already prepared for the multi-instance version.
+
+## Dev/Prod Parity
+
+`kwiva dev` runs the same composed handler in-process on the Bun dev server, executing TypeScript natively with no compile step. Production builds target an adapter. The request pipeline — context, lifecycle, validation, handlers — is identical in both; only the carrier differs.
+
+What behaves correctly under `kwiva dev` behaves the same under `node .output/server/index.mjs`, on a Bun runtime, or as a compiled binary. If a response header, a validation error, or a session cookie behaves one way in development, it behaves the same way in production — because the code path that produces it is the same code path.
+
+## What's Next
+
+- [Runtime Adapters](/docs/deployment/adapters) — choose the right preset for a host
+- [Serverless Deployment](/docs/deployment/serverless) — compare function-based targets
+- [Container Deployment](/docs/deployment/containers) — run the same artifact in containers
+- [Production Checklist](/docs/deployment/production-checklist) — harden before shipping
+- [Observability](/docs/observability) — health endpoint, logs, and traces in production

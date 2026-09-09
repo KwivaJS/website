@@ -1,0 +1,14 @@
+{
+  "title": "Getting Started",
+  "pages": [
+    "index",
+    "create-project",
+    "project-structure",
+    "configuration",
+    "development-server",
+    "first-model",
+    "first-api",
+    "first-page",
+    "first-deployment"
+  ]
+}

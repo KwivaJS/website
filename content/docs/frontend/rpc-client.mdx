@@ -1,0 +1,149 @@
+---
+title: RPC Client
+description: "createClient — typed model and controller calls, SSR-safe dedupe, subscriptions, and testing."
+---
+
+The RPC client is how the frontend talks to the API — with zero codegen. Types flow from `defineController` and `defineModel` at the type level, so every call, every body, and every error is checked against the actual route manifest of this application. The client works identically on the server and in the browser, and it is the only transport the data hooks use.
+
+Because the client derives its surface from the same route manifest the API derives its routes from, a controller change is instantly visible to every consumer — there is no generated client to regenerate and no version to drift.
+
+## The Scoped Client
+
+Applications scaffold a single client from `@kwiva/client`:
+
+```ts
+// src/client.ts — types derive from THIS app's controllers and models
+import { createClient } from '@kwiva/client'
+export const client = createClient()
+```
+
+`createClient()` is ambiently typed against the app's route manifest. There is no configuration file enumerating endpoints — the client is the manifest, as types. The route manifest itself is produced by [Auto-Discovery](/docs/core-concepts/auto-discovery): every `defineModel` and `defineController` contributes its routes, and the client sees exactly that set.
+
+## Model API
+
+Every model's five generated routes are available as typed methods:
+
+```ts
+const { data, total } = await client.users.list({ where: { role: 'admin' }, page: 1 })
+const ada = await client.users.get('usr_01...')
+const updated = await client.users.update('usr_01...', { name: 'Ada L.' })
+await client.users.delete('usr_01...')
+```
+
+| Call | Endpoint |
+|---|---|
+| `client.users.list(query)` | list — filtered, paginated |
+| `client.users.get(id)` | single record |
+| `client.users.create(body)` | create |
+| `client.users.update(id, body)` | update |
+| `client.users.delete(id)` | delete |
+
+Each method's arguments are typed from the model IR — `where` values are checked against the model's fields, `body` against field types and validation. See [Generated Endpoints](/docs/api/generated-endpoints) for the five-route shape and [Models](/docs/data/models) for the IR they are derived from.
+
+## Custom Actions
+
+Controller actions attach to the same client surface:
+
+```ts
+await client.posts.publish('pst_01...')
+```
+
+Handlers declared on `defineController` become methods on the matching namespace, typed from the handler's schemas and return shape. Anything the API exposes, the client already knows — resource routes and custom actions present under the same namespace, with no distinction in how they are called. See [RPC & Integration](/docs/api/rpc) and [Controllers](/docs/http/controllers).
+
+## Namespaces
+
+The client surface mirrors the route manifest exactly. Model routes and controller routes each get a namespace:
+
+| Manifest source | Client namespace | Example |
+|---|---|---|
+| `defineModel('users', ...)` | `client.users` | `client.users.list({ page: 1 })` |
+| `defineController('posts', ...)` | `client.posts` | `client.posts.publish('pst_01...')` |
+| Realtime channel handlers | Async iterable | `client.chat.stream({ roomId })` |
+
+A namespace appears because the manifest produced it — there is no hand-registration. Remind every call: the method, the arguments, and the return type are all derived, never declared twice.
+
+## Typed Errors
+
+Calls resolve into discriminated unions on failure — shape and status are part of the type system:
+
+```ts
+const { error, data } = await client.users.get(id)
+
+if (error) {
+  // { code: 'NOT_FOUND' } or { code: 'VALIDATION', issues }
+}
+```
+
+Errors carry `code` and `message`, with structured `issues` on validation failures — mapped by the framework's error taxonomy. Because the union is discriminated on `code`, narrowing is exhaustive: every failure branch is checked against the codes the API can actually emit. See [Errors](/docs/api/errors) for the server side of the contract and [Error Handling](/docs/core-concepts/error-handling) for the taxonomy.
+
+## SSR-Safe Calls
+
+On the server, client calls run **in process** — no network hop — and are deduplicated per request. Two loaders calling the same endpoint share one execution. Results dehydrate into the page stream and rehydrate into the data-hook cache; a navigation that renders the same data reads what the request already produced.
+
+```
+server: client.posts.list()      → in-process, deduped per request
+client: hydrated into hooks      → no refetch of loader data
+```
+
+Server-side calls carry the current request's session, tenant, and config, so controllers see the same `ctx.session` they would from an HTTP client — the in-process call is not a shortcut that skips context. See [Request Lifecycle](/docs/http/lifecycle) for what a call traverses.
+
+The deduplication contract is per request: two loaders calling the same endpoint share one execution, so a page whose layout and content both read the same workspace performs one query, not two. On the client the same dedupe happens through the shared data-hook cache — a loader's result and a hook's read of the same model land on the same entry. See [Loaders & Data](/docs/frontend/loaders).
+
+## Type Flow, No Codegen
+
+The client is ambiently typed from `src/.kwiva/types` — generated once from the route manifest and model IR. Nothing is emitted at build or runtime; the typed surface exists as TypeScript types only:
+
+```
+defineModel / defineController → route manifest → @kwiva/client ambient types
+                            └→ client.users.list(...) type-checks against the manifest
+```
+
+That is why the client and the API cannot drift. The route manifest is one artifact; both the server routes and the client surface derive from it. Changing a controller schema updates the client's method signature in the same commit it updates the handler, with no regeneration step.
+
+## Session-Aware
+
+Session cookies flow automatically, and the CSRF token is handled by the provider. In the browser the client carries credentials per the session; on the server the current request's session and tenant context are attached — controllers see the same `ctx.session` they would from an HTTP client. There is no per-call auth configuration: the client inherits the request's identity in both contexts.
+
+## Subscriptions
+
+The client subscribes to realtime channels as an async iterable of typed events:
+
+```ts
+const stream = client.chat.stream({ roomId })
+for await (const event of stream) { ... }
+```
+
+Channel subscriptions are policy-checked on subscribe, and fall back to server-sent events when a bidirectional connection is unavailable. Events are typed from the channel's message schema, so a consumer pattern-matches against the exact shapes the channel declares. See [Channels](/docs/realtime/channels) and [Real-Time Data on the Client](/docs/realtime/client-usage).
+
+## Streaming Responses
+
+For long-running actions — large exports, generated reports — the typed client passes the response through unchanged, so streams and event sources work identically whether called in-process or over the network. Consume them with the standard reader interface, or with the async-iterable subscription surface for channels. See [Streaming & SSE](/docs/http/streaming).
+
+## Testing
+
+The same client surface operates against an in-process app harness:
+
+```ts
+import { createTestClient } from '@kwiva/client'
+import { app } from '../bootstrap/app'
+
+const testClient = createTestClient(app)
+const { data } = await testClient.users.list({ page: 1 })   // no network
+```
+
+`createTestClient(app)` boots the real app's routing, validation, and policies in process — tests exercise the same code path a browser would, without a running server. Because the client is the manifest, a test file types itself: the test client derives from the same route manifest as the production client. See [Testing](/docs/testing) for the full harness.
+
+## Conventions
+
+- Loaders and hooks use the typed client — never raw `fetch` (enforced by lint gates)
+- One `createClient()` per app, ambiently typed from the route manifest
+- Calls are session-aware and SSR-safe by default; no per-call configuration
+- No codegen — types flow from the manifest at type level
+
+## What's Next
+
+- [Data Hooks](/docs/frontend/data-hooks) — the client behind `useResource`, `useList`, and `useMutation`
+- [RPC & Integration](/docs/api/rpc) — the API surface the client is typed from
+- [Error Handling](/docs/api/errors) — the typed error contract
+- [Generated Endpoints](/docs/api/generated-endpoints) — the five routes per model
+- [Channels](/docs/realtime/channels) — subscribing client-side

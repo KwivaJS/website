@@ -1,0 +1,172 @@
+---
+title: Pages
+description: "definePage — the factory for every page: validation, loader, guards, UI states, head, component."
+---
+
+A page is a single file in `src/ui/pages/` that exports one `definePage(...)` call. Pages are discovered by convention — the file's path *is* the route, so there is no registration step and no route table to keep in sync. Everything a page needs — data, guards, loading and error UI, meta, and the component itself — is declared in one plain, serializable object.
+
+Because pages are the unit of both rendering and routing, the same file drives **server-side rendering** (loaders run on the server, HTML streams out) and **client-side rendering** in `api+spa` mode. There is no separate server page and client page: one `definePage`, two execution contexts. See [Server-Side Rendering](/docs/rendering/ssr) for how the file runs on the server.
+
+## The definePage Factory
+
+`definePage` comes from `@kwiva/react`. Its options cover the complete page lifecycle — from search-param validation before the route is even accepted, to the loader that fetches data, to the `<head>` that ships with the first paint:
+
+```tsx
+import { definePage, Link, useNavigate, notFound, stream, redirect } from '@kwiva/react'
+
+export default definePage({
+  // validation
+  validateSearch: (s) => s.object({ q: s.optional(s.string()), page: s.optional(s.number()) }),
+
+  // data
+  loader: async ({ params, search, client }) => ({
+    post: await client.posts.get(params.id),
+    comments: stream(client.comments.list({ postId: params.id })),   // deferred
+  }),
+  loaderDeps: ({ search: { page } }) => ({ page }),                   // refetch only on page change
+
+  // guards
+  beforeLoad: ({ session, location }) => {
+    if (!session.user) throw redirect({ to: '/login', search: { back: location.href } })
+  },
+
+  // UI states
+  pendingComponent: PostSkeleton,
+  pendingMs: 200, pendingMinMs: 300,
+  errorComponent: ({ error }) => <ErrorPanel error={error} />,
+  notFoundComponent: () => <p>No such post</p>,
+
+  // meta
+  head: ({ loaderData }) => ({
+    title: loaderData.post.title,
+    meta: [{ name: 'description', content: loaderData.post.excerpt }],
+  }),
+
+  // the component
+  component: PostPage,
+})
+```
+
+The full option surface, field by field:
+
+| Option | Purpose |
+|---|---|
+| `validateSearch` | Schema for search state; typed into `Route.useSearch()`, links, and navigation |
+| `loader` | Async data loader; runs server-side during SSR, client-side during navigation |
+| `loaderDeps` | Scopes loader re-execution to a slice of the search state |
+| `beforeLoad` | Guard running before loaders — redirects and permission checks |
+| `pendingComponent` | Rendered while loaders run during navigation |
+| `pendingMs` / `pendingMinMs` | Debounce floor and minimum display time for the pending state |
+| `errorComponent` | Route-scoped error boundary, receiving the thrown `error` |
+| `notFoundComponent` | Rendered for the typed `notFound()` outcome |
+| `head` | Document metadata, derived from loader data per route |
+| `component` | The page component, receiving typed `loaderData` |
+
+## From File to Route
+
+The route tree is generated from the file system. Dotted filenames collapse into path segments, `$` prefixes a dynamic segment, and folders nest layouts:
+
+| File | Route |
+|---|---|
+| `src/ui/pages/index.tsx` | `/` |
+| `src/ui/pages/about.tsx` | `/about` |
+| `src/ui/pages/posts.index.tsx` | `/posts` |
+| `src/ui/pages/posts.$id.tsx` | `/posts/:id` |
+| `src/ui/pages/posts.$id.edit.tsx` | `/posts/:id/edit` |
+| `src/ui/pages/files.$.tsx` | `/files/*` |
+
+The route file name becomes the route identity: `posts.$id.tsx` declares a `$id` param that the loader reads as `params.id`, and the search schema it validates becomes the search state of every link pointing at it. See [File-Based Routing](/docs/frontend/routing) for the full naming reference.
+
+## The Page Component
+
+`component` receives everything the page declared. Loader results arrive as typed `loaderData`, params come from `Route.useParams()`, and search state is typed by `validateSearch`:
+
+```tsx
+const { id } = Route.useParams()
+const search = Route.useSearch()
+const loaderData = Route.useLoaderData()
+```
+
+Route hooks mirror the loaders' types exactly, because both are generated from the same file. The component is plain — build it however you like, as long as it reads from the typed inputs. Complex interactive surfaces compose from the [Data Hooks](/docs/frontend/data-hooks) on top of the loader's results rather than duplicating them.
+
+## Head & Meta
+
+Set document-level metadata with the `head` option. Because it is a function of `loaderData`, the tags can describe the actual resource being rendered — an SEO description built from the post's excerpt, a page title from its heading:
+
+```tsx
+head: ({ loaderData }) => ({
+  title: loaderData.post.title,
+  meta: [{ name: 'description', content: loaderData.post.excerpt }],
+})
+```
+
+The `head` is serialized **per route on the server**, so the first HTML response already carries the correct document metadata. Because it is a function of loader data, cached pages keep correct SEO tags without re-rendering — see [Caching Strategies](/docs/rendering/caching).
+
+## Loading, Error, and Not Found UI
+
+Every page gets opinionated fallback UI without extra wiring:
+
+| Option | Purpose |
+|---|---|
+| `pendingComponent` | Rendered while loaders run during navigation |
+| `pendingMs` / `pendingMinMs` | Delay a fast route from flashing the pending state, and floor its minimum display time |
+| `errorComponent` | Route-scoped error boundary, receiving the thrown `error` |
+| `notFoundComponent` | Rendered when the route (or a loader) throws the typed `notFound()` |
+
+```
+Pending shown only if data takes longer than pendingMs
+   └─ commits the pending component for at least pendingMinMs
+Error → errorComponent on that route, or the root boundary
+404   → notFoundComponent, or a typed notFound() throw from a loader/guard
+```
+
+`pendingMs` (default debounce) prevents a fast route from flashing a skeleton; `pendingMinMs` floors the display so a very fast load does not flicker the skeleton away mid-paint. Errors thrown by loaders and guards land in the nearest `errorComponent`. Deferred segments that reject later settle into their own boundary with a retry. Uncaught errors bubble to the root boundary — the natural home for a root-level error screen. See [Streaming SSR](/docs/rendering/streaming) for deferred-error behavior.
+
+## beforeLoad Guards
+
+`beforeLoad` runs before loaders execute, which makes it the right place for authorization redirects. Guards run on the server during SSR and on the client during navigation — the same code path:
+
+```tsx
+beforeLoad: ({ session, location }) => {
+  if (!session.user) throw redirect({ to: '/login', search: { back: location.href } })
+}
+```
+
+Anything a guard throws stops the loaders for that route from running. Guards receive the full route context (`session`, `location`, `params`, `search`, `client`, `config`), so both auth redirects and permission checks are expressible in one place. See [Protecting Routes](/docs/auth/protecting-routes) for the broader authorization picture, and [Loaders & Data](/docs/frontend/loaders) for the guard-then-load ordering guarantee.
+
+## The Root Route
+
+Every app has a root route at `src/ui/pages/__root.tsx`. It is an ordinary `definePage` file whose component establishes the provider tree and the outlet that nested routes render into:
+
+```tsx
+import { definePage, Providers, Outlet } from '@kwiva/react'
+
+export default definePage({
+  component: () => (
+    <Providers theme="kwiva">
+      <Layout>
+        <Outlet />
+      </Layout>
+    </Providers>
+  ),
+})
+```
+
+`Providers` injects session state, the typed client, the data-hook cache, internationalization, and theming into context — loaders and hooks consume them without manual wiring. The root route can define its own loaders and error boundary, which makes it the natural place for app-wide data. Anything mounted inside it (a sidebar, a topbar, a provider tree) wraps every route in the app. See [Nested Layouts](/docs/frontend/layouts) for layout composition.
+
+## Page Conventions
+
+- One `definePage` per file, named by directory — no manual registration
+- The file path determines the route; folder layout files compose around it
+- Loaders use the typed client, never raw `fetch` (enforced by the `no-raw-fetch-in-loaders` gates)
+- Components use data hooks over model identity — no hand-built query keys
+- No engine imports (the query engine is internal to the framework)
+- Types flow from the file to the loader, to the hooks, to the render — one type universe
+
+## What's Next
+
+- [File-Based Routing](/docs/frontend/routing) — naming, dynamic segments, and route context
+- [Loaders & Data](/docs/frontend/loaders) — parallel and streamed data loading
+- [Navigation & Link](/docs/frontend/navigation) — typed links and programmatic navigation
+- [Nested Layouts](/docs/frontend/layouts) — composing pages with layout files
+- [Your First Page](/docs/getting-started/first-page) — build a page end to end

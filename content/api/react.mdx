@@ -1,0 +1,369 @@
+---
+title: "@kwiva/react"
+description: "React bindings — definePage contract, SSR orchestration and streaming, hydration, Providers, data hooks, client hooks, realtime hooks, Preact compat."
+---
+
+`@kwiva/react` binds the router to React and owns the framework's SSR orchestration. It exports `definePage` (the complete page contract), the streaming renderer and its hydration contract, the `Providers` tree, and the data hooks that give components typed, cache-backed access to models. React is the default runtime; Preact is a config flip.
+
+## definePage
+
+Every page file under `src/ui/pages/` default-exports a `definePage` definition. The factory takes a single options object covering validation, data, guards, and UI states.
+
+```tsx
+import { definePage, redirect, stream } from '@kwiva/react'
+
+export default definePage({
+  validateSearch: (s) => s.object({ tab: s.optional(s.string()) }),
+
+  loader: async ({ params, client }) => ({
+    post: await client.posts.get(params.id),
+    comments: stream(client.comments.list({ postId: params.id })),
+  }),
+
+  loaderDeps: ({ search: { tab } }) => ({ tab }),
+
+  beforeLoad: ({ session, location }) => {
+    if (!session.user) throw redirect({ to: '/login', search: { back: location.href } })
+  },
+
+  pendingComponent: PostSkeleton,
+  pendingMs: 200,
+  pendingMinMs: 300,
+
+  errorComponent: ({ error }) => <ErrorPanel error={error} />,
+  notFoundComponent: () => <p>No such post</p>,
+
+  head: ({ loaderData }) => ({
+    title: loaderData.post.title,
+    meta: [{ name: 'description', content: loaderData.post.excerpt }],
+  }),
+
+  component: PostPage,
+})
+```
+
+### Options
+
+| Option | Type | Description |
+|---|---|---|
+| `component` | `(props) => ReactNode` | Renders the page; receives `loaderData`, `params`, and `search` |
+| `loader` | `(ctx) => Promise<LoaderData>` | Server- and client-side data fetch for the route; runs in parallel across matched routes |
+| `loaderDeps` | `(ctx) => Deps` | Selects which navigational fields refetch the loader when they change |
+| `beforeLoad` | `(ctx) => void \| Promise<void>` | Guard running before loaders; throws `redirect` or `notFound` to abort |
+| `validateSearch` | `(s) => Schema` | Search-param schema via a Standard Schema validator builder |
+| `pendingComponent` | `Component` | Rendered during load on client-side navigation |
+| `pendingMs` | `number` | Delay before the pending UI shows |
+| `pendingMinMs` | `number` | Minimum time the pending UI stays visible |
+| `errorComponent` | `({ error }) => ReactNode` | Rendered when the loader or guards throw |
+| `notFoundComponent` | `() => ReactNode` | Rendered when `notFound()` is thrown or no route matches |
+| `head` | `({ loaderData }) => HeadOptions` | Per-route document head, serialized during SSR |
+
+### loader
+
+The loader is the only data-fetching surface for a page. It executes server-side during SSR (in-process, via the typed client) and client-side on navigation, in parallel across all matched routes and deduplicated per request.
+
+```tsx
+loader: async ({ params, search, client }) => ({
+  post: await client.posts.get(params.id),
+  comments: stream(client.comments.list({ postId: params.id, page: search.page })),
+})
+```
+
+| Loader context | Description |
+|---|---|
+| `params` | Typed route `$param` values |
+| `search` | Typed, validated search params |
+| `client` | Typed RPC client injected by the framework |
+
+A promise wrapped in `stream()` is deferred: the awaited shell renders immediately while the deferred value streams into its `Suspense` boundary. Loader results become `loaderData` and are written to the data-hook cache, so render and later hooks never double-fetch. See [Loaders & Data](/docs/frontend/loaders) and [Streaming SSR](/docs/rendering/streaming).
+
+### loaderDeps
+
+`loaderDeps` returns the subset of route state that should trigger a refetch. Navigation that changes only non-dep fields reuses the cached loader result.
+
+```tsx
+loaderDeps: ({ search: { page } }) => ({ page })
+```
+
+### beforeLoad
+
+Guards run before loaders, on both SSR and the client. The context carries `session` and `location`; throwing `redirect` or `notFound` short-circuits the request.
+
+```tsx
+beforeLoad: ({ session }) => {
+  if (!session.user) throw redirect({ to: '/login' })
+}
+```
+
+### validateSearch
+
+The search schema is built with a Standard Schema validator builder. It types `search`, `Link` and `useNavigate` targets, and drives `loaderDeps` refetching — invalid values fail at compile time.
+
+```tsx
+validateSearch: (s) => s.object({ q: s.optional(s.string()), page: s.optional(s.number()) })
+```
+
+### head
+
+`head` returns the document head for the route and is serialized per route during SSR, so SEO tags can derive from loader data.
+
+```tsx
+head: ({ loaderData }) => ({
+  title: loaderData.post.title,
+  meta: [{ name: 'description', content: loaderData.post.excerpt }],
+})
+```
+
+## SSR Renderer & Streaming
+
+`@kwiva/react` owns SSR orchestration. The framework renders; the serving engine responds. The pipeline is:
+
+```
+request (page route)
+  → router match (owned router)
+  → beforeLoad guards (session → login redirects)
+  → loaders execute in parallel (server-side, via the typed client, in-process)
+  → React tree renders to a readable stream
+      ├─ Suspense boundaries stream as they resolve (stream() deferreds)
+      └─ loader state dehydrates into the page at the stream tail
+  → response stream (http status, headers, set-cookies)
+hydration (client)
+  → state rehydrates into the data-hook cache (no refetch of loader data)
+  → router resumes at the same route with the same search state
+```
+
+- The blocking shell renders immediately; deferred chunks hydrate into their `Suspense` boundaries as they resolve.
+- Route rules apply to the whole response: `isr` caches the full stream, `swr` serves stale while revalidating, `static` builds once.
+- Loader, shell, and hydration phases are exposed as OTel spans (`SSR wall time`, time-to-first-byte, shell time, hydration time). See [Tracing](/docs/observability/tracing).
+
+### Route rules
+
+Page routes honor the same rules as the API surface, declared per path in `src/routes/rules.ts`:
+
+| Rule | Behavior |
+|---|---|
+| (default) | Dynamic SSR each request |
+| `cache: n` | Full response cached for `n` seconds |
+| `swr: n` | Stale-while-revalidate (revalidate in the background) |
+| `isr: n` | Static page regenerated on an interval or on demand |
+| `static` | Built once at `kwiva build` |
+| `prerender: true` | Crawled/prerendered at build time |
+
+```ts
+defineServerRoute('/products/**', { isr: 300, cache: { tags: ['catalog'] } })
+```
+
+On-demand invalidation (`invalidateTags(['catalog'])`) is available from any job, task, or event handler. See [Caching Strategies](/docs/rendering/caching).
+
+### Personalization with cached shells
+
+Public shells can be cached (`isr`) while user-specific fragments load client-side through data hooks — session-scoped reads are never part of the cached shell.
+
+### SSR error handling
+
+- Loader or guard throws render that route's `errorComponent`, or the root boundary.
+- Deferred promise rejections surface in their boundary with a fallback and retry.
+- In dev, the overlay attaches the loader stack and the OTel trace id.
+
+### SPA fallback
+
+In `api+spa` mode, the same `definePage` files render client-only: the server serves the shell plus the API, and route rules still apply to the API surface.
+
+## Hydration Contract
+
+Hydration is island-free and streaming-safe:
+
+- Loader data and deferred promises serialize with a typed reviver — dates and class instances such as model rows survive the wire.
+- The client data-hook cache is keyed identically on server and client, so hydration is a **cache transfer**, not a refetch.
+- Dehydrated state is written into the page as `<script id="kwiva:state">` at the stream tail; the client rehydrates it into the cache before first render.
+- The router resumes at the same route with the same search state.
+
+See [Hydration](/docs/rendering/hydration) and [SSR](/docs/rendering/ssr).
+
+## Providers
+
+`Providers` mounts the framework context at the root layout (`src/ui/pages/__root.tsx`). It injects session, the typed client, the data-hook cache, i18n, and theme, and handles client-side session and CSRF wiring.
+
+```tsx
+import { definePage, Providers, Outlet } from '@kwiva/react'
+
+export default definePage({
+  component: () => (
+    <Providers theme="kwiva" i18n={catalog}>
+      <Layout>
+        <Outlet />
+      </Layout>
+    </Providers>
+  ),
+})
+```
+
+| Provider prop | Description |
+|---|---|
+| `theme` | Active theme key; overrides the configured default |
+| `i18n` | Typed translation catalog (v1.x) |
+
+## Data Hooks
+
+Data hooks give components typed access to models over a client-side cache. Their keys derive from **model identity plus parameters**, so invalidation is model-scoped instead of hand-built.
+
+```tsx
+import { useResource, useList, useMutation, useInfiniteList, invalidate, useApi } from '@kwiva/react'
+import { Post } from '@kwiva/data'
+```
+
+| Hook | Purpose | Key |
+|---|---|---|
+| `useResource(Model, id, options?)` | Read a single record | Model identity + id |
+| `useList(Model, options)` | Paginated, filtered list | Model identity + params |
+| `useMutation(action, options?)` | Create/update/delete with optimistic updates | — |
+| `useInfiniteList(Model, options)` | Cursor-based infinite list | Model identity + cursor |
+| `useApi(key, fetcher)` | Custom query over a typed fetcher | Explicit key |
+| `invalidate(Model)` | Clear every derived key for a model | — |
+
+### useResource
+
+```tsx
+const { data, isPending, error } = useResource(Post, id)
+const { data: post } = useResource(Post, id, { suspense: true })
+```
+
+### useList
+
+```tsx
+const { data, isFetching } = useList(Post, {
+  where: { status: 'published' },
+  orderBy: { createdAt: 'desc' },
+  staleTime: 30_000,
+})
+```
+
+### useMutation
+
+Mutations wrap a model action, support optimistic updates, and auto-invalidate on success.
+
+```tsx
+const save = useMutation(Post.update, {
+  optimistic: (input, current) => ({ ...current, ...input }),
+  onSuccess: () => invalidate(Post),
+})
+
+const { mutate, isMutating } = save
+await mutate({ title: 'New title' })
+```
+
+The `optimistic` helper receives the mutation input and the currently cached row, and returns the next value; on failure the cache rolls back. Successful mutations invalidate model-scoped keys unless told otherwise.
+
+### useInfiniteList
+
+```tsx
+const feed = useInfiniteList(Post, { cursor: 'createdAt', limit: 20 })
+```
+
+### useApi
+
+The escape hatch for custom queries backed by the typed client:
+
+```tsx
+const report = useApi(['report', id], () => client.reports.get(id))
+```
+
+### Cache options
+
+The full data-hook option surface is passed through on read hooks:
+
+| Option | Meaning |
+|---|---|
+| `staleTime` | How long a result stays fresh before background refetch |
+| `gcTime` | How long an unused entry stays in the cache |
+| `refetchOnWindowFocus` | Refetch when the window regains focus |
+| `refetchInterval` | Polling interval |
+| `suspense` | Suspend while pending |
+| `retry` | Retry policy on failure |
+| `select` | Derive a view of the data |
+| `placeholderData` | Show data while refetching |
+| `enabled` | Gate the query |
+
+### Invalidation model
+
+- `invalidate(Model)` clears every list, detail, and custom-key entry derived from that model.
+- `invalidateTags([...])` (server-side) clears route-rule response caches. See [Caching](/docs/rendering/caching).
+- Loader results, navigation preloads, and hook reads share one cache, so no path double-fetches. See [Hydration](/docs/rendering/hydration) and [Routing](/api/router).
+
+### Devtools
+
+`@kwiva/react/devtools` mounts a framework-skinned devtools pane for inspecting cache entries, keys, and staleness. The dev overlay shows loader timings and cache state during development.
+
+## Client Hooks
+
+The provider exposes typed client hooks:
+
+```tsx
+const { user, signOut, isPending } = useSession()
+const theme = useConfig('ui.theme')
+const canPublish = useCan('posts.publish')
+const t = useT()
+```
+
+| Hook | Description |
+|---|---|
+| `useSession()` | Auth state, typed user, and sign-in/out helpers |
+| `useConfig(key)` | Typed reads of client config; `KWIVA_PUBLIC_*` keys only |
+| `useCan(permission)` | Client-mirrored policy check, e.g. `useCan('posts.publish')` |
+| `useT()` | Typed i18n catalog access (v1.x) |
+
+See [Client-Side Auth](/docs/auth/client-usage) and [Policies](/docs/authorization/policies).
+
+## Realtime Hooks
+
+Realtime hooks wrap typed channel subscriptions from the client:
+
+```tsx
+const { messages, send } = useChannel(`chat.${roomId}`, {
+  onMessage: (m) => enqueue(m),
+})
+
+const { members } = usePresence(`chat.${roomId}`)
+```
+
+| Hook | Description |
+|---|---|
+| `useChannel(channel, options)` | Subscribe to a channel; returns the event list and a `send` helper |
+| `usePresence(channel)` | Track channel presence; returns the member set |
+
+See [Client-Side Realtime](/docs/realtime/client-usage) and [Channels](/docs/realtime/channels).
+
+## Forms
+
+`useForm` builds schema-driven forms from a model action. Fields derive from model validation, server errors map back to fields, and submit runs through the mutation pipeline on the same cache — no separate form library is required (v1.x).
+
+```tsx
+const form = useForm(Post.create)
+```
+
+## Preact Compatibility
+
+`@kwiva/react` supports a Preact runtime through `preact/compat`, selected in the UI config (`src/config/ui.ts`):
+
+```ts
+import { defineConfig } from '@kwiva/config'
+
+export default defineConfig('ui', {
+  defaults: { runtime: 'react', theme: 'kwiva' },
+})
+```
+
+Setting `runtime: 'preact'` makes the framework's Rust-speed toolchain rewrite React import specifiers to `preact/compat` at build time — one config flip, application code unchanged. The pipeline, providers, data hooks, and hydration contract behave identically with a smaller bundle.
+
+## What to Read Next
+
+- [Pages](/docs/frontend/pages) — `definePage` walkthrough
+- [Data Hooks](/docs/frontend/data-hooks) — Hook reference by use case
+- [SSR](/docs/rendering/ssr) — Render pipeline and route rules
+- [Streaming SSR](/docs/rendering/streaming) — Deferred data in depth
+- [Hydration](/docs/rendering/hydration) — The cache-transfer contract
+- [Nested Layouts](/docs/frontend/layouts) — Root layout with `Providers`
+- [Client-Side Realtime](/docs/realtime/client-usage) — `useChannel` and `usePresence`
+- [Client-Side Auth](/docs/auth/client-usage) — `useSession`
+- [`@kwiva/router`](/api/router) — Routing conventions, loaders, and navigation
+- [`@kwiva/client`](/api/client) — The typed RPC client under the hooks

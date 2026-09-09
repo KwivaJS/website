@@ -1,0 +1,14 @@
+{
+  "title": "Frontend",
+  "pages": [
+    "index",
+    "pages",
+    "routing",
+    "layouts",
+    "loaders",
+    "navigation",
+    "data-hooks",
+    "rpc-client",
+    "ui-components"
+  ]
+}

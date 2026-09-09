@@ -1,0 +1,128 @@
+---
+title: Server-Side Rendering
+description: "Kwiva-owned SSR orchestration, the render pipeline, streaming-first, and route rules."
+---
+
+Kwiva renders pages on the server by default. Loading, guarding, and rendering are orchestrated by the framework: the owned router matches the request, loaders run server-side, HTML streams to the client, and the first paint is complete before any client-side data fetch. The client hydrates the same state instead of rebuilding it.
+
+SSR orchestration is a locked framework decision (ADR-0006). The framework's server engine serves the request; the framework renders the page. That split gives Kwiva full control of streaming composition, header and cookie injection, and per-request context (session and tenant) entering the tree — matching modern fullstack-framework behavior without a third-party server-functions model.
+
+## The Render Pipeline
+
+A page request moves through a fixed pipeline:
+
+```
+request (page route)
+  → router match (owned router)
+  → beforeLoad guards (session → login redirects)
+  → loaders execute in parallel (server-side, via the typed client — in-process)
+  → the rendering runtime streams the tree (suspense-aware)
+  → response stream (http status, headers, set-cookies from the pipeline)
+hydration (client)
+  → state rehydrates into the data-hook cache (no refetch of loader data)
+  → router picks up at the same route with same search state
+```
+
+The same ordered contract appears at the HTTP layer — middleware, routing, and caching stages are shared with API routes. See [Request Lifecycle](/docs/http/lifecycle) for the full sequence and [Frontend](/docs/frontend) for the page surface that feeds it.
+
+## What Runs Server-Side
+
+Every step that needs authority or infrastructure runs before the first byte of HTML:
+
+| Stage | Server behavior |
+|---|---|
+| Router match | The owned router resolves the URL against the generated route tree |
+| `beforeLoad` | Guards run with real session state — unauthorized navigations redirect before any data loads |
+| Loaders | Execute in parallel across all matched routes, via the typed client running **in process** — no network hop, deduplicated per request |
+| Rendering | Streaming HTML with suspense boundaries flushing as deferred data resolves |
+| Head & meta | Per-route `head` is serialized into the document from loader data |
+| Cookies & status | Pipeline-set cookies and status codes attach to the response |
+
+Because loaders run in process, server rendering pays no HTTP round-trip for data that lives in the same process — the request is answered, typed, and gated in one pass. Guards see the same `session` and `tenant` objects the API handlers see, so a page can never render past an authorization boundary. See [Loaders & Data](/docs/frontend/loaders) and [Protecting Routes](/docs/auth/protecting-routes).
+
+## No Client Round-Trip for First Paint
+
+The first paint does not wait on the network from the browser:
+
+```
+server: loader data → HTML stream → <head> from loader data
+client: render from streamed HTML → hydrates → cache already warm
+```
+
+The client does not refetch what the server loaded: loader results are dehydrated into the stream and rehydrated into the data-hook cache, so the first interactive frame uses the exact data the server computed. See [Hydration](/docs/rendering/hydration).
+
+## Streaming-First by Default
+
+SSR is streaming-first: the shell flushes the moment blocking data across all matched loaders resolves, and deferred segments stream into their suspense boundaries as they complete. A comment-heavy post reaches first paint with its headline and body while the comment query is still running; comments then stream in without another navigation.
+
+Failed deferred segments cannot reset the page — the boundary falls back to its error state with a retry while the shell stays intact. For runtimes without streaming support, the pipeline degrades to a buffered render; capability is documented per preset. See [Streaming SSR](/docs/rendering/streaming).
+
+## SSR and Route Rules
+
+SSR is the dynamic default; route rules override it per path. The full stream, or the built page, is what the rules operate on:
+
+| Rule | Behavior |
+|---|---|
+| (default) | Dynamic SSR each request |
+| `cache: n` | Full response cached `n` seconds |
+| `swr: n` | Stale-while-revalidate (purge-in-background) |
+| `isr: n` | Static page regenerated on interval (or on-demand via `revalidateTag`) |
+| `static` | Built once at `kwiva build` (prerender) |
+| `prerender: true` | Crawl/prerender at build |
+
+Route rules are declared on server routes:
+
+```ts
+// src/routes/rules.ts
+defineServerRoute('/products/**', { isr: 300, cache: { tags: ['catalog'] } })
+```
+
+On-demand invalidation reaches cached responses from anywhere with server authority — jobs, tasks, event handlers:
+
+```ts
+invalidateTags(['catalog'])
+```
+
+The framework calls the engine's purge; the next request re-renders. Because route rules apply before context assembly, a cached page skips session loading entirely — public ISR pages skip auth by design. See [Caching Strategies](/docs/rendering/caching) and [Response Caching](/docs/http/caching).
+
+## Personalization with Cached Shells
+
+SSR and caching compose with personalization. A public shell can be cached (`isr`), while user-specific fragments load client-side via data hooks (`useResource`) from session-scoped endpoints — keyed per user, never cached:
+
+```
+/products/**  isr cached shell   → same for every visitor
+                └─ useResource on session-scoped endpoint → fresh per user
+```
+
+Session-bearing responses are never cached — the framework refuses to cache a response that sets `Set-Cookie`. The `head` serializes per route, so cached pages keep correct SEO tags from loader data without re-rendering.
+
+## Error Handling During SSR
+
+Loaders and guards that throw during the server pass land in the route's `errorComponent`, or the root boundary when no closer boundary exists. Deferred segments that reject after the shell has streamed settle into their own boundary with a retry. During development, the overlay attaches the loader stack and the OTel trace id, so failures are traceable to the exact stage. See [Pages](/docs/frontend/pages) and [Observability](/docs/observability).
+
+## SPA Fallback
+
+In `api+spa` mode, pages render client-only from the same `definePage` files; the server serves the shell plus the API. The page files do not change — the same named exports drive server rendering and single-page rendering alike, which is what makes the mode a projection of the same codebase rather than a rewrite. Route rules still apply to the API surface; the client build is what the host serves. See [Static Generation](/docs/rendering/prerendering).
+
+## Observability
+
+The server pass emits spans for the pieces that matter: total SSR wall time, time-to-first-byte of the stream, shell time, and hydration time. Correlation ties a request's rendering stages together with its trace id, and the dev overlay shows the loader waterfall per request. See [Observability](/docs/observability) and [Tracing](/docs/observability/tracing).
+
+## When SSR Fits
+
+Full SSR is the right default for most of an application's surface. Reach for it when:
+
+- **First paint matters** — the user sees meaningful content immediately, without a loading spinner
+- **SEO matters** — the document carries real content and per-route `head` meta from the very first response
+- **Session and tenancy matter** — guards and loaders run with server-side authority, so nothing sensitive waits for a client round-trip to be confirmed
+- **Read paths dominate** — most screen time is browsing data the server already holds
+
+Heavy, personal, frequently-churning fragments belong in the client path — session-scoped data loaded via data hooks on top of a cached shell. See [Caching Strategies](/docs/rendering/caching) for the hybrid pattern.
+
+## What's Next
+
+- [Streaming SSR](/docs/rendering/streaming) — how suspense-aware segments stream in
+- [Hydration](/docs/rendering/hydration) — how server state becomes client state
+- [Caching Strategies](/docs/rendering/caching) — route rules per path
+- [Loaders & Data](/docs/frontend/loaders) — what runs in the server-side pass
+- [Frontend](/docs/frontend) — the page surface SSR renders

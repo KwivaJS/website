@@ -1,0 +1,149 @@
+---
+title: Application Composition
+description: "How defineApp assembles the kernel — config, models, middleware, providers, and modules — and how the module registry in kwiva.config.ts resolves and merges contributions."
+---
+
+Everything in a Kwiva application is composed by one function: `defineApp` in `src/bootstrap/app.ts`. It is the kernel — config, models, HTTP, modules, and providers assembled into a single runnable application. This page describes that assembly in order: the kernel, the module registry, the merge, the boot sequence, and what happens at shutdown.
+
+## The Kernel
+
+```ts
+// src/bootstrap/app.ts
+import { defineApp } from '@kwiva/core'
+import auth from '../app/http/auth'
+
+export const app = defineApp({
+  auth,
+
+  // discovered (scan-based; explicit override possible)
+  models, controllers, middleware, jobs, events, tasks, policies, pages,
+
+  // explicit composition
+  providers: [
+    telemetryProvider,       // telemetry init (from src/config/telemetry.ts)
+    queueProvider,           // queue transport (from src/config/queue.ts)
+    storageProvider,         // disks (from src/config/storage.ts)
+  ],
+
+  // app-level context
+  state: { startTime: Date.now() },
+  decorate: { /* singletons */ },
+  resolve: [ /* per-request derivations */ ],
+
+  // route-level reusable keys
+  macros: { auth, cache, rateLimit },
+})
+```
+
+Most of the kernel is assembled by **auto-discovery** — models from `src/app/models/`, controllers from `src/app/http/controllers/`, pages from `src/ui/pages/`. Explicit lists remain available for override. Providers are the explicit part: services that boot, hold resources, and shut down in order. Modules contribute to both halves: their models, controllers, and pages join the scan, and their boot/shutdown hooks participate alongside providers.
+
+The kernel also carries the app-level context that every request sees: `state` for process-lifetime values, `decorate` for singletons, and `resolve` for per-request derivations — such as the per-request logger bound to the request's correlation IDs. `macros` declares reusable route-level keys that controllers can consume as typechecked options.
+
+## The Module Registry
+
+Modules are registered in `kwiva.config.ts` through the `modules` key:
+
+```ts
+// kwiva.config.ts
+export default defineConfig({
+  modules: [
+    '@kwiva/auth-kit',        // first-party (package addon)
+    '@acme/chat',             // third-party (package addon)
+    './modules/billing',      // local (workspace path)
+  ],
+})
+```
+
+- **First-party** entries are framework-maintained addons.
+- **Third-party** entries are published addons installed from the package registry.
+- **Local** entries are workspace paths — no publishing step required.
+
+`kwiva add` writes this entry automatically as part of installation. Manual registration stays supported for vendored or path-based modules. The `modules` array is the single list of external composition in the application — everything internal is auto-discovered, everything external joins here.
+
+## How Modules Join the App
+
+Discovery **merges module contributions into the application scan**. A module's models, controllers, and pages appear as if they were local — namespaced to the module scope. A chat module contributing `messages` registers as `chat.messages`, mounts its pages under its declared prefix, and merges its config defaults under `chat.*`.
+
+The merge is invisible from the handler side: a request to `chat.messages` behaves exactly like a request to a locally-defined model, because it flows through the same pipeline — context, lifecycle, validation, policies, and response. There is no second routing universe for module contributions.
+
+The ordering of that merge matters. Module contributions land before the model scan produces its intermediate representation, so module models, migrations, and config defaults participate in everything the IR derives:
+
+- the generated route surface (model REST routes + controllers)
+- the typed client
+- the OpenAPI spec
+- Studio screens
+- MCP tool schemas
+
+Switch one module for another with the same shape and the derived artifacts re-derive — that is what makes package-level composition feel like the rest of the framework.
+
+## Composition Order (Boot)
+
+The kernel assembles in a deterministic order:
+
+```text
+1. config folder load + env validation        (fail-fast)
+2. module contributions merge (models/config/migrations)
+3. model scan → IR → migrations drift check   (dev warn)
+4. route registration: generated model routes + controllers + server routes + module routes
+5. middleware stack assembly (config order)
+6. providers boot (telemetry, queue, storage, custom services)
+7. engine init (storage mounts, cache, task scheduler, ws)
+8. listen (preset adapter)
+```
+
+Shutdown inverts the sequence: providers stop, the queue drains, the engine stops.
+
+The critical position for modules is step 2 — contributions merge before the model IR is built. Two consequences follow:
+
+- A module's migrations and config defaults are in place before the drift check at step 3 runs, so the dev-time warning reflects the full composed schema.
+- A module's models are in the route registration step at step 4, so generated routes for `chat.messages` exist from the first request.
+
+## Module Resolution and Conflicts
+
+Conflicts are prevented by contract and resolved by precedence:
+
+- **Namespacing prevents collisions** — every module claims its own namespaces for models, routes, config, and policies, so two modules cannot silently overwrite each other.
+- **Standard config precedence** — defaults → `src/config` values → inline `defineX` options, with inline winning. Module config defaults register under their namespace and are overridden in the app's `src/config/modules.ts` through a deep merge where the app wins.
+- **Peer requirements** — each module declares `requires` ranges for `@kwiva/*` packages; resolution rejects incompatible combinations rather than running them.
+- **Discovery overrides stay explicit** — a module's contribution is merged, but the app can still define its own files and providers to win where intended.
+
+The resolution runs at build time as a dependency graph with cycle detection, so a module arrangement that would deadlock is a build error, not a runtime surprise.
+
+## Adding Capability Is Still Adding a File
+
+The composition story scales down as much as up: there is no "register the router" step and no "add the cache plugin" step. Adding capability to the kernel is still just adding a defineX file:
+
+| I want… | I add… |
+|---|---|
+| a new resource | `src/app/models/x.ts` (+ optional controller) |
+| authenticated pages | `src/app/http/auth.ts` + middleware in the stack |
+| background processing | `src/app/jobs/x.ts` + queue config |
+| realtime | event + channel policy |
+| reusable capability | a module |
+| envs/deploy targets | presets — zero code changes |
+
+## Composition per Mode
+
+The kernel assembles differently per application mode, selected at scaffold time:
+
+| Mode | Kernel assembly |
+|---|---|
+| `fullstack` | everything |
+| `api+spa` | no pages SSR; SPA shell |
+| `static` | pages + prerender only; no http/jobs |
+| `standalone` | fullstack + binary output |
+| `edge` | fullstack under the edge constraint set |
+
+The kernel shape never changes — only which `defineX` files and modules exist. A module written for a fullstack app composes identically into an edge deployment as long as it stays inside the constraints the mode imposes.
+
+## Testing Composition
+
+`withApp` boots the real kernel with in-memory adapters where possible, so tests compose exactly like production. `createTestClient(app)` talks to it in-process with full types — no network, no deployment required. Because the harness boots the composed kernel, module contributions come along: a test that exercises a route contributed by a module exercises the same merged pipeline production runs. See [Testing](/docs/testing/) for the harness in depth.
+
+## What's Next
+
+- [Defining Modules](/docs/modules-plugins/defining-modules) — the contribution points modules provide
+- [Addons & Distribution](/docs/modules-plugins/addons) — install and manage modules
+- [Modules & Plugins](/docs/modules-plugins) — the composition model at a glance
+- [Applications](/docs/core-concepts/applications) — the kernel in depth
+- [The defineX Convention](/docs/core-concepts/definex) — one grammar across every factory

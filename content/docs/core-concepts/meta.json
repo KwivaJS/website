@@ -1,0 +1,17 @@
+{
+  "title": "Core Concepts",
+  "pages": [
+    "index",
+    "definex",
+    "applications",
+    "configuration",
+    "auto-discovery",
+    "lifecycle",
+    "context",
+    "services",
+    "modules",
+    "plugins",
+    "error-handling",
+    "type-inference"
+  ]
+}

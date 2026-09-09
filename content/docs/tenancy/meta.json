@@ -1,0 +1,10 @@
+{
+  "title": "Multi-Tenancy",
+  "pages": [
+    "index",
+    "configuration",
+    "resolution",
+    "scoping",
+    "isolation"
+  ]
+}

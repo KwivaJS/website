@@ -1,0 +1,110 @@
+---
+title: Dev Overlay
+description: "Requests, latency, errors, server timing, and the query list — live telemetry visible while you develop."
+---
+
+The development overlay turns the telemetry that Kwiva already records into a live, in-flight view of your application. While you develop, the same spans, logs, and metrics that would normally sit in a collector are rendered next to your app, so a slow page, a failing query, or a validation misfire shows up in place instead of in a separate tool.
+
+## What You See During Development
+
+The overlay surfaces five things:
+
+- **Request timeline** — every request your dev server handles, with method, route, status, and total duration.
+- **Span waterfall** — the full tree for any request: middleware, validation, controller, model queries, cache lookups, and response.
+- **Errors** — validation failures and exceptions, each carrying its `requestId` for follow-up.
+- **Query list** — every model query executed, with model, operation, normalized SQL, and duration.
+- **Cache decisions** — which responses and queries were served from cache versus computed, and which tags invalidated them.
+
+Requests are always sampled in development, so the timeline is complete — nothing is probabilistically skipped while you are debugging.
+
+## How It Surfaces
+
+The overlay is part of the development server, not a separate dashboard process. `kwiva dev` renders it alongside the running app, and because the pipeline is the same tracing runtime used by production, the overlay requires no extra wiring and adds nothing to the request path when it is closed. Data is derived from the same spans and logs that exporters would carry — the overlay reads from the shared runtime, so what you debug locally is exactly what your collector would receive in production.
+
+## The Request Timeline
+
+Each row corresponds one-to-one with a request your dev server handled. Clicking a request expands it into its span waterfall, mirroring the shape telemetry would export in production:
+
+```text
+http GET /api/posts (server)
+ ├─ middleware.request-id
+ ├─ middleware.session
+ ├─ middleware.tenant
+ ├─ validation (route schema)
+ ├─ controller posts.list
+ │   └─ model posts.query (sql + params normalized)
+ └─ http.response (status, size)
+```
+
+Read the waterfall top to bottom to find where time went: a request that took 900 milliseconds total with 800 of it inside one model query is a query problem, not a routing problem. The overlay makes that distinction obvious at a glance.
+
+## Server Timing
+
+Every dev response also carries a `server-timing` header, which frames the same timing information on the wire. This means you can inspect request timing directly from browser developer tools — the network tab shows the handler's staged timings without switching back to the terminal:
+
+```text
+server-timing: middleware;dur=0.4, validation;dur=0.2, controller;dur=8.1, model;dur=7.6, total;dur=9.0
+```
+
+The header and the overlay read from the same span data, so the numbers always agree. Matching them is fast, too: find the row in the overlay for the request you are inspecting and the network tab shows the same stages.
+
+## The Query List
+
+The query list is where most performance debugging actually happens. Every query builder call run during development appears with:
+
+- The model and operation (list, get, create, update, delete, aggregate)
+- Normalized SQL with redacted parameters
+- Duration in milliseconds
+
+Spotting a missing index is often a matter of scrolling the list, finding the query that dominates every request it touches, and reading its SQL. Because spans and the query list share the tracing runtime, each query in the list links back to the request that triggered it.
+
+The list is also the fastest education in what the framework actually issued: a route that produces a surprising number of queries for its code — an unexpected relation traversal, a where clause that parsed differently than intended — announces itself here before it becomes a production latency chart.
+
+## Errors
+
+When a handler throws or a schema rejects input, the overlay surfaces it inline:
+
+- **Validation failures** — the field and reason for each rejected input, mirroring field-mapped validation errors.
+- **Exceptions** — the error message and stack, tagged with the request's `requestId`.
+
+Every error row carries its correlation ID, so a failure you leave behind in the terminal can be cross-referenced with browser behavior later.
+
+The overlay is also where non-blocking findings from the verification gate show up while you work — diagnostics that do not block are surfaced next to the app instead of failing the run, so warnings stay visible without interrupting the dev loop.
+
+## The Console
+
+The same data is available programmatically in the `kwiva console` REPL:
+
+```text
+app.trace.last()      // the most recent span tree
+app.logs.tail(20)     // the last 20 log lines
+```
+
+This is useful for scripting assertions while developing — assert a request produced no failed spans, or assert a specific log line exists after a test call.
+
+The console and the overlay read the same in-memory buffers, so neither can drift from the other: a request visible in the overlay is the same request `app.trace.last()` returns, in the same shape.
+
+## The Investigative Loop
+
+The overlay is built for a specific working rhythm, and the surfaces line up with the order you investigate:
+
+1. Watch the **request timeline** as you reproduce the problem — the failing or slow request is right there
+2. Open its **span waterfall** and see which stage owns the time
+3. Read the **query list** for the accountable model query, and read its normalized SQL
+4. If the failure is an error, copy the `requestId` from the error row and follow it through logs
+
+Because every surface reads from one span tree, the loop never requires switching tools mid-investigation. A slow request, its slow query, and its error row are three views of the same event, not three separate records to reconcile.
+
+## What the Overlay Replaces
+
+Before you wire up a collector, the overlay answers the three questions that dominate early development: "which request is slow," "which query is slow," and "what failed." By the time you add exporters for production, the span data the overlay rendered is already flowing through the same runtime — nothing extra needs to be implemented to graduate from local debugging to distributed tracing.
+
+The overlay is deliberately dev-only. It renders telemetry in development; it is not a production dashboard, and production doesn't pay its rendering cost. The surface it shows is a window onto the same data your collector will receive.
+
+## What's Next
+
+- [Tracing](/docs/observability/tracing) — the span tree the overlay renders
+- [Logging](/docs/observability/logging) — the log lines behind the error rows
+- [Metrics](/docs/observability/metrics) — the counters and series measured alongside spans
+- [Lifecycle](/docs/http/lifecycle) — the middleware and validation stages shown in the waterfall
+- [Getting Started](/docs/getting-started) — run `kwiva dev` and open the overlay

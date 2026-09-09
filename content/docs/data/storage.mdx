@@ -1,0 +1,162 @@
+---
+title: File Storage
+description: "The storage abstraction — disks, uploads, signed URLs, tenant-scoped paths, and test fakes."
+---
+
+Kwiva provides a unified storage abstraction for file and object storage: user uploads, generated artifacts, backups, and public assets all go through one API. The surface is disk-based — you address resources through a named disk (`local`, `s3`, `r2`, `kv`, `memory`) and the same code runs locally, in a container, at the edge, and in tests. Paths are tenant-scoped automatically, so multi-tenant isolation applies to files as strictly as it applies to rows.
+
+## Configuring Disks
+
+```ts
+// src/config/storage.ts
+export default defineConfig('storage', {
+  defaults: {
+    public:  { driver: 'local', root: 'public' },
+    uploads: { driver: 'local', root: 'storage/uploads' },
+    s3: {
+      driver: 's3',
+      bucket: 'acme-media',
+      region: 'eu-west-1',
+      env: { accessKey: 'S3_ACCESS_KEY', secret: 'S3_SECRET' },
+    },
+  },
+})
+```
+
+Each named entry under `defaults` is a **disk**: a driver plus its options. Disks are the unit you reference from application code (`{ disk: 'uploads' }`), and environment variables supply credentials per deployment.
+
+## Disk Drivers
+
+| Driver | Engine | Environments |
+|---|---|---|
+| `local` | Filesystem adapter | Dev, node and bun server presets |
+| `s3` | S3 client | Production object storage |
+| `r2` | S3-compatible (Cloudflare R2) | Edge deploys |
+| `kv` | Key-value store adapter | Edge-safe small artifacts |
+| `memory` | In-memory adapter | Tests |
+
+The driver table drives the choice: `local` keeps development friction at zero, `s3`/`r2` are production and edge, `kv` fits small frequently-read artifacts, and `memory` makes tests fast and isolated.
+
+## The Storage API
+
+```ts
+import { storage } from '@kwiva/core'
+
+const path = await storage.put('uploads/avatars', bytes, {
+  disk: 'uploads',
+  contentType: 'image/png',
+})
+const file = await storage.get(path, { disk: 'uploads' })
+
+const url = storage.url(path, { disk: 's3' })                  // public CDN URL
+const signed = await storage.signedUrl(path, { expiresIn: 3600 }) // time-limited
+
+await storage.delete(path)
+const { files, dirs } = await storage.list('uploads/avatars')
+await storage.copy(path, 'backups/' + path)
+await storage.move(from, to)                                   // convenience: copy + delete
+const meta = await storage.stat(path)                          // { size, contentType, lastModified, etag }
+const size = await storage.size(path)                          // quick byte count
+```
+
+| Method | Returns | Notes |
+|---|---|---|
+| `put(path, bytes, opts)` | Stored path | `contentType`, `visibility`, disk selection |
+| `get(path, opts)` | File contents | Reads back what `put` stored |
+| `url(path, opts)` | Public URL | Disk-aware (CDN, bucket host, or local route) |
+| `signedUrl(path, opts)` | Time-limited URL | `expiresIn` seconds; async |
+| `delete(path)` | Void | Removes the object |
+| `list(prefix)` | `{ files, dirs }` | Directory-style listing |
+| `copy(from, to)` / `move(from, to)` | Void | Duplicate or relocate |
+| `stat(path)` | Metadata | `size`, `contentType`, `lastModified`, `etag` |
+
+## URLs and Visibility
+
+`put` accepts a `visibility` option, and every URL helper is visibility-aware:
+
+```ts
+await storage.put('covers/book.png', bytes, { disk: 'public', contentType: 'image/png' })
+const url = storage.url('covers/book.png', { disk: 'public' })   // public CDN URL
+
+const signed = await storage.signedUrl('documents/report.pdf', { expiresIn: 3600 })
+```
+
+| Mode | Helper | Behavior |
+|---|---|---|
+| Public | `storage.url(path, opts)` | Stable, cacheable URL to the object |
+| Signed | `storage.signedUrl(path, opts)` | Time-limited URL (`expiresIn` seconds); expired links 403 |
+| Private objects | — | Access only via `get()` or a signed URL |
+
+Private-by-default is the safe baseline: objects that are not explicitly public require a signed URL or server-side `get`. Public assets go on a `public` disk so their URLs are stable and cacheable.
+
+## Which Disk for Which Payload
+
+| Payload | Disk | Rationale |
+|---|---|---|
+| User uploads (avatars, documents) | `uploads` (local dev) → `s3`/`r2` (prod/edge) | Sized for real objects, scalable |
+| Shipped assets | `public/` directory | Served raw, immutable hashed assets |
+| Small hot artifacts (flags, config) | `kv` | Edge-safe, fast reads |
+| Tests | `memory` via `storage.fake()` | Zero I/O, assertable |
+
+There is no single right disk; the abstraction exists so the choice is deployment-scoped rather than baked into handlers.
+
+## Tenant-Scoped Paths
+
+Paths are prefixed per tenant automatically (`storage/{tenantId}/...`), derived from the same tenant context that scopes queries. Two tenants can never collide under one disk — the isolation guarantee follows the files even when a disk is shared.
+
+> [!NOTE]
+> The prefix is applied by the framework when using `storage`, so store the **returned** path on the model — it already includes the tenant segment. Reconstruction by concatenating raw segments is unnecessary and error-prone.
+
+## Upload Flow (Server-Side)
+
+Validation happens at the route; storage handles the write; the model stores the path:
+
+```ts
+c.post('/avatar', async ({ file, session }) => {
+  const { filename, bytes, type } = await file()
+  return storage.put(`avatars/${session.user.id}`, bytes, { contentType: type })
+}, {
+  file: { maxSize: '2mb', types: ['image/png', 'image/jpeg'] },
+})
+```
+
+| Concern | Handled where |
+|---|---|
+| Size and type limits | Route `file` options, before bytes reach storage |
+| Write and content type | `storage.put` |
+| Later retrieval | Path stored on the model |
+
+See [HTTP: File Uploads](/docs/http/file-uploads) and [Guides: File Uploads](/guides/file-uploads) for the full request-side pipeline.
+
+## Static Assets
+
+- `public/` is served raw by the engine; the build copies it into `.output/public`.
+- Hashed build assets are served with immutable cache headers.
+- `kwiva build` emits a manifest mapping logical names to hashed names for `assetUrl()`.
+
+Static assets and `storage` are complementary: public/ for shipped application assets, `storage` for user data that changes over time.
+
+## Testing
+
+```ts
+storage.fake()
+await putImage('uploads/avatar.png')
+// assert on stored paths and bytes without any driver
+```
+
+`storage.fake()` swaps every disk for the in-memory driver and lets tests assert on stored paths and contents — the same fake-based discipline used for the queue. See [Testing](/docs/testing) for the full harness.
+
+## Backups and Exports
+
+Backup and export surfaces are `v1.x`:
+
+- `storage.dump(disk)` — snapshot a disk's contents.
+- `kwiva storage:sync s3 uploads` — sync between disks.
+- DB backup tasks follow the `defineTask('db-backup')` pattern: dump the database, then `storage.put('backups/...')` to the backup disk.
+
+## What's Next
+
+1. [HTTP: File Uploads](/docs/http/file-uploads) — multipart parsing and route options
+2. [Models](/docs/data/models) — storing returned paths as `f.file()` / `f.image()` fields
+3. [Tenancy](/docs/tenancy) — how tenant-scoped paths compose with tenant-scoped queries
+4. [Guides: File Uploads](/guides/file-uploads) — an upload flow from form to model

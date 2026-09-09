@@ -1,0 +1,11 @@
+{
+  "title": "Authentication",
+  "pages": [
+    "index",
+    "configuration",
+    "sessions",
+    "providers",
+    "protecting-routes",
+    "client-usage"
+  ]
+}

@@ -1,0 +1,162 @@
+---
+title: Architecture Internals
+description: "The layered architecture — application, @kwiva/* framework APIs, sealed internal engines, toolchain, runtime — plus auto-discovery and module boundaries."
+---
+
+Kwiva is organized as a strict set of layers with one non-negotiable dependency direction. Understanding the layers tells you who owns what, where code is allowed to run, and why the framework can change its internals without ever breaking your application.
+
+## The Core Architectural Rule
+
+> The app depends only on the framework. The framework depends on internal engines and the Rust-speed toolchain. App code never imports an engine by name. Every app-facing construct is a `defineX` factory.
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ APP (src/) — models, http, routes, services, jobs, events, ui, config│
+│   writes defineX(...) only · imports only @kwiva/*                   │
+├──────────────────────────────────────────────────────────────────────┤
+│ FRAMEWORK API (@kwiva/*)                                             │
+│   core · config · schema · data · http · router · react · client ·   │
+│   queue · events · auth · studio · mcp · testing                     │
+├──────────────────────────────────────┬───────────────────────────────┤
+│ ENGINES (internal, sealed)           │ TOOLCHAIN (deeply integrated) │
+│   server carrier (presets, route     │   bundler pipeline            │
+│   rules, kv/blob, websockets)        │   TS/JSX transformer          │
+│   SQL engine                         │   resolver                    │
+│   auth engine                        │   minifier · built-in linter  │
+│   client-cache engine                │   formatter · declarations    │
+├──────────────────────────────────────┴───────────────────────────────┤
+│ RUNTIME: Bun (primary) · Node (compatible) · edge (via presets)      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+Each arrow in the diagram is a hard boundary enforced by the built-in linter. The rest of this page walks each layer.
+
+## Layer 1: The Application
+
+Application code lives in a lowercase, convention-driven filesystem. Directories and files use kebab or dot case — `send-welcome.ts`, `posts.$id.tsx` — and one `defineX` factory maps to each file type.
+
+```
+src/
+  bootstrap/app.ts           defineApp — the application kernel
+  app/models/                defineModel — one file per model
+  app/http/controllers/      defineController — one file per resource
+  app/http/middleware/       defineMiddleware — one file per middleware
+  app/http/auth.ts           defineAuth — providers and sessions
+  app/services/              defineService — business logic
+  app/jobs/                  defineJob — background work
+  app/events/                defineEvent — event definitions
+  app/policies/              definePolicy — authorization policies
+  app/tasks/                 defineTask — scheduled work
+  app/console/               defineCommand — CLI commands
+  routes/                    controller registration, ordering, route rules
+  config/                    every configuration module
+  database/migrations/       generated, editable schema steps
+  database/seeders/          defineSeeder seed files
+  ui/pages/                  definePage — file-based routing
+  .kwiva/                    GENERATED — never edit, gitignored
+```
+
+The whole application is booted from one kernel:
+
+```ts
+// src/bootstrap/app.ts
+import { defineApp } from '@kwiva/core'
+import auth from '../app/http/auth'
+import { controllers, models, middleware } from '@kwiva/core/discover'
+
+export const app = defineApp({
+  auth,
+  models,          // auto-discovered from src/app/models
+  controllers,     // auto-discovered from src/app/http/controllers
+  middleware,      // stack defined in src/config/app.ts, files discovered
+  providers: [
+    // boot/shutdown hooks for services
+  ],
+})
+```
+
+Application code writes only framework APIs. The `kwiva check` command gates this with the `no-engine-imports` rule, so a stray engine import fails in CI before it ever reaches production. The lowercase filesystem, the `defineX`-per-file convention, and the boot-from-one-kernel pattern are all mechanical contracts — they are enforced by the linter, not by documentation.
+
+## Layer 2: The Framework API
+
+This layer is the public surface of Kwiva: many equal packages that compose into a framework. Application code imports from this layer and nowhere below it.
+
+| Package | Exposes | Backed by |
+|---|---|---|
+| `@kwiva/core` | `defineApp`, context, dependency injection, `config()`, errors, `definePolicy` | Core + the internal server engine |
+| `@kwiva/config` | `defineConfig`, config-folder loader, typed env | Own |
+| `@kwiva/schema` | Field DSL, model IR, validation | Own |
+| `@kwiva/data` | `defineModel`, query builder, transactions, relations, factories | Sealed SQL engine |
+| `@kwiva/http` | `defineController`, `defineMiddleware`, `defineServerRoute`, lifecycle, guards, macros, WebSockets, tasks | Own + the internal server engine |
+| `@kwiva/router` | File-based router core, loaders, typed navigation | Own |
+| `@kwiva/react` | `definePage`, SSR renderer, providers, `Link`, `useNavigate` | Router + the internal server engine |
+| `@kwiva/react` (data hooks) | `useResource`, `useList`, `useMutation`, infinite, prefetch, devtools | Sealed client-cache engine |
+| `@kwiva/client` | Generated typed RPC SDK | Own, from controller and model IR |
+| `@kwiva/queue` | `defineJob`, workers, retries, backoff, dead-letter queue | Own transport |
+| `@kwiva/events` | `defineEvent`, listeners, transactional outbox | Own |
+| `@kwiva/auth` | `defineAuth`, `requireAuth`, sessions, OAuth, passkeys | Sealed auth engine |
+| `@kwiva/studio` | Generated Studio screens | React + the component kit |
+| `@kwiva/mcp` | MCP server generated from the IR | Own |
+| `@kwiva/testing` | App test harness, fixtures | Own |
+
+Two rules govern this layer. First, `core` and `schema` are leaves: nothing underneath them may depend on anything else in the framework. Second, no framework package ever re-exports an engine API — sealing holds at the package boundary, not just the convention level. If a framework surface never hands you an engine type, there is nothing for an engine import to reach for.
+
+## Layer 3: Internal Engines (Sealed)
+
+Kwiva delegates deep infrastructure to sealed internal engines. "Sealed" means the framework configures and owns them, and application code never imports them directly — the framework surface is the only way in.
+
+| Engine domain | Responsibilities behind the seal |
+|---|---|
+| Server carrier | Deploy presets, storage mounts, route rules (SWR, ISR, cache, redirect, proxy), tasks and cron, WebSockets, prerendering |
+| SQL engine | Schema translation, SQL query generation, transactions, relations |
+| Auth engine | Sessions, OAuth, passkeys, organizations |
+| Client-cache engine | Query keys, caching, invalidation, optimistic updates, devtools |
+
+Because engines are sealed, they can be swapped or upgraded without touching application code. One consequence matters for every Kwiva developer: you never pin or pass around engine configuration directly. Everything you can set flows through `defineX` options or the config folder, and the internal engine conforms to that.
+
+Sealing is what makes the upgrade story honest. An engine major version bumps behind the framework surface, the framework absorbs the breaking changes, and application code moves on untouched. The trade is deliberate: the framework owns more surface, in exchange for a stable contract the application can rely on.
+
+## Auto-Discovery and Module Boundaries
+
+The framework never asks you to register constructs. Registration is file-scan based: models, controllers, middleware, and pages are discovered from their directories by convention. `src/routes/*.ts` exists for cases where you need explicit registration, ordering, or route rules — not as a required step.
+
+Auto-discovery feeds the typed artifacts in `src/.kwiva/`, which is generated on every dev and build run and rebuilt whenever the filesystem changes:
+
+```
+src/.kwiva/
+  route-manifest.json   route IR → client, OpenAPI, MCP
+  model-ir.json         model IR
+  types/                generated ambient types
+```
+
+Never hand-edit anything under `.kwiva/`. It is a build product, regenerated deterministically from your definitions.
+
+## Layer 4: The Toolchain and the Runtime
+
+Below the engines sits the toolchain and the runtime. The `kwiva` CLI is built directly on a Rust-speed toolchain: the bundler pipeline handles client and server production builds and package distribution builds; the TS/JSX transformer powers on-the-fly transforms in development and codemods for `kwiva upgrade`; the resolver serves the dev module graph; the minifier shrinks production output; the built-in linter enforces convention gates; the built-in formatter normalizes code; and declaration emission produces fast type-declaration output for packages.
+
+The runtime layer is Bun-first: native TypeScript execution with no compile step in development, fast startup, and single-binary output when you need it. Node-compatible and edge outputs are produced through the engine presets, so the application surface stays identical across runtimes — deploy differences never leak into your code.
+
+## How the Layers Enforce the Guarantees
+
+The guarantees this section relies on are enforced mechanically, and each one has an owner:
+
+| Guarantee | Enforced by |
+|---|---|
+| App imports only `@kwiva/*` | `kwiva check` — `no-engine-imports` gate |
+| One factory per file type | `kwiva check` — `defineX-file-conventions` gate |
+| Lowercase filesystem | `kwiva check` — `lowercase-paths` gate |
+| Loaders use the typed client | `kwiva check` — `no-raw-fetch-in-loaders` gate |
+| Secrets stay out of bundles | `kwiva check` — `no-secrets-in-client` gate |
+| No engine re-exports | Package-boundary rules in the dependency graph |
+| Deploy surface stays stable | Sealed engines behind the framework API |
+
+Checks run in CI, so the architecture holds on every commit — not just for the developers who remember the diagram. The build pipeline produces the artifacts; the linter produces the discipline.
+
+## What's Next
+
+- [Package Boundaries](/docs/advanced/package-boundaries) — The dependency graph and where each package may import
+- [Request Lifecycle](/docs/advanced/request-lifecycle) — What happens inside the pipeline once a request arrives
+- [Auto-Discovery](/docs/core-concepts/auto-discovery) — How Kwiva finds and registers every construct
+- [Applications](/docs/core-concepts/applications) — How `defineApp` bootstraps the kernel shown above
+- [Project Structure](/docs/getting-started/project-structure) — The full lowercase filesystem, page by page

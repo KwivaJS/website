@@ -1,0 +1,173 @@
+---
+title: Queues & Workers
+description: "Queue transport, worker processes, concurrency control, the dead-letter queue, rate limiting, and running workers in production."
+---
+
+A queue is a named pipeline that holds dispatched work until a worker is ready to run it. A worker is a process that drains the queue, invoking the handler of each job it pulls. Together they are the transport half of the background layer: `defineJob` declares the work, and the queue guarantees it arrives, waits its turn, retries on failure, and eventually finishes — or lands in the dead-letter queue.
+
+The transport is framework-owned and configurable. The same `defineJob` file runs unchanged no matter which driver moves its payload, so choosing a transport is a config decision rather than a code change.
+
+## Queue Concepts
+
+- **A named queue** is a pipeline for a class of work. `emails`, `invoices`, and `nightly` are common examples. A job's `queue` option routes it; a worker subscribes by queue name.
+- **The default queue** is where jobs go when they declare no `queue` option. It is configured in `src/config/queue.ts`.
+- **The worker** is the built-in queue worker process, started from the CLI, that pulls jobs and runs their handlers with the configured concurrency.
+- **The dead-letter queue** is not a separate pipeline but a conclusion: jobs that exhaust their retries land in the `failed_jobs` table, where `kwiva queue:failed` and `kwiva queue:retry` manage them.
+
+## Configuration
+
+The queue transport is declared once in `src/config/queue.ts`:
+
+```ts
+// src/config/queue.ts
+import { defineConfig } from '@kwiva/config'
+
+export default defineConfig('queue', {
+  defaults: { driver: 'redis', url: 'redis://localhost:6379', default: 'default' },
+  queues: { emails: { driver: 'redis' }, nightly: { driver: 'database' } },
+  env: { url: 'REDIS_URL' },
+})
+```
+
+Named queues can override the transport: `emails` stays on the shared driver while `nightly` moves to the database-backed driver, depending on what the workload needs. The `env.url` binding lets the connection URL come from an environment variable, so config stays environment-agnostic.
+
+| Config | Meaning |
+|---|---|
+| `defaults.driver` | Transport driver used by default |
+| `defaults.url` | Connection URL for the transport |
+| `defaults.default` | Name of the default queue |
+| `queues` | Named queues, each able to override the driver |
+| `env.url` | Environment variable that overrides the connection URL |
+
+## Transport Drivers
+
+| Driver | Use | Notes |
+|---|---|---|
+| `redis` | Production default | Fast, shared transport for multi-instance workers |
+| `database` | Zero-infra | Polls the `kwiva_jobs` table — SQLite-friendly, no extra service |
+| `memory` | Dev and tests | Synchronous and instant; `queue.fake()` enables assertions |
+
+The driver is a config decision, not a code change. Development defaults to `memory` or `database`; production typically uses `redis`. Switching a queue's driver is a one-line edit in `src/config/queue.ts`. The `memory` driver pairs with `queue.fake()` in tests, which swaps the transport for an in-memory recorder so assertions can verify dispatch without running handlers.
+
+## Running Workers
+
+```bash
+kwiva queue:work --queue=emails,default --concurrency=5
+kwiva queue:listen                 # verbose mode (dev)
+```
+
+- `kwiva queue:work` starts the built-in queue worker. `--queue` accepts a comma-separated list of queues to drain; `--concurrency` sets how many jobs run at once.
+- `kwiva queue:listen` is the verbose development variant, printing each poll and job as it happens.
+- `--trace` links the logs of every job attempt to a per-job correlation id, so you can follow one job through retries. See [Job Observability](/docs/background-work/observability).
+
+| Flag | Description |
+|---|---|
+| `--queue=emails,default` | Comma-separated queues this worker consumes |
+| `--concurrency=N` | Number of jobs the worker processes in parallel |
+| `--trace` | Links structured logs per job id |
+
+## Concurrency Control
+
+Concurrency is controlled where the worker starts, not where the job is defined. A single worker process can run many jobs in parallel:
+
+```bash
+kwiva queue:work --queue=emails --concurrency=5
+```
+
+This keeps throughput tuning an operational decision. Raise concurrency when jobs are I/O-bound and waiting on the network; lower it when jobs contend for CPU, a database, or a third-party API with its own limits. Per-job `rateLimit` (v1.x) is the complementary control for shaping the throughput of a single job type, and per-queue rate limiting (v1.x) shapes a whole pipeline.
+
+## Dead-Letter Queue and Failure Management
+
+A job that exhausts its `attempts` is moved to the `failed_jobs` table. The CLI owns the failure lifecycle:
+
+```bash
+kwiva queue:failed                 # DLQ table listing
+kwiva queue:retry <id>             # republish one failed job
+kwiva queue:retry --all            # republish everything in the DLQ
+kwiva queue:clear <queue>          # drop all pending jobs in a queue
+```
+
+`kwiva queue:failed` lists each failure with its attempt history and error, so you can decide between retrying, fixing the root cause, and clearing the queue. The size of the dead-letter queue is also surfaced as a metric — an early warning for jobs that fail systematically.
+
+## Rate Limiting
+
+Per-job rate limiting (v1.x) caps how often a given job type may run, which protects the systems jobs touch:
+
+```ts
+export default defineJob('sync-crm', async ({ payload }) => {
+  // ...
+}, {
+  queue: 'integrations',
+  attempts: 5,
+  backoff: 'exponential',
+  rateLimit: { max: 100, per: 60 },   // at most 100 executions per minute
+})
+```
+
+When a job type hits its window, the worker leaves it queued instead of running it again too soon. This is the right lever at the application layer — it protects an external service without deploying separate middleware. Rate limits can be attached per queue as well as per job (v1.x), which suits a shared service used by several job types.
+
+## Chaining and Batching
+
+Queues support two composition forms (v1.x) from the dispatch side:
+
+```ts
+await queue.chain([ImportRows, BuildReport, NotifyDone]).dispatch()
+
+await queue.batch(rows.map(r => ImportRows.dispatch(r)))
+  .then(({ successes, failures }) => ...)
+```
+
+`queue.chain` runs members strictly in order, each queued after its predecessor succeeds. `queue.batch` fans out concurrently and reports on the aggregate outcome. Both treat promise-based offloading to the transport the same way single dispatch does, so transactional guarantees apply evenly. See [Jobs — Chaining and Batches](/docs/background-work/jobs).
+
+## Semantics at a Glance
+
+| Feature | Surface | Status |
+|---|---|---|
+| Retries + backoff | `attempts`, `backoff` | v1 |
+| Delayed dispatch | `delay` | v1 |
+| Priority | `priority` | v1 |
+| Concurrency | worker `--concurrency` | v1 |
+| Dead-letter queue | `failed_jobs` table + CLI | v1 |
+| Idempotency | `idempotencyKey` dedupe | v1 |
+| Progress reporting | `job.progress(n)` | v1 |
+| Rate limiting | per-job and per-queue | v1.x |
+| Chains | `queue.chain` | v1.x |
+| Batches | `queue.batch(...).then()` | v1.x |
+| Model-aligned payload typing | `schema` typed from model IR | v1 |
+
+## Running Workers in Production
+
+Two deployment shapes are supported:
+
+- **Separate worker process (recommended).** Deploy the worker as its own process so background work scales and fails independently of the web tier: `kwiva deploy --entry worker` produces a worker entry on the node and bun presets.
+- **In-process for development.** Workers inside the dev server are fine locally, where a single process keeps everything simple.
+
+Rules that hold in production:
+
+1. Do not run the worker where jobs must not block web requests.
+2. Give the worker its own concurrency and health supervision; a busy worker should not take down the web tier.
+3. Point workers at the same transport that dispatched the jobs — several worker instances can drain one queue, and that is the intended scaling model.
+
+Scaling is horizontal by construction: add worker processes pointed at the same transport to consume more. The transport, not the process count, is what orders and dedupes work. Deployment details live in [Deployment](/docs/deployment/).
+
+## Transaction-Aware Dispatch
+
+Jobs dispatched inside a database transaction are held until the transaction commits, using the same mechanism as the event outbox. If the transaction rolls back, the dispatch is never delivered:
+
+```ts
+await db.transaction(async (tx) => {
+  await Order.create({ amount: payload.total })
+
+  await SendWelcome.dispatch({ userId })
+})
+```
+
+This closes the gap between "the row is committed" and "the work is enqueued", so background work never runs against data the caller later rolled back. See [Transactions](/docs/data/transactions).
+
+## What's Next
+
+- [Jobs](/docs/background-work/jobs) — defining work, dispatch options, and retries
+- [Scheduled Tasks](/docs/background-work/scheduling) — cron-driven work that hands off to queues
+- [Job Observability](/docs/background-work/observability) — queue depth, DLQ size, and per-job traces
+- [Testing](/docs/testing/) — `queue.fake()` and dispatch assertions
+- [Deployment](/docs/deployment/) — running workers as separate processes

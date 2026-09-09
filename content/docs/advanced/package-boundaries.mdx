@@ -1,0 +1,135 @@
+---
+title: Package Boundaries
+description: "The strict acyclic dependency graph among @kwiva/* packages, what each package owns, engine sealing, and where application code can and cannot import."
+---
+
+Package boundaries are Kwiva's contract for organizing code: what each package owns, what it may depend on, and — just as important — what it may never import. These boundaries are enforced by the built-in linter, which means they hold in CI, not just on paper.
+
+## The Principle
+
+Dependency direction is always downward through the layers: application depends on the framework, the framework depends on sealed internal engines and the Rust-speed toolchain, and nothing depends upward. Two concrete rules follow:
+
+1. **App code imports only the framework** — `@kwiva/*` packages, plus the application's own modules and ordinary dependencies that are not internal engines.
+2. **No framework package re-exports an engine API** — engine capabilities reach the application only through the `@kwiva/*` surface.
+
+Rule two is the more subtle half. An engine that stays importable from outside is not sealed; sealing is only real when the public entry points of `@kwiva/*` are the sole way to reach engine behavior. That is why the boundaries are enforced at the package level rather than left as a documentation convention.
+
+## Monorepo Layout
+
+Kwiva is a monorepo of many equal packages, each versioned independently so a concern can change and release on its own schedule:
+
+```
+kwiva/
+  packages/
+    core/      @kwiva/core
+    config/    @kwiva/config
+    schema/    @kwiva/schema
+    data/      @kwiva/data
+    http/      @kwiva/http
+    router/    @kwiva/router
+    react/     @kwiva/react
+    client/    @kwiva/client
+    queue/     @kwiva/queue
+    events/    @kwiva/events
+    auth/      @kwiva/auth
+    studio/    @kwiva/studio
+    mcp/       @kwiva/mcp
+    testing/   @kwiva/testing
+  example/     the dogfood application
+  test/        functionality · types · node · edge smoke tests
+  build.ts     package build orchestration
+```
+
+Each package ships independent semantic versions with a documented compatibility contract for the internal engines. Package builds are produced by the Rust-speed bundler pipeline plus fast declaration emission — type declarations without a separate typecheck pass. `example/` is the dogfood application: the acceptance bar every phase of the roadmap is measured against, and the live proof that the package boundaries work in a real app.
+
+## The Dependency Graph
+
+The package graph is strict and acyclic:
+
+```
+studio ──► react · data
+react  ──► router · client · client-cache engine (sealed)
+client ──► core (types only)
+http   ──► core · schema · data · server carrier engine (sealed)
+data   ──► core · schema · sql engine (sealed)
+auth   ──► core · http · auth engine (sealed)
+queue  ──► core · events
+events ──► core · data
+config ──► core
+schema ──► (nothing — leaf)
+core   ──► (nothing — leaf)
+```
+
+Rules that keep this graph healthy:
+
+- `core` and `schema` are leaves — they depend on nothing.
+- No package depends on the CLI tooling; the toolchain consumes the framework, never the reverse.
+- Application-facing packages never re-export engine APIs, which is what keeps engines sealed at the boundary.
+- The services container used by application code depends only on `core`, keeping business-logic definitions squarely on the framework surface.
+
+Two more pieces complete the picture. The **CLI tooling** produces the `kwiva` binary and is the sole consumer of the Rust-speed build pipeline; it is used by you on the command line, never imported by application code. The **component kit** used by Studio sits alongside the react packages and stays out of the application-facing dependency path.
+
+## What Each Package Owns
+
+| Package | Owns |
+|---|---|
+| `@kwiva/core` | The application kernel, context, dependency injection, config access, errors, policies |
+| `@kwiva/config` | The config-folder loader, typed environment binding, precedence rules |
+| `@kwiva/schema` | The field DSL and the model IR — the leaf that everything else reads from |
+| `@kwiva/data` | Models, the query builder, transactions, relations, factories, migrations |
+| `@kwiva/http` | Controllers, middleware, server routes, the request lifecycle, guards, macros, WebSockets, tasks |
+| `@kwiva/router` | The file-based router core, loaders, and typed navigation |
+| `@kwiva/react` | Pages, the SSR renderer, providers, navigation primitives, and data hooks |
+| `@kwiva/client` | The generated typed RPC SDK, derived from controller and model IR |
+| `@kwiva/queue` | Jobs, workers, retries, backoff, and the dead-letter queue |
+| `@kwiva/events` | Event definitions, listeners, and outbox delivery |
+| `@kwiva/auth` | Authentication definitions, sessions, OAuth, and passkeys |
+| `@kwiva/studio` | The generated operations interface, derived from the model IR |
+| `@kwiva/mcp` | The MCP server and tools, derived from the IR |
+| `@kwiva/testing` | The app test harness, fixtures, and fakes |
+
+The ownership table is also a fault-localization map: a bug in query-generation semantics belongs to `@kwiva/data`, a bug in lifecycle ordering belongs to `@kwiva/http`, and a bug in the derived client types belongs to `@kwiva/client`. When something misbehaves, the owning package is where the fix and the test live.
+
+## Engine Sealing
+
+The internal engines — the server carrier, the SQL engine, the auth engine, and the client-cache engine — are configured by the framework and never imported by application code. Sealing gives Kwiva the freedom to upgrade an engine underneath you without changing your source, and it prevents the all-too-common pattern where "one small config thing" in an engine leaks into dozens of files.
+
+The seal is enforced by the built-in linter. `kwiva check` runs the convention gates:
+
+- `no-engine-imports` — flags any direct engine import in application code
+- `no-raw-fetch-in-loaders` — keeps page loaders on the typed client
+- `no-secrets-in-client` — keeps signed secrets out of client bundles
+- `defineX-file-conventions` — one factory per file type, in the right directory
+- `lowercase-paths` — the lowercase filesystem enforced mechanically
+
+### What is sealable
+
+Anything the framework configures is sealable: deploy presets, storage mounts, route rules, task execution, WebSockets, the SQL dialect translation, sessions, OAuth, and the client query cache. What is *not* sealable is the public surface itself — `defineX` factories, config modules, and the documented framework API are the contract application code compiles against, and they change through deprecation and codemods, never behind the application's back.
+
+## Where Application Code Can and Cannot Import
+
+Application code may import:
+
+- Any `@kwiva/*` package, from the framework surface
+- The application's own modules and services
+- Ordinary dependencies that are not internal engines
+
+Application code may **not** import:
+
+- Any sealed internal engine, by name or by path — flagged by `no-engine-imports`
+- Framework internals beneath the public entry points of a package
+
+If you find yourself reaching for an engine import to accomplish something, the framework surface almost always has the intended entry point — a `defineX` option, a config module, or a built-in middleware. That is the design: every app-facing capability is reachable through the framework API.
+
+Two practical heuristics for staying inside the boundaries:
+
+1. **Search the framework surface first.** Before importing anything, ask which `defineX` factory, config module, or middleware should own the capability you need. The answer is almost always "one exists."
+2. **If a configuration option is missing, treat it as a feature request, not a workaround.** An "escape hatch" import today becomes a maintenance tax across every engine upgrade tomorrow — the sealed boundary is exactly what protects you from paying it.
+
+## What's Next
+
+- [Architecture Internals](/docs/advanced/architecture-internals) — The layered model these boundaries enforce
+- [The defineX Convention](/docs/core-concepts/definex) — The factory surface you import from `@kwiva/*`
+- [Auto-Discovery](/docs/core-concepts/auto-discovery) — How the framework finds files by convention, not registration
+- [Security in Production](/docs/security/production) — Hardening guidance built on the same boundaries
+- [Project Structure](/docs/getting-started/project-structure) — Where each kind of file lives in your application

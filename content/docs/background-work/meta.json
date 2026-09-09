@@ -1,0 +1,10 @@
+{
+  "title": "Background Work",
+  "pages": [
+    "index",
+    "jobs",
+    "queues",
+    "scheduling",
+    "observability"
+  ]
+}

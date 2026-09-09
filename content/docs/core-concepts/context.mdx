@@ -1,0 +1,181 @@
+---
+title: Context
+description: "The typed request context — request data, session, tenant, store, and response controls — available in every middleware, guard, and handler."
+---
+
+## What is Context?
+
+Every middleware, guard, and handler receives the same object: the request context. It is a typed object that carries everything the current request needs — parsed input, session and tenant, application state, dependencies, and the knobs for shaping the response. Nothing useful is fetched from a global or ambient source; everything arrives through the context, which is how the framework keeps every handler explicit and testable.
+
+The context is assembled once during request processing, after routing and before validation. Assembly follows the fixed order described in [Lifecycle](/docs/core-concepts/lifecycle): parse query and body, decode cookies and load the session, resolve the tenant, then run `state`, `decorate`, and `resolve`. After assembly the context is threaded through validation, guards, the handler, and response hooks unchanged.
+
+## Using Context in Handlers
+
+```ts
+defineController('posts', (c) => ({
+  create: c.post('/', async (ctx) => {
+    // ctx.body     — typed request body
+    // ctx.params   — typed URL parameters
+    // ctx.query    — typed query string
+    // ctx.session  — the current session
+    // ctx.tenant   — the current tenant
+    // ctx.store    — per-request application state
+
+    const post = await Post.create({
+      ...ctx.body,
+      authorId: ctx.session.user.id,
+      tenantId: ctx.tenant.id,
+    })
+
+    return post
+  }),
+}))
+```
+
+The same context is available in middleware and guards, so code that runs before the handler can read and set values that handlers depend on.
+
+## Typed Per-Route Context
+
+Context types are inferred, not declared. Each property's type comes from a definition elsewhere in the app:
+
+| Property | Type source |
+|---|---|
+| `ctx.body` | Validation schema in the route definition |
+| `ctx.params` | URL parameter patterns |
+| `ctx.query` | Query validation schema |
+| `ctx.headers` | Header validation schema |
+| `ctx.cookies` | Cookie validation schema |
+| `ctx.session` | Auth configuration |
+| `ctx.tenant` | Tenancy configuration |
+| `ctx.store` | `state` declared in `defineApp` |
+| decorated keys | `decorate` declared in `defineApp` |
+| resolved keys | `resolve` declared in `defineApp` |
+
+Because the route declares its own schemas, `params.id` is a `string`, `body` matches the body schema exactly, and invalid input never reaches the typed value the handler sees — validation runs first. See [Validation](/docs/http/validation) for what is checked, and [Type Inference](/docs/core-concepts/type-inference) for how the types are derived.
+
+Concretely, the route definition is what produces the handler's types:
+
+```ts
+c.post('/', handler, {
+  body: { title: 'string', body: 'string?' },   // ctx.body: { title: string, body?: string }
+  query: { draft: 'string?' },                  // ctx.query: { draft?: string }
+  params: { id: 'string' },                     // ctx.params: { id: string }
+})
+```
+
+Change the schema and the handler re-types; the handler does not and cannot declare a conflicting body type.
+
+## A Walk Through Assembly
+
+The context is assembled in a fixed order during request processing, so every downstream stage sees a progressively richer object:
+
+1. **Parse** — query string and body are parsed (JSON, form, multipart) into `ctx.query` and raw body.
+2. **Decode and load** — cookies are decoded and the session is loaded into `ctx.session` from the configured store.
+3. **Resolve tenant** — tenant resolution runs from `src/config/tenancy.ts` (`subdomain`, `path`, `header`, or `fixed`) and lands on `ctx.tenant`.
+4. **Run app extensions** — `state` initializes the store, `decorate` attaches singletons, and `resolve` computes per-request values.
+
+Only after assembly does validation run against the schemas, followed by guards and the handler. The ordering guarantees are documented on [Lifecycle](/docs/core-concepts/lifecycle); the key consequence for app code is that a guard's `beforeHandle` always sees the resolved session, tenant, and validated input.
+
+## Context in Middleware and Guards
+
+Middleware and guards read and write the same context the handler sees. Middleware typically fills the store before the handler:
+
+```ts
+defineMiddleware.on('onRequest', async (ctx, next) => {
+  ctx.store.requestId = ctx.headers['x-request-id'] ?? crypto.randomUUID()
+  return next()
+})
+```
+
+Guards read context to make authorization decisions, and can return an error through the same `error` member a handler would use:
+
+```ts
+defineController('admin', (c) => c.guard({
+  beforeHandle: ({ session, error }) => {
+    if (session.user?.role !== 'admin') return error('FORBIDDEN')
+  },
+}, (g) => ({
+  dashboard: g.get('/dashboard', dashboardHandler),
+})))
+```
+
+What a guard writes is visible to the handler; what a handler writes is visible to `onAfterHandle` and `onResponse` hooks.
+
+## Response Controls: set and error
+
+Two context members control what happens to the value a handler returns:
+
+```ts
+handler: async ({ params, query, body, headers, cookies, session, tenant, store, set, error }) => {
+  set.status = 201
+  set.headers['x-cache'] = 'miss'
+  return { id: params.id, ...body }
+}
+```
+
+- `set` carries status (defaults to 200), response headers, and cookie mutations. Mutating `set` after returning a value produces a fully formed response.
+- `error` returns a typed error response that maps into the shared taxonomy — `return error('NOT_FOUND', { message: 'no such post' })`. See [Error Handling](/docs/core-concepts/error-handling).
+
+Returning a plain object or array serializes to JSON; returning a web `Response` passes through unchanged.
+
+## Extending Context: state, decorate, resolve
+
+Three mechanisms in `defineApp` shape what the context contains, and they differ in when and how values are produced:
+
+- **`state`** — declares typed fields on `ctx.store`. It is app-scoped state that lives on the per-request store.
+- **`decorate`** — attaches singletons that appear on the context unchanged and are created once at boot.
+- **`resolve`** — derives per-request values asynchronously during context assembly; it runs on every request and can read request data.
+
+```ts
+defineApp({
+  state: {
+    startTime: Date.now(),
+  },
+  decorate: {
+    client: createClient(),
+  },
+  resolve: async ({ headers, store }) => ({
+    tenant: await resolveTenant(headers),
+    requestStart: store.startTime,
+  }),
+})
+```
+
+Handlers then see the assembled result — `ctx.tenant`, `ctx.client`, `ctx.store.startTime` — all typechecked. `resolve` entries may be provided as an array of named resolvers, which is useful when derivations share intermediate work.
+
+> [!TIP]
+> Rules of thumb: `state` for typed request state, `decorate` for immutable singletons that exist once, and `resolve` for per-request values that depend on the inbound request (headers, path, cookies).
+
+## Reading Data Middleware Produces
+
+Because middleware runs before the handler, it can enrich the context for the handler and for everything downstream:
+
+```ts
+defineMiddleware('request-id', async (ctx, next) => {
+  ctx.store.requestId = ctx.headers['x-request-id'] ?? crypto.randomUUID()
+  return next()
+})
+```
+
+Session, tenant, and request ID are exactly this pattern internally: produced by pipeline stages, consumed by handlers, and typed through the assembled context.
+
+## Work After the Response
+
+The context exposes `waitUntil` for post-response work. It keeps the connection alive only as long as the task needs and is safe on edge runtimes:
+
+```ts
+handler: async ({ waitUntil }) => {
+  waitUntil(telemetry.flush())
+  return { ok: true }
+}
+```
+
+Both event emission and queue dispatch use this shape internally — they acknowledge in-band and complete durably. See [Lifecycle](/docs/core-concepts/lifecycle).
+
+## What's Next
+
+1. [Lifecycle](/docs/core-concepts/lifecycle) — where the context is assembled, step by step
+2. [Guards](/docs/http/guards) — reading the context to enforce authorization
+3. [Validation](/docs/http/validation) — the schemas that type `body`, `query`, `params`, `headers`, and `cookies`
+4. [Error Handling](/docs/core-concepts/error-handling) — the `error` member and response shaping
+5. [Sessions](/docs/auth/sessions) — how `ctx.session` is loaded and typed

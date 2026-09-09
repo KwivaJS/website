@@ -1,0 +1,89 @@
+---
+title: How do I handle file uploads?
+description: "Accept multipart uploads with ctx.file(), validate size and type, and store bytes with the storage API."
+---
+
+Handling file uploads means reading multipart bytes from a request with `ctx.file()`, validating them at the route level, and writing them to a configured storage disk with the storage API.
+
+## Prerequisites
+
+- A controller to host the upload route
+- A configured storage disk for uploads and, for production, an S3-compatible disk
+- Session middleware in place so the handler knows who owns the file
+
+## Configure a storage disk
+
+Define named disks in the storage config. Use `local` while developing and an `s3`-compatible disk in production:
+
+```ts
+import { defineConfig } from "@kwiva/data"
+
+export default defineConfig("storage", {
+  defaults: {
+    uploads: { driver: "local", root: "storage/uploads" },
+    s3: { driver: "s3", bucket: "acme-media", region: "eu-west-1", env: { accessKey: "S3_ACCESS_KEY", secret: "S3_SECRET" } },
+  },
+})
+```
+
+## Accept a multipart upload
+
+`ctx.file()` resolves the uploaded file in a handler. `storage.put` writes the bytes to a disk and returns the stored path, which you typically save back onto a model field:
+
+```ts
+import { defineController } from "@kwiva/http"
+import { storage } from "@kwiva/core"
+
+export default defineController("profile", (c) => ({
+  uploadAvatar: c.post("/avatar", async ({ file, session }) => {
+    const { filename, bytes, type } = await file()
+    return storage.put(`avatars/${session.user.id}`, bytes, {
+      disk: "uploads",
+      contentType: type,
+    })
+  }, {
+    file: { maxSize: "2mb", types: ["image/png", "image/jpeg"] },
+  }),
+}))
+```
+
+## Validate size and type
+
+The `file` option rejects files that don't match before the handler runs, so handlers only ever see conforming bytes:
+
+```ts
+file: { maxSize: "2mb", types: ["image/png", "image/jpeg"] }
+```
+
+## Read and serve stored files
+
+The storage API reads files back, exposes public URLs for a public disk, and issues time-limited URLs for private access:
+
+```ts
+const file = await storage.get(path, { disk: "uploads" })
+const url = storage.url(path, { disk: "s3" })
+const signed = await storage.signedUrl(path, { expiresIn: 3600 })
+```
+
+Use the public URL for openly served assets and `signedUrl` when a file must stay private but reachable for a short window, such as a download link.
+
+## Keep tenant data isolated
+
+When multi-tenancy is configured, storage paths are prefixed per tenant automatically, so no extra code is needed:
+
+```
+storage/{tenantId}/uploads/avatars/{userId}/photo.png
+```
+
+## Verify it works
+
+- Start the dev server with `kwiva dev` and sign in.
+- Upload a file: `curl -F "avatar=@photo.png" http://localhost:3000/profile/avatar` returns a stored path.
+- Upload a `.txt` file or one larger than `2mb` and the request is rejected before the handler runs.
+- Request the returned `url` or `signedUrl` and the response matches the uploaded bytes.
+
+## Related Documentation
+
+- [File Uploads](/docs/http/file-uploads)
+- [File Storage](/docs/data/storage)
+- [Controllers](/docs/http/controllers)

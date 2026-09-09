@@ -1,0 +1,196 @@
+/* Self-hosted fonts (Fontsource) */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/newsreader/opsz-italic.css";
+
+@import "tailwindcss";
+@import "fumadocs-ui/css/generated/glass.css";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+@import "fumapress/css/preset.css";
+@import "@fumapress/ai/css/preset.css";
+
+@theme {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", monospace;
+  --font-display: "Archivo Variable", "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-quote: "Newsreader Variable", Georgia, "Times New Roman", serif;
+
+  --default-font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-kwiva-50: #f0f4ff;
+  --color-kwiva-100: #dbe4ff;
+  --color-kwiva-200: #bac8ff;
+  --color-kwiva-300: #91a7ff;
+  --color-kwiva-400: #748ffc;
+  --color-kwiva-500: #5c7cfa;
+  --color-kwiva-600: #4c6ef5;
+  --color-kwiva-700: #4263eb;
+  --color-kwiva-800: #3b5bdb;
+  --color-kwiva-900: #364fc7;
+  --color-kwiva-950: #1e3a8a;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Code blocks */
+pre code {
+  font-family: var(--font-mono);
+}
+
+/* ------------------------------------------------------------------ */
+/* Kwiva design system — "framework blueprint"                         */
+/* ------------------------------------------------------------------ */
+
+/* Display typography: expanded grotesk */
+.font-expanded {
+  font-stretch: 122%;
+}
+
+.font-expanded-md {
+  font-stretch: 112%;
+}
+
+/* Editorial pull quotes: Newsreader italic */
+.kw-quote {
+  font-family: var(--font-quote);
+  font-style: italic;
+  font-optical-sizing: auto;
+}
+
+/* Blueprint grid background */
+.kw-grid {
+  background-image:
+    linear-gradient(to right, rgb(92 124 250 / 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(92 124 250 / 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.dark .kw-grid {
+  background-image:
+    linear-gradient(to right, rgb(124 143 252 / 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(124 143 252 / 0.06) 1px, transparent 1px);
+}
+
+/* Soft radial atmosphere for the hero */
+.kw-hero-glow {
+  background: radial-gradient(
+    ellipse 70% 55% at 50% -8%,
+    rgb(92 124 250 / 0.14),
+    transparent 70%
+  );
+}
+
+.dark .kw-hero-glow {
+  background: radial-gradient(
+    ellipse 70% 55% at 50% -8%,
+    rgb(92 124 250 / 0.16),
+    transparent 70%
+  );
+}
+
+/* Fade content at horizontal edges */
+.kw-mask-x {
+  mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+}
+
+/* ------------------------- Blueprint SVG nodes ------------------------- */
+
+.bp-box {
+  fill: var(--color-fd-background);
+  stroke: var(--color-fd-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  transition:
+    stroke 0.35s ease,
+    fill 0.35s ease;
+}
+
+.bp-box[data-on="true"] {
+  stroke: var(--color-kwiva-500);
+  fill: color-mix(in oklab, var(--color-kwiva-500) 9%, transparent);
+}
+
+.bp-dashed {
+  stroke-dasharray: 5 4;
+}
+
+.bp-edge {
+  fill: none;
+  stroke: var(--color-fd-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  transition: stroke 0.35s ease;
+}
+
+.bp-edge[data-on="true"] {
+  stroke: var(--color-kwiva-500);
+}
+
+.bp-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  fill: var(--color-fd-foreground);
+}
+
+.bp-sub {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  fill: var(--color-fd-muted-foreground);
+  transition: fill 0.35s ease;
+}
+
+.bp-sub[data-on="true"] {
+  fill: var(--color-kwiva-600);
+}
+
+.dark .bp-sub[data-on="true"] {
+  fill: var(--color-kwiva-300);
+}
+
+.bp-note {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  fill: var(--color-fd-muted-foreground);
+  opacity: 0.75;
+}
+
+/* ------------------------- Flow connectors ------------------------- */
+
+@keyframes kw-dash-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+.kw-flow-dash {
+  stroke-dasharray: 3 5;
+  animation: kw-dash-flow 1.1s linear infinite;
+}
+
+/* ------------------------- Motion safety ------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .kw-flow-dash {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

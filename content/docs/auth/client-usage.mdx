@@ -1,0 +1,119 @@
+---
+title: Client-Side Auth
+description: "useSession() in the browser, sign-in and sign-out flows, session-aware data hooks, and SSR-safe rendering."
+---
+
+Authenticated frontends need three things: current identity, a way to change it, and UI that reacts when it changes. Kwiva delivers all three through `useSession()` and the session-aware data hooks, with server rendering that never flashes the wrong state. The session that arrives in the browser is the same typed identity the server uses — no client-side re-derivation, no duplicated auth logic in components.
+
+## The useSession Hook
+
+The frontend entry point is `useSession()`, which returns the current user, the sign-out action, and the pending state:
+
+```tsx
+const { user, signOut, isPending } = useSession()
+```
+
+- **user** — the typed session user, or `null` when signed out.
+- **signOut** — revokes the session and updates every session-aware hook.
+- **isPending** — lets you render loading UI instead of a guessed state during the initial fetch.
+
+The hook is reactive by default: page components subscribe, and the whole tree re-renders when identity changes — a signing out from a profile menu clears the navbar's avatar without a reload. Every component that reads `useSession()` observes the same underlying session, so identity changes propagate consistently across the tree.
+
+### Where the identity comes from
+
+The hook resolves its value from the root context rather than making its own determinations about cookie contents. During server render the session is read from the cookie; on the client the same value is hydrated from the SSR payload. `user` therefore reflects the server's authenticated decision — the browser never has to re-derive "who am I" and risk disagreeing with the server.
+
+### The pending state
+
+`isPending` covers the one moment where the hook does not yet know the answer: the initial fetch before identity resolves. Render a neutral state there instead of guessing. Guessing wrong produces the classic flash — a signed-out avatar that flips to the signed-in one, or a protected view that briefly renders for a stranger. The hook prefers the honest `isPending` so your UI can render a meaningful placeholder exactly once, then settle into the server's answer.
+
+## The Typed Identity in Components
+
+The user object from `useSession()` is the same typed shape as the server's session user, down to the field names in your auth configuration. If you map `fields: { email, name, role }`, every component that reads `session.user.role` sees a typed enum, and every `session.user.email` is a string the type system knows. The pairing of `useSession()` and `useCan(...)` covers the two frontend questions — "who is here?" and "what can they do?" — without either hook needing to know how the answer was produced.
+
+### Reactivity across the tree
+
+The hook subscribes to the shared session value, so identity changes propagate to every component that reads it — not just the component that called `signOut`. When a session is revoked server-side (an admin ban, a device revoke), the client does not need to wait for a full reload: the next session-sensitive operation picks up the null identity, conditional UI settles into the signed-out view, and `beforeLoad` guards on navigations enforce the boundary if the user tries to continue.
+
+## Sign-in Screens and the AuthScreen Pattern
+
+The ui-kit `AuthScreen` pattern covers the common flows — credential sign-in, OAuth buttons, and (in v1.x) passkey and magic-link entry points — and calls the generated endpoints on your behalf. Custom pages are equally welcome as long as they call the same endpoints. What the framework guarantees in both cases is that the *route* to a session is standard. The protocol details — hashing on the server, OAuth callback handling, token issuance — never leak into page code, so a custom page cannot accidentally implement credentials incorrectly.
+
+## Sign-In and Sign-Out Flows
+
+The generated auth endpoints are called either directly by your chosen screen or by the ready-made ui-kit `AuthScreen` pattern. A minimal custom flow calls the API and lets the hooks react:
+
+```tsx
+const { user, isPending } = useSession()
+
+if (!user && !isPending) {
+  // Render the sign-in form; submitting calls POST /auth/sign-up
+  // or /auth/sign-in through the typed client.
+  return <AuthScreen />
+}
+
+return <Dashboard />
+```
+
+Whichever provider a user signs in with — password, OAuth, passkey, or magic link — the session object that `useSession()` exposes is the same shape. The provider affects only how the browser gets there, not what the hook hands back. OAuth redirect flows, passkey ceremonies, and magic link clicks all terminate in the same session state, so the conditional render above is provider-agnostic by construction.
+
+Sign-out is symmetric: call `signOut()` and the hook flips to the signed-out state everywhere at once. Since revocation lives in the shared session store, a sign-out in one tab invalidates the session for every other tab and every other instance on the next request. The same call powers the "sign out of this device" and "sign out everywhere" paths — the difference is only how many session rows are removed.
+
+## Session-Aware Data Hooks
+
+The data hooks are session-aware by design. `useResource`, `useList`, and `useMutation` inherit identity from the authenticated client, so queries that depend on the current user just work:
+
+```tsx
+const { data: myPosts } = useList(Post, { where: { status: 'published' } })
+const { mutate } = useMutation(Post.update, {
+  optimistic: (input, current) => ({ ...current, ...input }),
+})
+```
+
+No token plumbing, no manual headers. Session cookies flow automatically on every RPC call, and mutations that require specific permissions are authorised server-side by their policy — a session can call `posts.list` and still fail `posts.publish` without any client-side guard bookkeeping.
+
+The client never grants itself access; the server enforces. Passing an ability check client-side is a UX optimization, not an access decision. `useCan` and conditional rendering shape the UI to the user's abilities, while the actual gate stays in the route lifecycle where no amount of client manipulation can bypass it.
+
+## SSR-Safe Session Rendering
+
+Auth state is rendered correctly on the first paint, not corrected after hydration. The session is read from the cookie during server render, and the same identity is dehydrated into the data hooks for the client:
+
+- The server renders the signed-in view directly.
+- The client hydrates the identical state — no logged-out flash, no flicker race.
+- `beforeLoad` guards have already run server-side, so unauthenticated visitors are redirected before any protected markup is streamed.
+
+This is why page guards belong in `beforeLoad` and not in a client-only effect: the server makes the decision, and the client simply agrees. A client-only effect would render the protected tree first and correct it after hydration — visible to the user, wasteful of bandwidth, and wrong on the first paint.
+
+## Root Context Injection
+
+The session is part of the root context available to the whole tree. `createRootWithContext` injects session, config, and client into your layout, so nested components access identity without prop drilling:
+
+```tsx
+export default createRootWithContext({
+  session,
+  client,
+})
+```
+
+From there, `useSession()` resolves from context and every page, layout, and component can read the authenticated identity in the same typed way. The typed RPC client rides in the same context, so session cookies attach to every call without per-component wiring.
+
+## Conditional UI Patterns
+
+Three patterns cover most authenticated UI:
+
+- **Gate whole views** — `beforeLoad` redirects unauthenticated visitors away from a page before it renders.
+- **Branch on identity** — `useSession()` decides which variant to render, as in the sign-in example above.
+- **Branch on ability** — `useCan('posts.publish')` shows or hides an action for an authenticated user who may not hold the permission.
+
+The first is a route decision, the second a page decision, and the third a component decision — each at the right granularity, each backed by the same session.
+
+### Invariant guards
+
+For pages that must be reachable only by signed-in users, the invariant belongs in `beforeLoad`, not in component logic. Relying on `useSession()` alone in a component protects the *renderer* but not the *route* — a direct navigation, a deep link, or a stale client can still fetch data before the component decides to hide it. `beforeLoad` sits earlier, runs server-side, and redirects before the loader fetches anything, which is why the page-level pattern above uses it rather than a component effect.
+
+## What's Next
+
+- [Sessions](/docs/auth/sessions) — what `useSession()` is really reading, and how it expires
+- [Protecting Routes](/docs/auth/protecting-routes) — `beforeLoad` guards that run before this UI renders
+- [Data Hooks](/docs/frontend/data-hooks) — session-aware `useResource`, `useList`, and `useMutation`
+- [RPC Client](/docs/frontend/rpc-client) — how session cookies flow through typed calls

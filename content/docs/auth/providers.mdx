@@ -1,0 +1,95 @@
+---
+title: Auth Providers
+description: "Password, OAuth, passkeys, and magic links — enabling providers, comparing their behavior, and rendering sign-in screens."
+---
+
+Providers are how users prove who they are. `defineAuth` composes them from a single map, and each enabled provider contributes its endpoints, its hooks, and its UI requirements to the generated auth surface. You enable the methods your product needs and let the framework's auth engine handle the protocol details — token exchange, callback handling, credential storage, and session creation are all the framework's, never yours.
+
+Every provider funnels into the same session machinery. That single fact shapes everything else on this page: the method a user chooses to sign in does not change what a session is, what `ctx.session` contains, or how policies treat the resulting identity. A password sign-in and a Google sign-in both end with a typed session user backed by the same user model row.
+
+## The Provider Map
+
+```ts
+export default defineAuth({
+  providers: {
+    password: { enabled: true, minLength: 10 },
+    oauth: {
+      google: { clientId: env('GOOGLE_CLIENT_ID'), secret: env('GOOGLE_SECRET') },
+      github: true,
+    },
+    passkeys: { enabled: true },           // v1.x
+    magicLink: { enabled: true },          // v1.x (needs mail)
+  },
+})
+```
+
+Unlisted providers are simply absent — no routes registered, no dependencies pulled in, no UI to account for. The map is declarative in both directions: whatever you list becomes part of the generated surface, and whatever you omit never lands in the bundle.
+
+## Provider Comparison
+
+| Provider | How the user signs in | Routes | Status | Requires |
+|---|---|---|---|---|
+| Password | Email and password | `POST /auth/sign-up` · `/auth/sign-in` · `/auth/sign-out` | v1 | Nothing extra |
+| OAuth | Redirect through a third-party identity provider | `GET /auth/oauth/:provider` · callback | v1 | Provider credentials |
+| Passkeys | WebAuthn device credentials | `POST /auth/passkeys/*` | v1.x | A WebAuthn-capable runtime |
+| Magic link | Passwordless email link | `POST /auth/sign-in` (email flow) | v1.x | A mail integration |
+
+### Password
+
+The default choice and the one every app can start with. Passwords are hashed with an engine-level argon2id policy — the framework never sees plaintext beyond the sign-up and sign-in boundaries — and the configurable `minLength` lets you enforce a floor that matches your threat model. Responses are enumeration-safe: `UNAUTHORIZED` is returned both when the email is unknown and when the password is wrong, so sign-in never reveals which accounts exist.
+
+The flow is three routes: sign-up creates the account and a session, sign-in exchanges credentials for a session, and sign-out revokes it. The auth routes are additionally rate-limited by default through `src/config/api.ts`, so credential endpoints are throttled without you wiring anything.
+
+### OAuth
+
+For delegated identity, the OAuth providers are configured as a per-provider list that stays open — Google and GitHub are the built-in names, and the pattern extends to any provider. Google takes explicit credentials:
+
+```ts
+oauth: {
+  google: { clientId: env('GOOGLE_CLIENT_ID'), secret: env('GOOGLE_SECRET') },
+}
+```
+
+`github: true` opts into environment-driven defaults. The generated flow runs `GET /auth/oauth/:provider`, redirects through the identity provider, and handles the callback — creating the account on first sign-in and reusing it afterward. OAuth accounts are stored as engine-managed columns on the user model, so `ctx.session` looks identical whether the user arrived by password or by Google.
+
+The OAuth handshake follows the standard OAuth2 flow: the browser is redirected to the identity provider, the user approves, and the callback exchanges the authorization grant for identity before the engine establishes a session for the resulting user record. If the same email later signs in with a password, both paths resolve to the same row — there is no split identity to reconcile.
+
+> [!NOTE]
+> The OAuth callback routes are intentionally framework-owned. You never write the redirect or token-exchange handler; you configure credentials and the routes appear.
+
+### Passkeys (v1.x)
+
+WebAuthn lets users register a device credential — a built-in biometric or security key — and sign in without a password. `passkeys: { enabled: true }` adds the registration and authentication routes under `/auth/passkeys/*`. Passkeys compose cleanly with passwords: a user can sign up with a password and later add a passkey to the same account.
+
+The registration handshake stores the public credential in engine-managed columns on the user model, and subsequent authentication verifies the device challenge — no secret is ever stored on the server. The framework owns the raw WebAuthn ceremony; your application sees the same session result as any other provider.
+
+### Magic Links (v1.x)
+
+Passwordless sign-in sends a one-time link by email; following it creates or resumes a session. Because the token is delivered out of band, there is no password to leak or reset. This provider requires a mail integration to deliver the links, and `verifyEmail` user flows reuse the same delivery channel.
+
+## Enabling Multiple Providers
+
+Providers are deliberately independent and stackable. The generated routes merge into one surface, hooks fire consistently for every sign-in method, and each user carries a single unified identity — the engine-managed columns track which accounts and credentials belong to whom, so mixed-method users are not separate records.
+
+One consequence worth planning for: a user who signs in with a password and later signs in with Google is the same `session.user` — and therefore subject to the same policies and the same `role` — because both flows resolve to the same user model row. Provisioning, bans, and revocation therefore act on one account regardless of how the user authenticates.
+
+| Concern | Behavior with multiple providers |
+|---|---|
+| Identity | One user row per person, regardless of sign-in method |
+| Hooks | `onSignIn` fires exactly once per successful sign-in, any provider |
+| Revocation | Sign-out or ban invalidates every session, any provider |
+| Policies | Same `ctx.session`, same `role`, same decisions |
+
+## Sign-in Screens
+
+Rendering is your choice. Providers work with ready-made screens from the ui-kit `AuthScreen` pattern, or with fully custom pages — the page just has to call the same generated endpoints. What you never have to write is the protocol layer: token exchange, callback handling, credential storage, and session creation are all the framework's.
+
+On the client, the result of any provider is the same reactive identity exposed by `useSession()`. A minimal custom flow renders an `AuthScreen` from the ui-kit when the user is unauthenticated and the real app when a session exists — the provider only affects which form the screen shows, never what the hook hands back.
+
+## What's Next
+
+- [Auth Configuration](/docs/auth/configuration) — the rest of the `defineAuth` surface
+- [Sessions](/docs/auth/sessions) — what a sign-in produces, and how it behaves
+- [Protecting Routes](/docs/auth/protecting-routes) — guarding what signed-in users can reach
+- [Client-Side Auth](/docs/auth/client-usage) — provider-agnostic `useSession()` in the frontend
+- [Security](/docs/security/default-protections) — rate limiting and enumeration resistance

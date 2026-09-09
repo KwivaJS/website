@@ -1,0 +1,153 @@
+---
+title: Factories
+description: "Model-aware factories — attribute definitions, runtime API, overrides, states, and test/seed usage."
+---
+
+Factories generate realistic test data without tripping over the model's guarantees. They are **model-aware**: a factory respects required fields, enums, constraints, and relations, so a default `create()` produces a valid row — no N+1 of forgotten columns in your test fixtures. Factories are the engine behind seeders and the standard fixture tool for the test suites (unit, integration, API, and e2e all accept them).
+
+## Defining a Factory
+
+```ts
+// src/database/factories/posts.ts
+import { defineFactory } from '@kwiva/data'
+
+export const PostFactory = defineFactory(Post, (f) => ({
+  title: f.fake((fake) => fake.lorem.sentence()),
+  body: f.fake((fake) => fake.lorem.paragraphs(3)),
+  status: f.pick('draft', 'published', 'archived'),
+  author: f.relation(User),
+  comments: f.count(5, Comment),
+}), { timestamps: true })
+```
+
+| Attribute helper | Generates |
+|---|---|
+| `f.fake(fn)` | Deterministic fake values via a faker instance |
+| `f.pick(...values)` | One value chosen randomly from the given options |
+| `f.relation(Model)` | A related model, created and linked |
+| `f.count(n, Model)` | `n` related rows (typical for has-many) |
+
+Fields you omit from the definition are still generated for you from the model's types — a string field without a rule gets plausible text, an enum gets a valid member, a boolean gets true or false. The definition is a layer of intent on top of model-aware defaults, not a complete attribute list.
+
+## Override Precedence
+
+When a row is generated, three sources merge in a fixed order:
+
+```
+model defaults → factory definition → named state → call-site overrides
+```
+
+| Source | Wins over |
+|---|---|
+| Model defaults (types, enums, `default()`) | The baseline |
+| Factory definition (`f.fake`, `f.pick`, ...) | Model defaults, for the fields it names |
+| Named state (`states.draft`) | The factory definition |
+| `create({ ... })` overrides | Everything |
+
+Because the model's `default()` values participate, a factory never has to restate a field that already has a sane default — and a call site can always pin a specific value.
+
+## Determinism in fakes
+
+`f.fake` is seeded, so a factory run produces the same sequence of plausible values unless you opt into randomness. This matters in tests and seeds:
+
+| Goal | Approach |
+|---|---|
+| Reproducible fixtures | Keep the fake's default deterministic seed |
+| Varied volume data | Let the seeder/factory vary per call (`count(n)` naturally varies sequences) |
+| Unique business keys | Prefer `f.pick` over collisions-prone text, or set the identifier explicitly in an override |
+
+The contract is pragmatic: deterministic by default, variable when you want volume, explicit when a value is load-bearing.
+
+## The Runtime API
+
+```ts
+const post = await Post.factory().create()                  // persisted, valid row
+const post = await Post.factory().create({ title: 'Custom' }) // persisted with overrides
+const posts = await Post.factory().count(10).create()       // 10 persisted rows
+const post = await Post.factory().make()                    // unsaved instance
+await Post.factory().save(post)                             // persist an instance
+const draft = await Post.factory().draft().create()         // apply a named state
+```
+
+| Method | Effect |
+|---|---|
+| `create()` | Build and persist one (or `count(n)`) rows |
+| `create(overrides)` | Merge attribute overrides into the generated record |
+| `make()` | Build without persisting — useful for asserting before write |
+| `save(instance)` | Persist an instance produced by `make()` |
+| `count(n)` | Number of rows for the next `create()` |
+| Named states | `.draft()`, `.published()` — each declared state becomes a chainable method |
+
+Overrides win over the definition, and the definition wins over model defaults. `make()` runs the same validation logic as `create()`, so invalid overrides surface in tests before anything touches the database.
+
+## States
+
+States are named attribute bundles that override the base definition:
+
+```ts
+export const PostFactory = defineFactory(Post, (f) => ({
+  title: f.fake((fake) => fake.lorem.sentence()),
+  status: f.pick('draft', 'published', 'archived'),
+}), {
+  states: {
+    draft:     { status: 'draft' },
+    published: { status: 'published', publishedAt: 'now' },
+  },
+})
+```
+
+```ts
+const published = await Post.factory().published().create()
+```
+
+| Behavior | Detail |
+|---|---|
+| Merge order | `base definition → state → call-site overrides` |
+| Composition | Call-site overrides always win over the state |
+| Typed | State names and their attributes are typechecked against the model |
+
+The `publishedAt: 'now'` form is resolved by the framework at create time, so states stay declarative while values stay correct.
+
+## Factories and Relations
+
+Relation helpers keep graphs consistent:
+
+```ts
+export const PostFactory = defineFactory(Post, (f) => ({
+  title: f.fake((fake) => fake.lorem.sentence()),
+  author: f.relation(User),
+  comments: f.count(3, Comment),
+}))
+```
+
+| Pattern | Result |
+|---|---|
+| `f.relation(User)` | Create a fresh related row for each built parent |
+| `f.relation(User, existingUser)` | Link the given instance, never create |
+| `create({ author: existingUser })` | Same as above, enforced at the call site |
+| `f.count(3, Comment)` | Three children per parent, present in the graph |
+
+Factories for graphs — a post with comments, an order with items — pair `f.relation` with `f.count` so the composed fixture is one call rather than a hand-written tree. This composes with the model's lazy relation system, so a factory for a deep tree only pulls in the models it actually references.
+
+## Using Factories in Tests
+
+```ts
+import { describe, expect, it } from 'bun:test'
+import { Post } from '@kwiva/data'
+import { PostFactory } from '../database/factories/posts'
+
+it('lists published posts', async () => {
+  await PostFactory.count(3).create({ status: 'published' })
+  const result = await Post.query().where('status', 'published').get()
+  expect(result).toHaveLength(3)
+})
+```
+
+Because factories clean up after themselves via the test harness, look for the fixture setup on [Testing: Integration](/docs/testing/integration-testing) and [Testing: Unit](/docs/testing/unit-testing).
+
+## What's Next
+
+1. [Seeders](/docs/data/seeders) — factories inside idempotent seeders
+2. [Testing](/docs/testing) — the fixture discipline across suite types
+3. [Models](/docs/data/models) — the definitions factories respect
+4. [CLI: Generators](/docs/cli/generators) — `make:factory` and related scaffolding

@@ -1,0 +1,154 @@
+---
+title: Client SDK
+description: "createClient({ baseUrl }) — setup, typed end-to-end usage, SSR-safe behavior, prefetching, and testing."
+---
+
+`@kwiva/client` is how your app talks to its own API — a fully typed, SSR-safe RPC client derived from the same definitions that produce the routes. Because it is typed from the route manifest, it can never fall out of sync with the server.
+
+One client instance covers both runtimes. On the server it runs in-process with no network hop; in the browser it issues authenticated fetch requests. The same type universe, the same method surface, the same discriminated results.
+
+## createClient
+
+```ts
+import { createClient } from '@kwiva/client'
+
+export const client = createClient({ baseUrl: 'https://api.acme.dev' })
+```
+
+`createClient` accepts a `baseUrl` for remote or explicitly targeted deployments. When called without one, the client targets the API prefix from your configuration, reads session cookies, and knows the complete route surface. The same call shape works for generated model routes and custom controller actions.
+
+You typically create one instance and share it, injecting it into app context so handlers and loaders can use it:
+
+```ts
+// src/bootstrap/app.ts
+import { defineApp } from '@kwiva/core'
+import { createClient } from '@kwiva/client'
+
+export default defineApp({
+  decorate: {
+    client: createClient(),
+  },
+})
+```
+
+Handlers, guards, and loaders then read `ctx.client` with the exact types the server declares.
+
+## Typed End-to-End
+
+The type pipeline runs from model through controller to pages:
+
+```
+defineModel → defineController → @kwiva/client → definePage loader → data hooks
+```
+
+Add a field to a model and the client's types update immediately. Rename a controller action and every call site that uses it fails to compile until updated. There is no generated artifact to refresh and no type duplication anywhere in the stack.
+
+## Server-Side Usage
+
+On the server the client executes in-process — no network call, no serialization, no port management. Page loaders use it directly:
+
+```ts
+definePage({
+  loader: async ({ params, client }) => {
+    const post = await client.posts.get(params.id)
+    return { post }
+  },
+})
+```
+
+Calls made during a single server render are deduplicated, so the same list requested by two loaders is resolved once and fetched a single time.
+
+## Browser Usage and Sessions
+
+In the browser the client performs fetch requests against the API. Session cookies flow automatically — sign in once, and every subsequent call carries the session. For cookie-based apps there is no manual token plumbing at the call site. For token-based integrations, the client presents the bearer credential on each request without changing the call shape.
+
+The client bundle never carries secrets. Typed environment access is server-side only, so configuration values such as API keys never reach the browser even though the same client type travels both runtimes.
+
+## Prefetching
+
+The client exposes prefetch helpers for loaders to warm the cache ahead of an interaction. A prefetched query lands in the same keyed cache the data hooks read, so a link hover or an anticipated navigation resolves with data already present instead of a second round-trip. The keys are derived from model and controller identity, matching the hooks exactly.
+
+## Hydration into Data Hooks
+
+Results fetched on the server dehydrate into data hooks on the client, so `useResource` and `useList` render with data instead of a loading spinner:
+
+```tsx
+const { data: post, isPending } = useResource(Post, id)
+
+const { mutate, isMutating } = useMutation(Post.update, {
+  optimistic: (input, current) => ({ ...current, ...input }),
+})
+```
+
+Query keys derive automatically from model and controller identity, and invalidating a model clears every derived key. See [Data Hooks](/docs/frontend/data-hooks) for the complete surface.
+
+> [!NOTE]
+> The client and the hooks are two views of one cache. A stale query invalidated on the client and a model write purged on the server converge on the same key space, so freshness decisions stay consistent across the boundary.
+
+## Testing with createTestClient
+
+For tests, `createTestClient(app)` boots the real application and calls it in-process — the same typed RPC without a network layer:
+
+```ts
+import { createTestClient, withApp } from '@kwiva/testing'
+
+await withApp(async (app) => {
+  const client = createTestClient(app)
+  const res = await client.posts.create({ title: 'Draft' })
+  expect(res.error).toBeNull()
+})
+```
+
+This is the fastest way to assert on controllers, permissions, and validation from a single test process. Because it exercises the real pipeline — parsing, validation, guards, policies, handlers — the tests are integration-faithful without a server process. See [API Testing](/docs/testing/api-testing) for the full pattern.
+
+## Configuration
+
+The client picks up the API prefix, versioning, and auth mode from application config, so setup is one call. `baseUrl` overrides the target for remote deployments — staging and production clients can point elsewhere without changing call sites. See [REST conventions: versioning](/docs/api/rest).
+
+## Call-Site Errors
+
+Every call resolves to a result object, and every call site can branch without try/catch gymnastics:
+
+```ts
+const res = await client.posts.create({ title: 'Draft' })
+
+if (res.ok) {
+  // res.data is the created model
+} else if (res.error.code === 'VALIDATION') {
+  mapToForm(res.error.issues)
+}
+```
+
+The success/failure discrimination is part of the type, so impossible branches fail to compile. See [API Errors](/docs/api/errors).
+
+## A Shared Cache, Two Views
+
+The client's server-side results and the client-side data hooks share one key space. Prefetching lands in the keys the hooks read, and model invalidation clears derived keys on both sides of the boundary. See [Data Hooks](/docs/frontend/data-hooks).
+
+## In Tests
+
+`createTestClient(app)` and `withApp` run the real pipeline without a network layer, so permission denials, validation failures, and 204 deletes behave exactly as they do in production — in one process, in one test run. See [API Testing](/docs/testing/api-testing).
+
+## When to Reach for fetch
+
+The typed client is the default path for routes it knows. `fetch` remains the correct tool for third-party APIs, plain file downloads requiring precise request control, and one-off scripts that do not need the derived types.
+
+## Server-Side Usage
+
+The same client runs on the server, including within controllers and page loaders, because it is in-process and typed. A loader can call `client.posts.get(id)` and trust the result — the pipeline, permissions, and validation all run. This is the recommended pattern for server-rendered routes that read API data. See [Data Hooks](/docs/frontend/data-hooks).
+
+## Hook Integration
+
+`useQuery` and friends accept the client's result type, so prefetching, mutation, and invalidation stay in one type space. The hooks receive caching keys that match the server-side cache, which is what makes shared TTL behavior possible.
+
+## Updating the Typed Surface
+
+After you change models or controllers, regenerate types as part of the change loop. The typed surface reflects the new manifest on regeneration; until then it is stale by design. CI can fail the build when regenerated types produce new errors at call sites, which turns every breaking change into a compile-time checklist.
+
+## What's Next
+
+- [Typed RPC](/docs/api/rpc) — the call surface in depth
+- [Data Hooks](/docs/frontend/data-hooks) — caching, invalidation, optimistic updates
+- [API Testing](/docs/testing/api-testing) — in-process testing with the real app
+- [RPC Client in the Frontend](/docs/frontend/rpc-client) — browser-side patterns
+- [Auth Client Usage](/docs/auth/client-usage) — `useSession` in the browser

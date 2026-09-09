@@ -1,0 +1,113 @@
+---
+title: Core Concepts
+description: "The foundational ideas behind Kwiva — the defineX convention, one config source, file-based discovery, a single type universe, and the two lifecycles every app runs."
+---
+
+Every Kwiva application is built from a small set of ideas that repeat everywhere: one authoring grammar (`defineX`), one place for configuration, one discovery mechanism, and one type system that flows from source to client with zero code generation. This section explains those ideas so the rest of the documentation reads like details of a single system rather than a list of unrelated APIs.
+
+If you have not created a project yet, start with [Getting Started](/docs/getting-started), which walks through a real application. This section assumes you have scaffolding up and want to understand how it fits together.
+
+## The Mental Model
+
+Kwiva is organized as a stack of four layers. Application code lives at the top, framework APIs in the middle, and everything below is owned by the framework, not by you:
+
+```
+Application (src/)
+    ↓  authoring via defineX files
+Framework APIs (@kwiva/* packages)
+    ↓  owned pipeline, typed edges
+Internal engines (hidden, framework-owned)
+    ↓  deployment presets
+Runtime (Bun, Node, Edge)
+```
+
+Developers interact almost exclusively with the framework layer — the `@kwiva/*` packages. Below it sit the **hidden engine layer**: sealed dependencies the framework configures and adapts for serving, storage, caching, sessions, and client state. Convention enforces the boundary: application code never imports an engine directly, and a lint gate rejects engine imports before they land in your codebase. This is what lets framework upgrades absorb engine changes on your behalf.
+
+## The Concepts at a Glance
+
+| Concept | What it answers |
+|---|---|
+| [The defineX Convention](/docs/core-concepts/definex) | Why every construct is written the same way |
+| [Applications](/docs/core-concepts/applications) | How `defineApp` composes everything into a running app |
+| [Configuration](/docs/core-concepts/configuration) | Where every knob lives and what wins when values conflict |
+| [Auto-Discovery](/docs/core-concepts/auto-discovery) | How files in the standard tree become registered capabilities |
+| [Lifecycle](/docs/core-concepts/lifecycle) | Boot order and the request pipeline from entry to response |
+| [Context](/docs/core-concepts/context) | The typed object every handler receives |
+| [Services](/docs/core-concepts/services) | Reusable business logic with typed composition |
+| [Modules](/docs/core-concepts/modules) | Self-contained feature packages |
+| [Plugins](/docs/core-concepts/plugins) | Framework-behavior extension |
+| [Error Handling](/docs/core-concepts/error-handling) | The shared taxonomy every error maps into |
+| [Type Inference](/docs/core-concepts/type-inference) | How types flow end to end without codegen |
+
+## How the Pieces Fit Together
+
+Four flows run through every application, and each maps to a set of core-concepts pages.
+
+### Configuration flows down
+
+Everything configurable — the app name, middleware stack, database connection, rate limits, tenant mode — is declared in one place under `src/config/`, typed through `defineConfig` modules, and surfaced through a typed `config()` reader. An entry file, `kwiva.config.ts`, points at the config folder and carries build and deploy options. Precedence is fixed: defaults, then config-folder values, then inline `defineX` options, then environment overrides. See [Configuration](/docs/core-concepts/configuration).
+
+### Capabilities flow in by convention
+
+Models, controllers, middleware, jobs, events, and pages are plain files in standard directories. At boot the framework scans those directories and registers whatever it finds — adding a model is creating a file, not editing a registry. The [defineX convention](/docs/core-concepts/definex) keeps every one of those files in the same shape, and [auto-discovery](/docs/core-concepts/auto-discovery) is the wiring that turns files into running capabilities. [Applications](/docs/core-concepts/applications) shows how the kernel assembles the result.
+
+### Requests flow through one pipeline
+
+At runtime, every request — API call, rendered page, WebSocket upgrade — traverses a single ordered pipeline: entry hooks, routing, context assembly, validation, guards, handler, response hooks. Everything you can hook is a named lifecycle event (`onRequest`, `onTransform`, `onBeforeHandle`, `onAfterHandle`, `onResponse`). The [lifecycle](/docs/core-concepts/lifecycle) page covers boot order too, and [context](/docs/core-concepts/context) explains the object passed through it.
+
+### Types flow out with zero codegen
+
+Because definitions are plain typed functions, the framework can derive everything else: model definitions become a route manifest, the manifest becomes REST endpoints, a typed client, OpenAPI documents, Studio screens, and MCP tools. The client that calls your API from a page loader is typechecked against the same definitions that produced the endpoints. See [type inference](/docs/core-concepts/type-inference).
+
+## The Standard Tree
+
+The conventions in this section map to a fixed directory layout. Knowing the tree is the fastest way to predict what a file does:
+
+```
+kwiva.config.ts            # entry: config folder + build/deploy/modules
+src/
+├─ bootstrap/app.ts        # defineApp — the kernel
+├─ config/                 # defineConfig modules, one per domain
+├─ app/
+│  ├─ models/              # defineModel
+│  ├─ http/
+│  │  ├─ auth.ts           # defineAuth
+│  │  ├─ controllers/      # defineController
+│  │  └─ middleware/       # defineMiddleware
+│  ├─ services/            # defineService
+│  ├─ jobs/                # defineJob
+│  ├─ events/              # defineEvent
+│  ├─ tasks/               # defineTask
+│  ├─ policies/            # definePolicy
+│  ├─ console/             # defineCommand
+│  ├─ mcp/                 # defineMcpTool
+│  └─ studio/              # defineStudioScreen
+├─ routes/                 # defineServerRoute
+├─ ui/pages/               # definePage
+└─ database/               # migrations, seeders, factories
+```
+
+Placement is declaration: a file's directory is what registers it, which is why [auto-discovery](/docs/core-concepts/auto-discovery) needs no configuration. The full layout is documented in [Project Structure](/docs/getting-started/project-structure).
+
+## Design Pillars
+
+These are the decisions that hold the section together:
+
+1. **Convention over configuration** — the framework assumes the standard tree and standard names; you opt out per construct, not globally.
+2. **Everything is a file** — a new resource is a model file, a new endpoint is a controller file, a new capability is a module.
+3. **One config source** — all knobs resolve through the config folder; there is no second, ad-hoc way to configure.
+4. **Zero codegen types** — type derivation happens at the type level, so there is nothing to regenerate or commit.
+5. **Sealed engines** — the framework owns internals; you never import them, and they never leak into your typing.
+6. **Extensible by design** — modules compose features declaratively, plugins change framework behavior programmatically.
+
+> [!NOTE]
+> Terminology: throughout this section "the framework" means the `@kwiva/*` packages you import. "The engine layer" or "hidden engine" refers to sealed internals the framework manages for you — you will never import them directly.
+
+## What's Next
+
+1. [The defineX Convention](/docs/core-concepts/definex) — start here; every other concept builds on it
+2. [Applications](/docs/core-concepts/applications) — see the kernel that assembles your app
+3. [Configuration](/docs/core-concepts/configuration) — the typed config folder and precedence rules
+4. [Auto-Discovery](/docs/core-concepts/auto-discovery) — how files become capabilities
+5. [Getting Started](/docs/getting-started) — a guided path through a real project
+6. [Architecture](/architecture) — deeper framework design and the derivation pipeline

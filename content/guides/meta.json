@@ -1,0 +1,21 @@
+{
+  "title": "Guides",
+  "root": true,
+  "pages": [
+    "index",
+    "create-model",
+    "create-controller",
+    "validate-input",
+    "pagination",
+    "protect-routes",
+    "authentication",
+    "policies",
+    "file-uploads",
+    "background-jobs",
+    "schedule-tasks",
+    "realtime",
+    "tenancy",
+    "openapi",
+    "deploy"
+  ]
+}

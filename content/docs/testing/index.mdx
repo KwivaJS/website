@@ -1,0 +1,148 @@
+---
+title: Testing
+description: "A layered test stack — unit, integration, API, and E2E — powered by the @kwiva/testing harness, in-process client, and model-aware fakes."
+---
+
+Kwiva is testable by construction. Every surface has an in-process entry point — an app harness that boots the real application, a typed test client that calls it without a network hop, and fakes that replace the queue, storage, HTTP, and broadcast layers. The result is a test stack where fast tests cover most of the behavior and browser-level E2E covers only the paths that need it.
+
+## The Test Pyramid for Kwiva Apps
+
+```
+e2e                            — real browser against the built app
+integration                    — withApp: real kernel + adapters, in-memory engines where possible
+api                            — typed in-process client against the real request path
+unit                           — services, policies, jobs, pure logic
+type tests                     — end-to-end type inference guarantees
+```
+
+The pyramid is the contract for how you spend test time:
+
+- **Unit tests** pin down services, policies, jobs, and helper logic in isolation — no boot, milliseconds each
+- **Integration tests** boot the real application through `withApp` and exercise real routes backed by in-memory engines
+- **API tests** drive the in-process typed client against a real app instance and assert responses, errors, permissions, and tenant behavior
+- **E2E tests** run a real browser against a real UI and API for the critical flows
+- **Type tests** guard end-to-end type inference — model to route to client — at compile time
+
+Framework philosophy sandboxes it clearly: applications should reach high coverage on services, policies, and jobs with fast tests; E2E covers the critical paths only.
+
+## The Harness
+
+`@kwiva/testing` provides the harness primitives used across the middle of the pyramid:
+
+```ts
+import { withApp, createTestClient, queue, storage } from '@kwiva/testing'
+
+test('posts CRUD', withApp(async (app) => {
+  const client = createTestClient(app)
+
+  const created = await client.posts.create({ title: 'First' })
+  expect(created.data.title).toBe('First')
+
+  const { data, total } = await client.posts.list({ where: { title: 'First' } })
+  expect(total).toBe(1)
+}))
+```
+
+`withApp` wraps each test with a booted application — test-mode config and environment, migrations applied on an in-memory database, and factories seeded — so a test starts from a known, isolated state. What runs inside the callback is the real kernel: real middleware, real validation, real generated routes, real policies.
+
+## Test Isolation
+
+Per-test isolation is a design decision of the harness, not an accident of the runner:
+
+- The default database trait is **transaction-per-test** — each test runs in a transaction rolled back afterward, so tests are fast, side-effect-free, and order-independent.
+- Migration-heavy tests opt into **fresh migrations** (`withApp({ db: 'fresh' })`), which drop and migrate for the test.
+- Infrastructure such as the queue and storage is faked per test where side effects beyond the app process would otherwise leak between tests.
+
+Every test sees the same starting world, which is what makes the suite deterministic in CI and on a laptop.
+
+## Fakes
+
+Fakes replace infrastructure without changing application code:
+
+| Fake | Replaces | Asserts |
+|---|---|---|
+| `queue.fake()` | the job queue | pushed jobs and their payloads |
+| `storage.fake()` | the storage disk | stored paths and bytes |
+| `http.fake()` | outbound client calls | stubbed responses |
+| `broadcast.fake()` | the realtime layer | emitted channels and events |
+
+```ts
+test('welcome email on signup', withApp(async (app) => {
+  queue.fake()
+  storage.fake()
+
+  const client = createTestClient(app)
+  await client.auth.signUp({ email: 'a@b.dev', password: 'swordfish123' })
+
+  expect(queue.assertPushed('send-welcome')).toBe(true)
+  expect(queue.assertNotPushed('invoice-paid')).toBe(true)
+}))
+```
+
+Fakes assert positive and negative effects both ways — `assertPushed` and `assertNotPushed` — so a test can prove that a flow dispatched the expected job and, just as importantly, did not dispatch an unwanted one.
+
+## The Test Runner
+
+The test runner is built into the framework — no separate tool to install, configure, or keep in version alignment. The same runtime that executes the app executes the tests, with `test` and `expect` built in. Test files live under `tests/`, and `kwiva make:test <name>` scaffolds a matching test file for a construct in the right place.
+
+Test layout mirrors the layers, so a reader knows where a test belongs by path:
+
+```text
+tests/
+├─ unit/          # services, policies, jobs, helpers — no boot
+├─ integration/   # withApp: real kernel, in-memory engines
+├─ api/           # createTestClient against the real request path
+├─ e2e/           # browser projects per app mode
+└─ types/         # inference assertions, guarded at compile time
+```
+
+Layering by directory keeps the layers obvious and lets the commands stay simple: `kwiva test` runs the in-process layers by default, and `--e2e` adds the browser projects on top.
+
+## Running Tests
+
+All levels run through one CLI:
+
+```bash
+kwiva test                # unit + integration
+kwiva test --e2e          # add the browser-level projects
+kwiva test --watch posts  # watch a filter
+kwiva test --coverage     # test coverage, with CI thresholds
+```
+
+A positional filter narrows to matching tests; `--watch` re-runs on change. `--e2e` runs the browser projects, which launch the built app and drive it through browser flows, optionally against the built artifact with a server target.
+
+## Type Tests
+
+Type tests sit at the base of the pyramid at compile time. They assert the inference contract — the shape a model's routes produce, the responses a controller declares, the union a client call resolves to — so a change to a definition fails the typecheck before a single assertion runs. They are shipped in the suite layout and run as part of the same gate.
+
+## Coverage
+
+Coverage runs through the same command surface (`kwiva test --coverage`), reporting per-layer coverage with thresholds CI enforces. The framework's guidance follows the pyramid: high coverage on services, policies, and jobs with fast tests; explicit critical-path coverage on E2E.
+
+## Testing in CI
+
+The full verification gate runs on the Rust-speed toolchain the CLI is built on:
+
+```text
+lint + format → typecheck → type tests → unit + integration (in-memory) →
+build (multiple presets) → smoke tests → e2e (browser projects)
+```
+
+Each stage gates the next, and the E2E stage runs last — by the time the browser tests start, every cheaper signal has already said yes. See [E2E Testing](/docs/testing/e2e-testing) for the ordering rationale.
+
+## Key Components
+
+| Component | Description |
+|---|---|
+| [Unit Testing](/docs/testing/unit-testing) | Services, policies, jobs, and helpers in isolation with factories |
+| [Integration Testing](/docs/testing/integration-testing) | The `withApp` harness, database traits, and fakes |
+| [API Testing](/docs/testing/api-testing) | The typed in-process client and assertion patterns |
+| [E2E Testing](/docs/testing/e2e-testing) | Browser projects per app mode and CI ordering |
+
+## What's Next
+
+- [Unit Testing](/docs/testing/unit-testing) — fast, isolated tests for pure logic
+- [Integration Testing](/docs/testing/integration-testing) — booting the real app with `withApp`
+- [API Testing](/docs/testing/api-testing) — typed in-process client assertions
+- [E2E Testing](/docs/testing/e2e-testing) — browser projects and pipelines
+- [Factories](/docs/data/factories) — model-aware factories used across every layer

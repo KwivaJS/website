@@ -1,0 +1,159 @@
+---
+title: Services
+description: "defineService — typed, injectable objects for business logic that does not belong in a controller or a model."
+---
+
+## What is defineService?
+
+`defineService` creates typed service objects for business logic that belongs neither in a controller nor in a model. A controller orchestrates the request; a model represents a row. Everything in between — billing runs, welcome emails, permission resolution reused across entry points — is a service. Services live in `src/app/services/`, one per file, authored with the same `defineX` grammar as everything else.
+
+The point of a service is reuse without imports. Because services are declared and resolvable through the application container, any consumer can obtain one by name, and a controller, job, task, or event handler all get the same instance. See [Auto-Discovery](/docs/core-concepts/auto-discovery) for how the container picks services up.
+
+## Creating a Service
+
+```ts
+// src/app/services/email.ts
+import { defineService } from '@kwiva/services'
+
+export default defineService('email', {
+  sendWelcome: async (user: User) => {
+    await mailer.send({
+      to: user.email,
+      subject: 'Welcome to our app',
+      template: 'welcome',
+      data: { name: user.name },
+    })
+  },
+
+  sendPasswordReset: async (user: User, token: string) => {
+    await mailer.send({
+      to: user.email,
+      subject: 'Reset your password',
+      template: 'password-reset',
+      data: { token },
+    })
+  },
+})
+```
+
+The first argument names the service; the second is the service body — a plain object of methods. The service object is fully typed, so callers get method signatures and return types without annotation.
+
+## Using Services
+
+Services resolve through the application container:
+
+```ts
+import { resolve } from '@kwiva/core'
+import EmailService from '../services/email'
+
+const email = resolve(EmailService)
+await email.sendWelcome(user)
+```
+
+In a handler, the same service is available without importing its definition by reaching through the container, or used directly from the controller module like any dependency:
+
+```ts
+defineController('auth', (c) => ({
+  register: c.post('/register', async ({ body }) => {
+    const user = await User.create(body)
+    await EmailService.sendWelcome(user)
+    return user
+  }),
+}))
+```
+
+Whichever import style you prefer, the surface is the same typed methods — and because services resolve by name, swapping an implementation in tests replaces the behavior everywhere it is consumed.
+
+## Typed Injection
+
+Service method signatures are typed against the application's models and other definitions, so a service can augment a typed model instance without constructing anonymous tuples:
+
+```ts
+// src/app/services/payments.ts
+import { defineService } from '@kwiva/services'
+
+export default defineService('payments', {
+  invoiceFor: async (user: User, order: { amount: number }) => {
+    const vat = await config('billing.vatRate')
+    return { user: user.id, subtotal: order.amount, total: order.amount * (1 + vat) }
+  },
+})
+```
+
+Types flow into service definitions the same way they flow everywhere else: model types come from `defineModel`, config values from the typed `config()` reader, and context values from `defineApp`. There is no separate type-declaration step for a service.
+
+## Service Composition
+
+Services compose like any plain module — one service calls another, and both sit in the same container:
+
+```ts
+// src/app/services/onboarding.ts
+import { defineService } from '@kwiva/services'
+
+export default defineService('onboarding', {
+  runFor: async (user: User, { resolve }) => {
+    await resolve('email').sendWelcome(user)
+    await resolve('audit').record('user.joined', user.id)
+  },
+})
+```
+
+Keep services discrete: one responsibility, one file, explicit dependencies. A service that wires other services together is still a service with a single job.
+
+## Service Lifecycle and Scoping
+
+Services are plain objects resolved from the container, with a clear ownership story:
+
+- **One instance per service** — a service resolves to a single instance for the application lifetime. State you keep on the service object is app-scoped, shared across every request.
+- **Per-request data comes from the context, never module state** — if a service needs the current user, tenant, or request ID, the caller passes the relevant context values, or the service reads them through a `resolve` value from `defineApp`. This keeps services request-agnostic and trivially testable.
+- **No lazy surprises** — a service is created when first resolved; dependencies it declares are resolved at call time, so circular imports between services are avoided by keeping them each a single unit.
+
+## Naming and Placement
+
+Services follow the naming conventions of the [defineX grammar](/docs/core-concepts/definex): one service per file in `src/app/services/`, kebab-case filenames, and a name matching the file. `src/app/services/billing.ts` defines the `billing` service, resolvable by that name everywhere the container is reachable.
+
+The generators scaffold the shape: `kwiva make:service billing` writes `src/app/services/billing.ts` as a typed, discoverable starting point. See [Generators](/docs/cli/generators).
+
+## Where Services Are Consumed
+
+The container is reachable from every entry point the framework provides, so one service implementation serves all of them:
+
+| Entry point | Consumption |
+|---|---|
+| Controllers | in handlers, resolved or imported like any dependency |
+| Jobs, tasks | within the handler context |
+| Event listeners | when an event is consumed |
+| Commands | inside the command's `handle` |
+| Other services | through explicit `resolve` of the dependency |
+| Tests | direct instantiation or container resolution |
+
+Because consumption is uniform, moving logic from a controller into a service does not change how it is called — it changes where the logic lives.
+
+## When to Reach for a Service
+
+Use a service when the logic satisfies at least one of:
+
+- it is reused by more than one entry point (controller, job, task, event handler, command);
+- it coordinates multiple models, so putting it in any single model would be wrong;
+- it is a side-effecting integration (email, billing, storage uploads) that should be swappable in tests;
+- it is domain logic that a handler should not read.
+
+Keep plain query logic in the model, and keep request orchestration in the controller. The service layer is the middle: domain operations that neither belong to one row nor to one request.
+
+## Testing Services
+
+Because services are plain objects resolved from a container, unit tests instantiate them directly or through the container without the HTTP pipeline:
+
+- Direct: import the service definition and call its methods.
+- Container-based: resolve the service like the app does, and swap dependent services for fakes.
+- Integration: with `withApp`, a service resolves against the real kernel — useful when a service touches models or providers.
+
+See [Testing](/docs/testing) for the harnesses that support each style.
+
+## What's Next
+
+1. [Applications](/docs/core-concepts/applications) — how `defineApp` bootstraps the container services resolve from
+2. [Context](/docs/core-concepts/context) — the request object services are consumed from
+3. [Controllers](/docs/http/controllers) — where most services are called from
+4. [API: services](/api/services) — the `@kwiva/services` reference
+5. [Modules](/docs/core-concepts/modules) — how a module contributes services to the app

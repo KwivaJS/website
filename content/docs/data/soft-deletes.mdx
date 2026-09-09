@@ -1,0 +1,133 @@
+---
+title: Soft Deletes
+description: "The deletedAt column — automatic filtering, withTrashed, onlyTrashed, restore, forceDelete, and how relations behave."
+---
+
+Soft deletes mark records as deleted without permanently removing them. A `deletedAt` timestamp is set instead of the row disappearing, trashed rows are excluded from normal queries, and the record can be restored — or eventually purged for real. Soft deletes are a model option, so the column, the filtering, and the derived API behavior all come from one flag.
+
+## Enabling
+
+```ts
+export default defineModel('posts', (f) => ({
+  title: f.string(),
+}), {
+  softDelete: true,
+})
+```
+
+The option adds the `deletedAt` timestamp column to the schema and turns the generated `DELETE` route into a soft delete.
+
+| Setting | Effect |
+|---|---|
+| `softDelete: true` | `deletedAt` column added; default queries exclude trashed rows |
+| `softDelete: false` (default) | Hard deletes; no timestamp column |
+
+## Query Behavior
+
+```ts
+const active = await Post.query().get()                  // excludes trashed rows (default)
+const withTrashed = await Post.query().withTrashed().get() // includes everything
+const trashed = await Post.query().onlyTrashed().get()   // only deleted rows
+```
+
+| Scope | What it returns |
+|---|---|
+| Default `.query()` | Non-trashed rows only — `deletedAt is null` is injected automatically |
+| `.withTrashed()` | All rows, trashed or not |
+| `.onlyTrashed()` | Trashed rows only |
+
+Scoping is injected into the query the same way tenant scoping is — invisible to the rest of your builder chain, and still applied inside joins and eager loads.
+
+## Deleting and Restoring
+
+| Operation | Behavior |
+|---|---|
+| `row.delete()` | Sets `deletedAt`, row stays in the table |
+| `Post.restore(id)` | Clears `deletedAt`, row becomes active again |
+| `Post.forceDelete(id)` | Physically removes the row |
+
+```ts
+const post = await Post.findOrFail(id)
+await post.delete()                    // soft delete
+
+await Post.restore(id)                 // clear deletedAt
+
+await Post.withTrashed().first(...)    // find the trashed row...
+await Post.forceDelete(id)             // ...then purge it for real
+```
+
+> [!NOTE]
+> `findOrFail` and `first` respect the default scope — a trashed row is invisible to them unless the query uses `withTrashed()`. Restoration and purge are the only operations that must target trashed rows explicitly.
+
+## The Generated API
+
+When `softDelete` is enabled, the derived surface follows the soft-delete contract:
+
+| Route | Behavior |
+|---|---|
+| `DELETE /api/posts/:id` | Soft deletes (sets `deletedAt`) |
+| `PATCH /api/posts/:id` | Fails on trashed rows with the standard not-found response |
+| List / get | Trashed rows invisible by default |
+
+This means public API clients cannot accidentally resurrect or purge rows — recovery is a controlled, server-side action via `restore` / `forceDelete`.
+
+## Relations and Soft Deletes
+
+Soft-delete scoping composes with relations. A `hasMany` eager load on a soft-deleted model respects the related model's scope, and a parent can be hidden while children remain — the per-model scope is applied consistently.
+
+When restoring, consider the object graph: restoring a parent does **not** automatically restore its children. If a soft-deleted parent has soft-deleted dependents, restore them explicitly after re-inheriting visibility.
+
+## Uniques and Soft Deletes
+
+A unique constraint on a soft-deleted table eventually collides with a recreated row:
+
+```ts
+email: f.string().unique(),
+```
+
+If a deleted user's email stays in the table with `deletedAt` set, a new user asserting the same email conflicts. For identifier reuse, either include `deletedAt` in the composite unique constraint (`uniques: [['email', 'deletedAt']]`) or purge trashed rows before recreating. The trade-off is schema-level, so pick deliberately per model.
+
+## Hard Delete When Needed
+
+Hard purge is always available even on soft-deleting models. `forceDelete` is the documented escape hatch for retention windows, GDPR-style lifecycle rules, and cleanup tasks. Prefer combining it with `db.chunk` and a scheduled task when purging old trash at volume — see [Background Work: Scheduling](/docs/background-work/scheduling).
+
+## Soft vs. Hard Delete
+
+| Consideration | Soft delete | Hard delete |
+|---|---|---|
+| Recoverability | Row remains, `restore` is instant | Permanent unless restored from backup |
+| Query cost | Every default query adds a `deletedAt is null` filter | No extra filter |
+| Referential integrity | Children survive their parent's soft delete | Foreign keys govern cleanup |
+| Retention | Rows accumulate until purged | Table stays lean |
+| Audit value | History is keepable on the row itself | History needs a separate log |
+
+Choose soft deletes when recovery matters (user accounts, documents, content), and hard deletes when the row has no recoverable value (sessions, tokens, transient joins). Retention hygiene still applies to soft-deleted rows: schedule a purge of trash older than the retention window rather than letting it accumulate.
+
+## When to Use Soft Deletes
+
+Concrete signals that a model should be soft-deletable:
+
+- Deletion is user-visible and reversible (a document in the trash).
+- Deletion cascades matter and you need to reason about the graph before purging.
+- Compliance or audit contexts require knowing *when* a record was removed.
+- Business rules reference "records that still exist in some state" (`onlyTrashed` counts, restore flows).
+
+When none of those hold, the extra filter and column are pure overhead — keep the model hard-delete and rely on backups for recovery.
+
+## Indexing and Retention
+
+The default scope predicates on `deletedAt is null`, so composite indexes that lead with it perform well for "active rows" lists:
+
+| Column | Suggest index |
+|---|---|
+| `status` | `['status', 'deletedAt']` |
+| `tenantId` + `createdAt` | `['tenantId', 'deletedAt', 'createdAt']` |
+
+Declare these through the model's `indexes` option. Retention is a policy, not a column: prefer a scheduled task that `forceDelete`s trash older than your window, chunked with `db.chunk` for large tables.
+
+## What's Next
+
+1. [Models](/docs/data/models) — the `softDelete` option and the option table
+2. [Queries](/docs/data/queries) — how scopes layer into the builder
+3. [Relations](/docs/data/relations) — soft-delete behavior inside eager loads
+4. [Tenancy](/docs/tenancy) — scoping composes the same way tenant scoping does

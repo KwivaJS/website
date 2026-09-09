@@ -1,0 +1,110 @@
+---
+title: Headers
+description: "The security headers a fresh Kwiva app sends by default — CSP with nonces, framing, MIME, and privacy headers — plus per-route overrides."
+---
+
+Kwiva handles the security headers for you. Every response that leaves a Kwiva application — SSR-rendered pages, API responses, and middleware responses alike — passes through the security headers middleware, enabled by default, with a conservative header set applied unless you override it.
+
+## Default Header Set
+
+A fresh application sends:
+
+| Header | Default value | What it defends against |
+|---|---|---|
+| `Content-Security-Policy` | Nonce-based, strict | XSS and injection-into-executed-content |
+| `X-Content-Type-Options` | `nosniff` | MIME sniffing and downstream content-upgrade attacks |
+| `X-Frame-Options` | `DENY` | Clickjacking via embedded frames |
+| `Referrer-Policy` | Restrictive default | Leaking the current origin in the `Referer` header |
+| `Strict-Transport-Security` | Enabled for production hosts | Downgrade and protocol-sniffing attacks |
+| `Permissions-Policy` | Restricted default | Abuse of browser feature APIs (camera, mic, geolocation) |
+
+Header names follow standards casing as written here; case is honored as configured. The table is additive-friendly: unwelcome browser features and unsafe framing are closed by default and unlocked per route when an app genuinely needs them.
+
+## Content Security Policy
+
+The CSP is the largest default header, and it follows the protocol in the default protections:
+
+- **Production** — strict enforcement with nonces. Every response carries a one-time nonce; script and style sources require it, and `unsafe-inline` is not granted where it can be avoided.
+- **Development** — report-only. Violations are reported without enforcement, so they surface in the dev overlay while you build instead of breaking your loop.
+
+The policy is driven by a `defaults` dict in the security configuration. If name- or value-sensitive adjustments are needed, they can be provided inline per request — which is the escape hatch for third-party widget integrations that require a specific script source.
+
+> [!NOTE]
+> Report-only mode is the development posture because blocking a script you are actively editing is noise, not signal. Arrays of violations appear in the overlay as warnings — see [Dev Overlay](/docs/observability/dev-overlay) — and the same policy, flipped to enforce, is what ships to production.
+
+## Configuration
+
+Headers are configurable through the security config via lower-cased field names, mapping 1:1 to their HTTP equivalents:
+
+```ts
+export default defineConfig('security', {
+  defaults: {
+    securityHeaders: {
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'strict-origin-when-cross-origin',
+      'content-security-policy-report-only': null, // default report-only in dev
+    },
+  },
+})
+```
+
+The `securityHeaders` dictionary belongs to the same `defineConfig` module as every other security toggle, so environments can ship different header sets without changing request code. A production preset that enforces the strict CSP is exactly the same shape as the development preset that reports it.
+
+## CSP and Nonces
+
+Nonce-based CSP is the default because of what nonces guarantee: each response binds its inline and external scripts to a value generated when the response was produced. A stored or reflected injection that lands in a later response fails the nonce check — CSP enforcement becomes the framework's answer to XSS that application-level escaping missed.
+
+The nonce is applied automatically to scripts and styles Kwiva emits, so hydration, page transitions, and streaming all work under the strict policy without a compatibility carve-out. When you add third-party widgets:
+
+- **Prefer an explicit `script-src` value per widget** over `unsafe-inline`
+- **Use inline, per-request overrides** for the narrow, specific source a widget needs — the escape hatch exists precisely so one integration never forces a loosened global policy
+- **Verify in report-only dev** that the widget's violations are what the allowlist covers, then flip to enforce
+
+The posture is additive: enforce the strictest possible set, and widen per integration, per request, permanently visible in diffs.
+
+## Directives Minimum
+
+The framework's CSP default ships the directives needed to run an SSR-reactive application safely, then closes what it can. Where the framework cannot know your intent — external embeds, image hosts, worker payloads — the defaults stay conservative and the inline per-request override exists to admit exactly what a given page needs.
+
+## Per-Route Overrides
+
+The header set is not a blunt instrument. A route that embeds an OAuth2 dialog in an iframe, a page that needs a specific permissions policy for camera access, or a widget endpoint with a narrow script source can override headers for that route alone:
+
+```ts
+export default defineController('widgets', (c) => ({
+  view: c.get('/', async ({ headers }) => {
+    headers.set('frame-ancestors', "'self' https://partner.example")
+    return { ok: true }
+  }),
+}))
+```
+
+Overrides widen one route while every other route keeps the defaults — the surface change is bounded, visible, and reviewable in the route file, not buried in a global config edit.
+
+## Applying to Static Assets
+
+The security headers middleware covers responses from the application surface, including prerendered and streamed pages, so the audit of a deployed page is short: fetch the production URL and read the headers. Static assets served by the platform follow the same header directives, keeping the CSP and privacy headers consistent between documents and their resources.
+
+## Headers as a Contract
+
+Treat the header set as a deployable contract, not set-and-forget configuration. A few practices keep it reviewable:
+
+- **Read them in every environment** — a dev-mode fetch should show report-only CSP and permissive friendliness; a production fetch should show the enforced, strict set
+- **Diff via the telemetry** — CSP violations reported during development are a preview of production enforcement; reconcile them by override, not by loosening the global policy
+- **Keep widening explicit** — every third-party integration that requires a header change should appear as a per-route override or a named directive, visible in the route file or config diff
+- **Confirm the hardening headers stayed** — `x-content-type-options`, `x-frame-options`, and the privacy headers are cheap to drop silently during a config edit and expensive to rediscover
+
+The contract view is also the debugging view: when a production report says "this page lacks a header," the answer is one production fetch away, and the fix is one config key away.
+
+## Verifying What's Actually Sent
+
+The fastest verification is to fetch a production response and read its headers. Because the same telemetry that renders in the overlay also drives headers, a dev-mode violation report is often the earliest signal that an integration needs a per-route override — and a production fetch confirms the enforcement state before an incident does.
+
+## What's Next
+
+- [Default Protections](/docs/security/default-protections) — CSP, cookies, rate limits, and tenant masking as one posture
+- [CORS](/docs/http/cors) — the orthogonal header story for cross-origin clients
+- [Middleware](/docs/http/middleware) — where the security headers middleware sits in the chain
+- [Controllers](/docs/http/controllers) — writing headers per route
+- [Production](/docs/security/production) — environment gating and the production checklist

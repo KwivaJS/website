@@ -1,0 +1,112 @@
+---
+title: Job Observability
+description: "Queue depth, failed jobs, job progress, structured logs, and correlation IDs for the background layer."
+---
+
+Background work is invisible by definition — it never serves a request you can watch. Observability for the background layer exists to make it visible again: to see how deep each queue is, how many jobs have failed, how far a long job has gotten, and exactly which logs belong to which job attempt. Kwiva instruments the entire lifecycle automatically, so the information is available the moment a queue starts running.
+
+The background layer and the web layer share one observability pipeline. A trace started in a controller that dispatches a job continues into the worker that runs it; a log line from a task run joins the same structured pipeline as request logs. There is no second observability system to learn for background work.
+
+## What Is Tracked Automatically
+
+Every job that moves through the transport produces a trace from dispatch to start to finish, including queue wait time:
+
+```
+dispatch ──► (queued) ──► start ──► (handler) ──► finish / failed
+                └──────── wait time ────────┘
+```
+
+Because dispatch and execution are separate processes, the full span bridges both: you can see not only how long a job ran but how long it waited before a worker picked it up. High wait times mean a queue is backed up; long run times mean the job itself is slow. The span is emitted per job and per attempt, so retries are visible as distinct segments of the same job's history.
+
+Alongside traces, the framework maintains a small set of queue metrics:
+
+| Metric | What it tells you |
+|---|---|
+| Queue depth | How much work is pending per queue |
+| Throughput | How many jobs complete per interval |
+| Failure rate | The share of runs that fail and consume a retry |
+| DLQ size | Jobs that exhausted retries and entered the dead-letter queue |
+
+DLQ size is the metric that deserves a watch. It stays flat on a healthy system; when it grows, jobs are failing systematically and someone must decide between retrying, fixing the cause, and clearing. See [Metrics](/docs/observability/metrics) for where these land on dashboards.
+
+## Inspecting the Queue
+
+The CLI is the fastest surface for looking at the current state:
+
+```bash
+kwiva queue:failed        # dead-letter queue listing with attempt history + error
+kwiva queue:clear <queue> # drop pending work in a queue
+```
+
+`kwiva queue:failed` lists each dead job with the attempts behind it and the error that ended it. `kwiva queue:retry <id>` or `--retry --all` republishes. This is the day-to-day operational loop: observe the failure, decide, retry or clear. Queue depth, throughput, and failure rate are emitted continuously for whatever collection backend your metrics configuration points at.
+
+## Job Progress
+
+A job can report its own progression through the `job` object:
+
+```ts
+job.progress(50)
+```
+
+Progress is advisory state attached to the job record. For a long-running, multi-phase job — an import with distinct read/transform/write phases — progress makes "is it stuck or progressing?" trivially answerable. Progress does not change scheduling behavior; it exists so operators and Studio can see a job is alive and moving.
+
+## Structured Job Logs
+
+Each job handler receives a `logger` scoped to that execution:
+
+```ts
+export default defineJob('import-rows', async ({ payload, job, logger }) => {
+  const rows = await readFile(payload.path)
+  logger.info({ rows: rows.length, jobId: job.id }, 'import rows loaded')
+  // ...
+})
+```
+
+The logger emits structured records — event name plus fields — rather than formatted text, so downstream tooling can filter and aggregate. Logs from a single job execution share one job id, which makes every line from a multi-attempt saga greppable in one pass. See [Logging](/docs/observability/logging) for the record shape.
+
+## Correlation IDs
+
+Logs and traces are linked through correlation ids. Each job attempt carries an id that is propagated into every span and log record the attempt produces, and across retries of the same job. To follow one job through its retries:
+
+```bash
+kwiva queue:work --trace
+```
+
+`--trace` enables link-gathering on the worker so logs are grouped per job id. In a system where the web tier, workers, and tasks all log to the same pipeline, the correlation id is what lets a tracing tool walk from the HTTP request that enqueued a job to the job's eventual completion. A dispatch started in a controller and completed on a worker are one correlated story, not two unrelated events.
+
+## Worker Status
+
+`--trace` also surfaces worker state while it runs: which queues a worker drains, its concurrency, and per-attempt outcomes. Combined with queue depth, that answers the two operational questions that matter most — "is work sitting in the queue?" and "is the worker processing it?" — without SSHing into a box.
+
+## Scheduled Task Reporting
+
+Scheduled tasks report through the same machinery. Each `task.run` produces a structured log event with duration and result, and a corresponding span. Failures follow retries, then a `task_failures` metric with an alert hook configured in `src/config/telemetry.ts`. For run bookkeeping:
+
+```bash
+kwiva schedule:list --json
+```
+
+renders the schedule with next run times as machine-readable data for dashboards and monitors. See [Scheduled Tasks](/docs/background-work/scheduling).
+
+## Where Metrics Land
+
+Metrics flow to the exporter configured in `src/config/telemetry.ts`, along with request tracing from the HTTP layer. The background layer and the web layer share one observability pipeline, so queue depth sits next to request latency in the same dashboard. Alert thresholds on DLQ size and failure rate are configured in the same module, so a failing queue pages the same place a failing endpoint does. See [Observability](/docs/observability/).
+
+## Building an Operational Loop
+
+The practical rhythm for running queues in production:
+
+1. **Watch queue depth** — a sustained backlog with idle workers means the worker is misconfigured or down.
+2. **Watch failure rate and DLQ size** — a growing DLQ means the job is failing systematically, not transiently.
+3. **Read the DLQ** — `kwiva queue:failed` shows the attempt history and the error; decide between retry, fix, and clear.
+4. **Follow correlation ids** — on any retry, `--trace` links every log line of the job across attempts and processes.
+
+The loop is the same at one instance or fifty: the state is in the transport, the traces are in the pipeline, and the CLI is the tool for the day-to-day decisions.
+
+## What's Next
+
+- [Jobs](/docs/background-work/jobs) — the unit of work these traces describe
+- [Queues & Workers](/docs/background-work/queues) — where queue depth and DLQ size are managed
+- [Scheduled Tasks](/docs/background-work/scheduling) — `task.run` logs and the `task_failures` metric
+- [Observability](/docs/observability/) — the shared tracing, logging, and metrics pipeline
+- [Observability — Metrics](/docs/observability/metrics) — exported metrics and dashboards

@@ -1,0 +1,139 @@
+---
+title: Plugins
+description: "definePlugin — extend the framework itself. Plugin lifecycle, hooks, and when to reach for a plugin instead of a module."
+---
+
+## What is a Plugin?
+
+Plugins extend the framework itself. Where a module composes first-party constructs — models, controllers, pages — into an application feature, a plugin hooks into the framework's own behavior: intercepting boot, contributing middleware, registering services, or augmenting the context. Plugins are programmatic packages; modules are declarative packages.
+
+The distinction is one of target. A plugin changes what the framework does for every request, every route, or at boot and shutdown. Request timing, default security headers, a compatibility shim, or a tracing integration are plugins. A blog, an analytics panel, or an admin console are modules.
+
+## The `definePlugin` Factory
+
+```ts
+import { definePlugin } from '@kwiva/core'
+
+export default definePlugin('request-timing', {
+  setup(app) {
+    app.on('before:handle', ({ start }) => {
+      const t0 = performance.now()
+      return () => console.log(`handled in ${performance.now() - t0}ms`)
+    })
+  },
+})
+```
+
+Like every `defineX` factory, `definePlugin` takes a name and an options object. The options are the plugin's contract: lifecycle functions that receive the application and mutate framework behavior programmatically.
+
+## Plugin Lifecycle
+
+Plugins participate in the application lifecycle at defined hook points. The hooks run in order as the kernel boots and stops:
+
+| Hook | When | Use |
+|---|---|---|
+| `booting` | Before the app registers its constructs | Configure providers and defaults |
+| `setup` | After boot, before serving | Register middleware, services, or context extensions |
+| `starting` | When the app starts serving | Allocate connections, start watchers |
+| `stopping` | When the app shuts down | Dispose connections, flush queues |
+
+The hooks align with the kernel's boot sequence described in [Lifecycle](/docs/core-concepts/lifecycle) and [Applications](/docs/core-concepts/applications): a plugin's `booting` runs before construct registration, `setup` runs after providers boot and before listen, and `stopping` participates in inverted shutdown. Ordering between plugins is deterministic, so a plugin can rely on another plugin's `setup` having run.
+
+## What a Plugin Can Do
+
+A plugin can contribute the same constructs an application can, plus framework-level wiring:
+
+- middleware into the global stack
+- services into the container
+- context extensions via `state` and `decorate`
+- error mapping and handlers
+- lifecycle behavior at every hook
+
+```ts
+import { definePlugin } from '@kwiva/core'
+
+export default definePlugin('legacy-compat', {
+  boot(app) {
+    app.middleware(['legacy-session'])
+    app.decorate('legacyRequestId', () => crypto.randomUUID())
+  },
+})
+```
+
+Anything a plugin registers is available exactly like an app-authored equivalent: the middleware appears in scopes, decorated keys appear on the context, and error handlers participate in the shared taxonomy. See [Middleware](/docs/http/middleware), [Context](/docs/core-concepts/context), and [Error Handling](/docs/core-concepts/error-handling).
+
+## How Plugins Receive the App
+
+Lifecycle hooks receive the application object, and through it a small set of programmatic operations:
+
+| Method | What it does |
+|---|---|
+| `app.on(event, handler)` | Attach a handler to a lifecycle event or pipeline hook |
+| `app.middleware([...])` | Add named middleware to the global stack |
+| `app.decorate(key, value)` | Extend the context with a singleton or resolver |
+| `app.error(...)` | Register error mapping or handlers |
+| `app.state(...)` | Declare typed store fields |
+
+The set is deliberately small — plugin authors reach for the same public surface application code uses, never for engine internals or private pipeline wiring. This keeps plugin behavior auditable: a plugin changes the framework through framework APIs.
+
+## Ordering Between Plugins
+
+Plugin hooks run in a deterministic order, which lets plugins build on each other:
+
+- `booting` hooks run in registration order before construct registration.
+- `setup` hooks run in order after providers boot and before listen.
+- `starting` and `stopping` mirror the kernel's start and inverted shutdown.
+
+Because ordering is stable, a plugin can rely on another plugin's `setup` having run — for example, a tracing plugin can expect the session plugin's context extensions to exist. Document any ordering requirement in the plugin's `requires` metadata alongside peer ranges.
+
+## A Practical Example
+
+A plugin that times every request end to end combines several framework surfaces:
+
+```ts
+import { definePlugin } from '@kwiva/core'
+
+export default definePlugin('request-timing', {
+  setup(app) {
+    app.decorate('timing', () => ({ started: performance.now() }))
+  },
+  boot(app) {
+    app.on('onResponse', async ({ store }) => {
+      const started = store.timing?.started ?? performance.now()
+      console.log(`request took ${performance.now() - started}ms`)
+    })
+  },
+})
+```
+
+The example shows the shape most plugins share: decorate to prepare, hook to observe, and let the pipeline flow unchanged.
+
+## Plugins vs Modules
+
+| | Plugin (`definePlugin`) | Module (`defineModule`) |
+|---|---|---|
+| Scope | Framework behavior | Application feature |
+| Contributes | Middleware, services, hooks, context, error handling | Models, controllers, pages, jobs, config, channels |
+| Contribute shape | Programmatic `setup` / `boot` functions | Declarative globs and options |
+| Distribution | Addon packages | Addon packages |
+| Example | Request timing, security defaults, legacy compat | Blog, analytics, admin |
+
+When in doubt, prefer a **module**. Most capabilities are features, not framework extensions. Reach for a plugin only when you need to change how the framework itself behaves — for example, shifting the middleware stack, altering context assembly, or running work at boot and shutdown for every app that installs the plugin.
+
+## Authoring Rules
+
+- Keep plugins small and focused — one behavior per plugin, named clearly.
+- Prefer configuration over code where the framework already offers it. If a behavior can be expressed in the config folder, it belongs there, not in a plugin.
+- Use lifecycle hooks at the narrowest scope that works. A plugin that only adds middleware does not need `starting` or `stopping`.
+- Respect the shared boundaries: a plugin must not import engine internals or re-architect pipeline stages; it uses the same public surface as application code.
+
+> [!NOTE]
+> Both modules and plugins ship as addon packages with the `kwiva-addon` keyword. The difference is internal: a module declares contributions as data, a plugin executes behavior against the app. See [Addons](/docs/modules-plugins/addons) for distribution.
+
+## What's Next
+
+1. [Modules](/docs/core-concepts/modules) — declarative feature composition, the preferred default
+2. [Defining Modules](/docs/modules-plugins/defining-modules) — contribution points in detail
+3. [Applications](/docs/core-concepts/applications) — the kernel a plugin hooks into
+4. [Lifecycle](/docs/core-concepts/lifecycle) — where plugin hooks fit in boot and request processing
+5. [Addons](/docs/modules-plugins/addons) — distributing plugins and modules

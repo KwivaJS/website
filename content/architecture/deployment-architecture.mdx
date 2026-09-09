@@ -1,0 +1,114 @@
+---
+title: Deployment Architecture
+description: One codebase, many targets — mode presets, deploy presets, the edge-safe constraint set, and the adapter decision flow.
+---
+
+Kwiva's deployment philosophy is simple: **deploying is a build-time choice, never a code change.** The application is written runtime-agnostic against web-standard `Request`/`Response`; the build produces an artifact for the target you select. This page explains the modes, presets, and constraints that make "one codebase, many targets" real.
+
+## How Deployment Works
+
+1. `kwiva build` runs the client build (with minification) plus the server build, configured by the framework core.
+2. The build emits an output directory (`server/` + `public/`) for the selected **preset**.
+3. The preset is selected by a deployment preset env var, a `--preset` flag, `kwiva.config.ts > deploy.preset`, or CI auto-detection.
+4. `kwiva deploy` is a thin wrapper that runs the provider's deploy path.
+
+Whatever the preset, the application sees the same framework API surface — deploy differences stay in the engine.
+
+## Mode Presets
+
+Modes are chosen at scaffold time (`kwiva new --mode=...`) and change what the build produces:
+
+| Mode | Default preset | What changes |
+|---|---|---|
+| `fullstack` (default) | server preset (auto-detected in CI) | SSR + API |
+| `api+spa` | server preset + client build only | no SSR renderer; SPA served |
+| `static` | static | everything prerendered; no server needed |
+| `standalone` | Bun server + single-binary compile | one file, zero-dependency artifact |
+| `edge` | worker preset (recommended default) | edge-safe constraint set enforced |
+
+## Target Presets
+
+The portability layer provides two families of presets.
+
+### Zero-config, auto-detected providers
+
+These are detected in CI with no configuration:
+
+| Target | What it produces |
+|---|---|
+| AWS Amplify | server output + static |
+| Azure Static Web Apps | API runtime + static |
+| Cloudflare Pages / Workers | worker script(s) |
+| Firebase App Hosting | functions |
+| Netlify | functions + edge functions |
+| Vercel | serverless functions |
+| Stormkit | server output |
+| Zeabur | server output |
+
+### Explicit presets
+
+| Preset class | Notes |
+|---|---|
+| Node server | default production output; cluster variant for multi-core |
+| Bun server | ideal single-binary path |
+| Deno server | Deno output |
+| Cloudflare module | worker (module format) |
+| Vercel edge / Netlify edge | edge functions |
+| AWS Lambda | response streaming opt-in |
+| Fastly Compute | edge platform |
+| Static | prerender everything |
+| Service worker | offline/PWA-style output |
+| PaaS/hosted (via Node preset) | env `PORT` respected |
+
+Self-host any preset by running the generated entry directly — a Node artifact, a Bun artifact, or a compiled single binary.
+
+## The Edge-Safe Constraint Set
+
+For edge presets, Kwiva documents a small writeable surface that keeps your app portable:
+
+- Loaders and handlers must be statically importable (no dynamic import of `node:*` at runtime).
+- No long-lived in-memory state across requests — use storage/cache APIs.
+- No raw sockets or `net` — use channels/WebSockets through the framework.
+- Database access goes through the model layer over an env-defined connector.
+- Avoid `process.env` reads beyond startup — inject via typed env/config.
+- Don't rely on runtime-exclusive APIs — use platform web APIs.
+
+## Environment & Metadata
+
+The build emits a manifest (deployment ID injectable). Key environment inputs:
+
+| Variable | Purpose |
+|---|---|
+| preset env var | force a preset in CI |
+| base URL env | subpath serving |
+| `PORT` | PaaS port (Railway, Render, DigitalOcean, …) |
+| provider tokens | for the deploy CLI |
+| `KWIVA_*` defaults | app-level config overrides |
+
+## Testing Deploys Locally
+
+- `kwiva preview` runs the built preset locally.
+- `kwiva build --preset <x>` then run the emitted entry — a raw smoke test per preset.
+
+## Adapter Decision Flow
+
+```
+Is SSR/edge required?
+ ├─ no → static mode
+ ├─ yes → is the provider auto-detected in CI?
+ │    ├─ no → set the preset env/config
+ │    └─ yes → nothing to do
+ └─ special cases?
+      - passthrough caching    → route rule swr
+      - per-page static        → route rule static
+      - websockets on edge     → edge durable objects + channels pattern
+      - single binary internal → standalone (compile)
+```
+
+## What to Read Next
+
+- [Deployment](/docs/deployment) — Deployment overview and philosophy
+- [Runtime Adapters](/docs/deployment/adapters) — Presets and mode presets in detail
+- [Node/Bun Deployment](/docs/deployment/node-bun) — Servers and single-binary mode
+- [Serverless](/docs/deployment/serverless) — Serverless targets
+- [Production Checklist](/docs/deployment/production-checklist) — Before you ship

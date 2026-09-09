@@ -1,0 +1,13 @@
+{
+  "title": "API",
+  "pages": [
+    "index",
+    "rest",
+    "generated-endpoints",
+    "rpc",
+    "client",
+    "openapi",
+    "authentication",
+    "errors"
+  ]
+}

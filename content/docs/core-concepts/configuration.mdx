@@ -1,0 +1,174 @@
+---
+title: Configuration
+description: "One config folder, one precedence chain, typed access everywhere — how Kwiva handles configuration, environment binding, and inline overrides."
+---
+
+## Configuration Architecture
+
+Kwiva's configuration system is built on three principles:
+
+1. **Typed** — every config value is typechecked from its module's `defaults` and schema; there is no `any` config.
+2. **Layered** — a fixed precedence chain runs from defaults to config-folder values to inline options to environment overrides.
+3. **Single source** — all configuration resolves through `src/config/`; nothing is configured from a second, ad-hoc place like a YAML file or package.json flags.
+
+The result: you can discover every knob in one folder, typos fail at compile time, and misconfiguration fails at boot instead of on the first request.
+
+## The Entry File
+
+`kwiva.config.ts` at the project root is the thin entry point. It points at the config folder and carries build, deploy, and module composition:
+
+```ts
+// kwiva.config.ts
+import { defineConfig } from '@kwiva/config'
+
+export default defineConfig({
+  load: './src/config',          // the config folder
+  deploy: { preset: 'node_server' },
+  build: {
+    // full inline build options (the toolchain's surface, exposed as an escape hatch)
+    // sourcemap: true, target: 'es2022', ...
+  },
+  modules: [],
+})
+```
+
+Runtime configuration lives in the folder; build-time configuration (preset, module list, build options) lives in this file.
+
+## The Config Folder
+
+Each domain owns one module under `src/config/`, authored with `defineConfig`:
+
+```ts
+// src/config/database.ts
+import { defineConfig } from '@kwiva/config'
+
+export default defineConfig('database', {
+  defaults: {
+    driver: 'sqlite',
+    url: 'sqlite://storage/database.db',
+    pool: { max: 10 },
+    migrations: { table: 'kwiva_migrations' },
+  },
+  env: {
+    url: 'DATABASE_URL',          // env var → config key mapping (typed + validated)
+    driver: 'DB_DRIVER',
+  },
+})
+```
+
+The scaffolding ships a standard set of modules:
+
+| Module | Owns | Key keys (excerpt) |
+|---|---|---|
+| `app.ts` | app identity, mode, middleware stack, timezone/locale | `name`, `env`, `url`, `middleware[]` |
+| `database.ts` | connections, pool, migrations | `driver`, `url`, `connections{}` |
+| `auth.ts` | providers, session, password policy | `providers`, `session{}` |
+| `session.ts` | session store and cookie shape | `driver`, `cookie{}` |
+| `api.ts` | API surface, versioning, rate limits, docs | `prefix`, `rateLimit`, `docs` |
+| `queue.ts` | connections, retries, DLQ | `driver` (redis/db), `default` |
+| `cache.ts` | mounts, TTLs, tag strategy | `mounts{}`, `defaultTtl` |
+| `storage.ts` | storage disks and drivers, signed URLs | `disks{ local, s3 }` |
+| `schedule.ts` | timezone, task cron table | `tz`, `tasks{}` |
+| `tenancy.ts` | tenancy mode, resolution, tenant field | `mode`, `tenantField` |
+| `cors.ts` | CORS policy | `origins`, `methods`, `headers` |
+| `security.ts` | headers, CSP, CSRF | `csp`, `csrf` |
+| `ui.ts` | renderer, theme, i18n | `runtime`, `theme` |
+| `telemetry.ts` | OTel exporters, sampling | `exporter`, `sampleRate` |
+| `modules.ts` | module registry | `modules[]` |
+| `mail.ts` (v1.x) | mailers, from-address | `mailers{}` |
+
+Each module is a `defineX` file, so it also accepts inline options and its values are typed. Custom domains are supported — a module is just a namespaced `defineConfig` call.
+
+## Precedence Rules
+
+Configuration follows one strict precedence chain, low to high:
+
+```
+defineConfig defaults  →  src/config/*.ts module values  →  defineX inline options  →  env (runtime overrides)
+```
+
+Later values override earlier ones. In particular:
+
+- `defaults` are the floor for every module.
+- Config-folder values mutate the defaults.
+- Inline `defineX` options are per-construct and always win over the folder — but only for that construct.
+- Env bindings apply at runtime and also override the folder.
+
+Nothing can be configured from a third place. Redis-dependent and other dynamic values stay runtime-owned, but they are always schema-typed in config.
+
+## Reading Configuration Anywhere
+
+The typed reader comes from `@kwiva/core`:
+
+```ts
+import { config } from '@kwiva/core'
+
+const url = config('database.url')          // typed: string
+const pool = config('database.pool.max')    // typed: number
+```
+
+Types flow from each module's `defaults` plus its schema, so a misspelled path or a wrong access fails compilation.
+
+## Inline Overrides in defineX
+
+Because every `defineX` factory accepts full inline options, per-construct tuning lives next to the construct:
+
+```ts
+export default defineModel('posts', (f) => ({ /* ... */ }), {
+  cache: { ttl: 120, tags: ['posts'] },       // overrides src/config/cache.ts defaults for this model
+  rateLimit: { max: 100, per: 60 },           // overrides api defaults for generated routes
+})
+
+export default defineController('reports', (c) => ({ /* ... */ }), {
+  prefix: '/reports',
+  cors: { origins: ['https://acme.dev'] },    // inline beats the folder
+})
+
+export default defineJob('cleanup', handler, {
+  queue: 'maintenance',                       // routes to a queue declared in src/config/queue.ts
+  attempts: 3,
+})
+```
+
+Rule of thumb: the folder centralizes and defaults; inline tunes per construct. Inline options never move the folder's role as the centralizing authority.
+
+## Typed Env Access
+
+Env vars are declared exactly once — in the module's `env` map — and everything flows from that declaration: types, boot validation, and the generated `.env.example`. Application code reads through the typed helper:
+
+```ts
+import { env } from '@kwiva/core'
+
+const dbUrl = env('DATABASE_URL')              // string — declared in database.ts env map
+// env('NOT_DECLARED') → compile-time error, plus a boot-time error
+```
+
+Env is validated at boot, fail-fast, with a table of missing variables. Undeclared reads fail at compile time and at boot, so ambient magic is impossible. Client-safe values are the exception: only variables under the `KWIVA_PUBLIC_` prefix ever flow into client bundles. See [Getting Started: Configuration](/docs/getting-started/configuration) for env setup.
+
+## Runtime vs Build-Time
+
+| Layer | Values | Notes |
+|---|---|---|
+| Build-time | `kwiva.config.ts` — build options, deploy preset, module list | resolved when you build |
+| Runtime | everything in `src/config/`, overridable by env | snapshotted into the runtime config channel |
+
+For production cold starts, `kwiva config:cache` merges and snapshots the folder so a zero-IO process can load it. The planned `doctor` command (v1.x) validates config against presets and runtimes. Both are CLI-level conveniences on top of the same typed model.
+
+## Anti-Patterns (Rejected by Design)
+
+These are not warnings but blocks:
+
+- **Scattering config as the primary home** — configuring constructs widely and ad-hoc instead of centralizing in the folder.
+- **Untyped `process.env` reads in app code** — lint-gated; use `env()` after declaring the variable.
+- **Baking env values into client bundles** — only `KWIVA_PUBLIC_*` values may reach the client.
+
+> [!WARNING]
+> If you find yourself reading `process.env` directly, reaching for config outside the folder, or looking up a value that was never declared in a module's `env` map, you are fighting the system — the framework will fail loudly rather than guess.
+
+## What's Next
+
+1. [Getting Started: Configuration](/docs/getting-started/configuration) — day-one setup of the config folder
+2. [The defineX Convention](/docs/core-concepts/definex) — `defineConfig` as one of the seventeen factories
+3. [Applications](/docs/core-concepts/applications) — how the kernel loads and validates config at boot
+4. [Data: database config](/docs/data/database-config) — connection, pool, and migration settings
+5. [Deployment: adapters](/docs/deployment/adapters) — presets and runtime overrides per target

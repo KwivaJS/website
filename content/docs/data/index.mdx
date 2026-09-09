@@ -1,0 +1,125 @@
+---
+title: Data
+description: "The data layer — defineModel, derived artifacts, the model IR, and a tenancy-first runtime."
+---
+
+The data layer is the foundation of every Kwiva application. It is **model-driven** rather than migration-driven: one `defineModel` declaration in `src/app/models/` is the single source of truth, and everything that touches your data — the schema, migrations, REST and RPC APIs, the typed client, Kwiva Studio screens, the OpenAPI document, search indexes, and MCP tools — is derived from it. You describe what a resource looks like once, and the framework guarantees the rest of the system cannot drift from that description.
+
+This section documents the full surface: the model and field DSL, relations, validation, the query builder, pagination, transactions (including the outbox pattern), migrations, seeders, factories, soft deletes, database configuration, and the storage abstraction.
+
+## Design Principles
+
+Four principles shape the data layer:
+
+| Principle | What it means |
+|---|---|
+| One source of truth | The model file, not the database, owns the shape of your data. Schema, API, client, and UI are derived from it. |
+| Function-based DSL | Models are plain definitions returned from a factory — no classes, no decorators, no runtime reflection, no `this` pitfalls. |
+| Tenancy-first | Tenant scoping is injected into every query and write at the data layer, not bolted on per handler. |
+| Escape hatches | Raw SQL, hand-authored migrations, controllers, and route-level schemas are first-class when you need to leave the rails. |
+
+## One Declaration, Many Artifacts
+
+```ts
+// src/app/models/posts.ts
+import { defineModel } from '@kwiva/data'
+
+export default defineModel('posts', (f) => ({
+  id: f.id(),
+  title: f.string().validation((s) => s.min(1).max(200)),
+  body: f.text().optional(),
+  status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
+  views: f.integer().default(0),
+  author: f.belongsTo(() => User),
+  comments: f.hasMany(() => Comment),
+}), {
+  timestamps: true,
+  softDelete: true,
+  audit: true,
+  tenantField: 'tenantId',
+  permission: 'posts',
+})
+```
+
+From this single file the framework produces:
+
+| Artifact | Where it lands |
+|---|---|
+| Database table | Generated schema for the active driver |
+| Migration file | `src/database/migrations/*.ts` |
+| REST API routes | `GET/POST/PATCH/DELETE` under `/api/posts` |
+| Typed RPC client | `client.posts.list()` via `@kwiva/client` |
+| Studio screens | Auto-generated CRUD in Kwiva Studio |
+| OpenAPI schema | `/openapi.json` components and schemas |
+| Validation rules | Field-level schemas compiled from the DSL |
+| Permission gates | Policy checks from the `permission` option |
+| MCP tools | Tool definitions via `@kwiva/mcp` |
+| TypeScript types | Ambient types flowing into handlers and the client |
+| Search indexes | Full-text search fields declared with `searchable` |
+
+## The Derivation Pipeline
+
+```
+defineModel files
+  └─► model IR (src/.kwiva/model-ir.json)
+        ├─► SQL table definitions + migrations
+        ├─► REST routes (list / get / create / update / delete)
+        ├─► RPC client types (@kwiva/client)
+        ├─► Studio screens (@kwiva/studio)
+        ├─► OpenAPI components
+        └─► MCP tools (@kwiva/mcp)
+```
+
+The pipeline runs during `kwiva dev` and on demand through the CLI. It scans `src/app/models/`, resolves the lazy relation references (so models compose without circular imports), and emits a deterministic intermediate representation. Field-level detail follows this chain:
+
+```
+Field definition → Type resolution → Modifier chain → Validation schema → Database column
+```
+
+## The Model IR
+
+Every consumer of the model layer is fed by the model IR — a generated, gitignored JSON document at `src/.kwiva/model-ir.json`. It captures fields, types, modifiers, relations, options, validation schemas, and permission metadata as plain data. Because the model definition is itself a plain object, generating the IR is deterministic and type-exact: the same types that flow into the query builder also flow into the REST validation and the client. See [Advanced: Model IR](/docs/advanced/model-ir) for the file format and how to consume it from tooling.
+
+## The Runtime Surface
+
+Models are not just schema. At runtime each model exposes:
+
+- A **query builder**: `.query()` with `where`, `orderBy`, `select`, `join`, `limit`, aggregates, `groupBy`, `having`, and `raw`; eager loading with `.with()` and `.withCount()`; pagination with `.page()`.
+- **Static helpers**: `findOrFail`, `first`, `create`, `update`, `delete`, `restore`, `withTrashed`, `forceDelete`.
+- **Factories**: `.factory().count(n).create()` for test and seed data.
+- **Relations**: typed relationship access, including lazy references that keep models circular-import-free.
+
+Alongside models, `db` provides transactions (`db.transaction`) with the outbox pattern for transactional events, and `storage` provides the disk-based file abstraction. The CLI — `kwiva make:model`, `kwiva db:diff`, `kwiva db:migrate`, `kwiva db:seed`, and friends — drives the lifecycle documented in [CLI: Database Commands](/docs/cli/database-commands).
+
+## Tenancy-First Data Access
+
+Multi-tenant SaaS data leakage is a catastrophic failure class, so tenancy is a first-class data-access concern rather than a flag you remember to check. When a model declares `tenantField: 'tenantId'`, the model layer injects the tenant scope into every query and write from the request's tenant context. Cross-tenant writes are rejected with a conflict; cross-tenant reads are indistinguishable from 404s. See [Tenancy](/docs/tenancy) for the full picture.
+
+> [!NOTE]
+> Every derived surface — routes, Studio, the client — inherits tenancy, validation, and permissions from the model. There is no second schema to keep in sync.
+
+## Section Guide
+
+| Section | Covers |
+|---|---|
+| [Models](/docs/data/models) | `defineModel`, ModelOptions, hooks, the derived surface |
+| [Fields & DSL](/docs/data/fields) | Field types, modifiers, default/validation integration |
+| [Relations](/docs/data/relations) | `belongsTo`, `hasMany`, `hasOne`, many-to-many, polymorphic, eager loading |
+| [Validation](/docs/data/validation) | Field-level rules, Standard Schema, custom rules, error shape |
+| [Queries](/docs/data/queries) | The full query builder: where, joins, aggregates, raw SQL, locks |
+| [Pagination](/docs/data/pagination) | Offset and cursor modes, defaults, client hooks |
+| [Transactions](/docs/data/transactions) | ACID, savepoints, isolation, the outbox pattern |
+| [Migrations](/docs/data/migrations) | Typed SQL-step files, `db:diff`, deploy-time strategy |
+| [Seeders](/docs/data/seeders) | Ordered, idempotent seed data |
+| [Factories](/docs/data/factories) | Model-aware test data generation, states |
+| [Soft Deletes](/docs/data/soft-deletes) | `deletedAt`, `withTrashed`, `restore`, `forceDelete` |
+| [Database Config](/docs/data/database-config) | Connections, pooling, drivers, logging |
+| [Storage](/docs/data/storage) | Disks, uploads, signed URLs, tenant-scoped paths |
+
+## What's Next
+
+1. [Models](/docs/data/models) — `defineModel` and ModelOptions in depth
+2. [Fields & DSL](/docs/data/fields) — field types, modifiers, and the validation chain
+3. [Your First Model](/docs/getting-started/first-model) — hands-on walkthrough
+4. [Guides: Create a Model](/guides/create-model) — build a resource end to end
+5. [Project Structure](/docs/getting-started/project-structure) — where models, migrations, and seeders live on disk

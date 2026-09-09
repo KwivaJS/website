@@ -1,0 +1,136 @@
+---
+title: Production
+description: "Environment-gated config, secret rotation, typed environment access, and the hardening checklist before every deploy."
+---
+
+Production configuration is where defaults meet reality. Kwiva's answer is environment gating: the same `defineConfig` module that runs in development renders a strict, secret-safe production surface, and a preflight gate verifies the environment before the app serves traffic. This page is the checklist between development completeness and production readiness.
+
+## Environment-Gated Configuration
+
+The `defineConfig` machinery supports per-environment modules. A production preset that enforces the strict CSP, discards pretty-printed logs, and tightens sessions is the same shape as the development preset that reports CSP violations and pretty-prints:
+
+```ts
+export default defineConfig('security', {
+  production: {
+    securityHeaders: {
+      'content-security-policy': "...",   // enforce in prod
+    },
+  },
+})
+```
+
+The preflight gate (`verify` in the build preset) blocks the deploy when the environment fails a defined check — a missing `DATABASE_URL`, a development-only leak, or a mismatched key. Verified-for-production environments are the only ones the gate lets through.
+
+## Typed Environment Access
+
+Production code reads configuration through `env`, not by reaching into the process environment object. Plain runtime access to untrusted process environment is not allowed; configuration is verified and typed:
+
+```ts
+env('DATABASE_URL')        // typed, verified, allowed
+process.env.X              // not accessible at runtime in app code
+```
+
+The translation rule: production code uses `env`, and the environment is the untrusted input that configuration verifies. A missing or malformed variable fails the preflight rather than shipping default-forgotten behavior.
+
+## Onboarding and Secrets
+
+The onboarding process enforces the boundary between public and private configuration:
+
+- Only `KWIVA_PUBLIC_` variables are made available in the client bundle
+- Everything else stays server-side, so secrets referenced by page-adjacent code cannot accidentally reach the client
+- Environment names and values stay out of the repository and out of source control history
+
+A secret rotation is a roll of the key file, not a code change: `key:generate` writes a fresh key, and `--rotate` signals the running app to pick it up (details below).
+
+## Key Rotation
+
+Sessions, and any value that depends on the application key, are signed by `key:generate` output. Rotating the key invalidates outstanding sessions — the expected semantic for a confidential credential — and the rotation flow makes it deliberate:
+
+```bash
+kwiva key:generate --rotate
+```
+
+Rotation is a deploy-time operation with a documented consequence (signed sessions reset), which is exactly what a focused, reviewable security action should look like. Running rotation outside a deploy window is the way to force-logout every user accidentally.
+
+## Session Hardening
+
+Sessions default to HttpOnly with SameSite set in production. On top of the defaults, production preflight verifies:
+
+- **Secure transport**: cookies carry the `Secure` flag, so sessions are only sent over HTTPS
+- **Session TTLs**: absolute and idle timeouts are bounded to the app's threat model
+- **CORS tightening**: the cross-origin allowlist is the production value, not the development catch-all
+
+The auth and session surfaces document their own tightening — sessions on [Auth and Sessions](/docs/auth/sessions), CORS on [HTTP CORS](/docs/http/cors).
+
+## No Debug Endpoints in Production
+
+The debugging and development surface is disabled when the environment is not development. This includes:
+
+- Debug endpoints and their tooling
+- Dev-only verbosity in logs
+- The development overlay's telemetry rendering, which is a development surface by design
+
+By the time production serves traffic, the only way to reach telemetry is through the configured exporters and the documented `/healthz` and `/readyz` endpoints — see [Tracing](/docs/observability/tracing).
+
+## Rate Limits in Production
+
+Rate limits default safe for authentication (strict) and API mutation (standard). Production tuning is about capacity, not posture:
+
+- Raise limits where legitimate application traffic is known to exceed the default
+- Keep authentication strict — credential stuffing is a production-time threat, not a development one
+- Confirm rate-limit events flow to logs and notifications, so a spike is observable while it happens
+
+The event composition is the same mechanism documented in Default Protections; production is where it starts mattering.
+
+## What Production Means for Logs and Telemetry
+
+Production observability is the security surface's evidence layer, and production settings exist to make that layer trustworthy:
+
+- Logs stay **structured JSON** — the pretty printer is a development device; production output is raw and forwardable
+- **Exporters** are configured with a real endpoint, and the collector outage path (swallowed and counted, never fatal) is the standing guarantee
+- The **dev overlay is development-only** — production renders telemetry through the configured pipeline, not through the overlay
+- `/healthz` and `/readyz` remain the only always-on endpoints, giving orchestrators a definitive readiness signal without exposing debug machinery
+
+The correlation IDs documented under observability double as incident tooling: a report that carries `requestId` resolves to its spans, logs, and series without time-bounded search. See [Observability](/docs/observability) for the full path.
+
+## Dependency Audits
+
+The production release includes a dependency audit stage: third-party code is scanned for known, documented vulnerabilities, and the pipeline blocks when findings are unresolved. The expectation is a clean audit on every deploy and a documented decision for anything the audit flags:
+
+- **Fixed** — bump the dependency and re-run the scan
+- **Accepted** — record the rationale (unreachable surface, no public exploit for this version) in the deploy note
+- **None** — clean bill, ship
+
+Audits run before the security gate in CI so a blocked deploy is explained by a flag, not discovered on the running server.
+
+## Identity and Multi-Tenancy in Production
+
+Two surfaces deserve production-specific attention beyond the defaults:
+
+- **Session turnover** — sessions are the walking credential. Production preflight verifies bounded TTLs and secure transport; deliberate rotation via `key:generate --rotate` is the sanctioned way to invalidate all signed sessions at once, which is exactly what a leaked-key incident requires.
+- **Tenant isolation at volume** — scoping fixed the single-tenant honest bug in development; production verifies it against real app traffic. Probing a cross-tenant ID from a second tenant's session must return 404 at scale the way it does in tests, with the same slow-path masking under load.
+
+Neither behavior changes at scale in the framework's model — but production is where a regression in either becomes an incident, so the preflight gate verifies both before traffic.
+
+## The Checklist Before Each Deploy
+
+The production page composes with the deploy checklist. Before a deploy is green:
+
+```text
+key:generate has been run and the key is out of the repository
+secret rotation flow reviewed — sessions can be invalidated deliberately
+CSP enforced (production preset), no development-only CSP allowlists
+sessions and CORS are production-hardened values
+debug and development endpoints disabled
+rate limits tuned to capacity; auth routes stay strict
+dependency audit passes; accepted findings are documented
+preflight gate passes against the target environment
+```
+
+## What's Next
+
+- [Production Checklist](/docs/deployment/production-checklist) — the deploy-time companion to this page
+- [Default Protections](/docs/security/default-protections) — the defaults this page hardens further
+- [Headers](/docs/security/headers) — the CSP enforcement switching per environment
+- [Auth and Sessions](/docs/auth/sessions) — session and CSRF hardening in production
+- [Configuration](/docs/core-concepts/configuration) — per-environment modules and the preflight gate

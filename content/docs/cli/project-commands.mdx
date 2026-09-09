@@ -1,0 +1,178 @@
+---
+title: Project & Lifecycle Commands
+description: "Scaffolding, the dev server, the exec/lint/format gate, tests, builds, preview, deploy, the REPL, key generation, upgrade codemods, and config caching."
+---
+
+The project and lifecycle commands cover the whole arc of an application: create it, develop it, verify it, build it, and ship it. They are the commands you will run most, and the ones that encode the framework's conventions — lowercase files, typed configuration, and one toolchain from dev to deploy.
+
+## Full Reference
+
+| Command | Action |
+|---|---|
+| `kwiva new <name> --mode=<mode>` | Scaffold a new application |
+| `kwiva dev [--port] [--cluster]` | Dev server with HMR |
+| `kwiva build [--preset] [--binary] [--docs]` | Production build |
+| `kwiva preview` | Serve the built output locally |
+| `kwiva deploy [provider]` | Build and deploy to a provider |
+| `kwiva check [--fix] [--audit]` | Format, lint, and typecheck gate |
+| `kwiva test [--e2e] [--watch] [filter]` | Run the test suite |
+| `kwiva console` | REPL with app context |
+| `kwiva upgrade` | Codemod recipes plus dependency bumps |
+| `kwiva key:generate` | Generate `APP_KEY` into `.env` |
+| `kwiva config:cache` | Snapshot merged config (v1.x) |
+| `kwiva doctor` | Environment and dependency diagnostics (v1.x) |
+
+## The Arc of a Project
+
+The commands line up with the way a project actually lives:
+
+```bash
+kwiva new my-app            # 1. scaffold
+kwiva dev                   # 2. develop
+kwiva check                 # 3. keep the gate green
+kwiva test                  # 4. verify behavior
+kwiva build                 # 5. produce the artifact
+kwiva preview               # 6. inspect the built output
+kwiva deploy                # 7. ship
+```
+
+Each step feeds the next: generated files must pass `check`, `check` and `test` must pass before a `build` you trust, and `preview` validates the exact artifact `deploy` will ship.
+
+## Scaffolding: `kwiva new`
+
+```bash
+kwiva new my-app
+kwiva new my-app --mode=api+spa
+```
+
+`kwiva new` scaffolds a complete project tree — `kwiva.config.ts`, `src/`, `public/`, `storage/`, environment files, and a typed config folder covering app, database, auth, session, api, queue, cache, storage, schedule, tenancy, cors, security, ui, telemetry, modules, and mail. The `--mode` flag selects the application shape:
+
+| Mode | Description |
+|---|---|
+| `fullstack` | SSR pages plus API routes (default) |
+| `api+spa` | API server with a single-page application |
+| `static` | Static site generation only |
+| `standalone` | API-only, single-binary output |
+| `edge` | Optimized for edge runtimes |
+
+Omitting the name triggers an interactive prompt; supplying it runs non-interactively for scripts. Once scaffolded, the project is a runnable app: `kwiva dev` starts it, `kwiva check` passes on the generated files, and the folder structure is enforced thereafter by the CLI and the exec/lint/format gate.
+
+## Development: `kwiva dev`
+
+```bash
+kwiva dev
+kwiva dev --port 4000
+kwiva dev --cluster      # v1.x multi-process dev
+```
+
+`kwiva dev` starts the development server with hot module replacement. TypeScript runs natively through the runtime with no compile step, and pages, controllers, and models hot-swap as the framework re-resolves them. `--port` overrides the listening port. `--cluster` (v1.x) runs the dev server across processes with port reuse for cluster-shaped workloads.
+
+While you work, the development overlay renders the same telemetry the framework records for production — request timeline, span waterfall, errors, and the query list — beside the app. See [Development Server](/docs/getting-started/development-server) and [Dev Overlay](/docs/observability/dev-overlay).
+
+## The Gate: `kwiva check`
+
+```bash
+kwiva check
+kwiva check --fix       # apply lint + format fixes
+kwiva check --audit     # dependency audit (v1.x)
+```
+
+`kwiva check` is the exec/lint/format gate — one command that runs the formatter, the linter (including the framework's convention rules such as `no-engine-imports` and `no-raw-fetch-in-loaders`), and a full typecheck. It is the single verification command a project runs before anything merges, and it is built on the Rust-speed toolchain, so it runs fast enough to be the constant companion of a dev loop rather than a slow pre-deploy ritual.
+
+- `--fix` applies automatic formatting and lint fixes. The rare rule that refuses auto-fix is reported with a pointer to the offending line.
+- `--audit` (v1.x) checks dependency health against locked versions, surfacing advisories so they resolve to a controlled upgrade path.
+
+Generated output — and any code you write by hand — is expected to pass `kwiva check`. Diagnostic findings that do not block, such as style warnings without an auto-fix, are reported without failing the gate.
+
+## Tests: `kwiva test`
+
+```bash
+kwiva test
+kwiva test --watch
+kwiva test --e2e
+kwiva test users
+```
+
+`kwiva test` runs the unit and integration suite through the runtime's test runner. `--watch` re-runs on change; a positional filter narrows to matching tests; `--coverage` reports coverage against CI thresholds. `--e2e` runs the end-to-end suite, which launches the built app and drives it through browser flows. The full command surface — including the `--server` target for E2E against the built artifact — is documented on [Testing](/docs/testing/).
+
+## Build: `kwiva build`
+
+```bash
+kwiva build
+kwiva build --preset node_server
+kwiva build --binary
+kwiva build --docs
+```
+
+`kwiva build` produces the production artifact using the Rust-speed toolchain — tree shaking, code splitting, and minification — and the framework-owned engine presets. Because the build is deterministic and idempotent, the same source produces the same artifact: exactly what `kwiva preview` and `kwiva deploy` consume. Key flags:
+
+| Flag | Effect |
+|---|---|
+| `--preset <preset>` | Target a deployment shape; presets flow from `kwiva.config.ts > deploy` |
+| `--binary` | Compile to a single standalone binary |
+| `--docs` | Build the generated route documentation |
+
+The build config surface lives in `kwiva.config.ts > build`, where deployment presets are declared alongside the rest of the project configuration. See [Deployment](/docs/deployment/) for presets.
+
+## Preview and Deploy
+
+```bash
+kwiva preview            # serve the built artifact locally
+kwiva deploy             # build + deploy to the configured provider
+kwiva deploy cloudflare  # or a specific provider
+```
+
+`kwiva preview` runs the finished build exactly as the output was produced, so you validate the artifact before it ships. `kwiva deploy [provider]` builds and pushes in one step; provider presets come from configuration, and worker deploy is available via `kwiva deploy --entry worker` for queue workers. See [Deployment](/docs/deployment/).
+
+## The REPL: `kwiva console`
+
+```bash
+kwiva console
+```
+
+`kwiva console` opens an interactive REPL with the full application context loaded — configuration, models, the typed client, and services are all available. It is the fastest way to exercise a model query, test a service, or check what a config value resolves to without running the server.
+
+The REPL doubles as an observability surface:
+
+```text
+app.trace.last()      // the most recent span tree
+app.logs.tail(20)     // the last 20 log lines
+```
+
+Model queries, worker logic, and telemetry inspection all share the same context, which makes the console the debugging tool that sits between a unit test and a deployed environment.
+
+## Key Generation
+
+```bash
+kwiva key:generate
+```
+
+`kwiva key:generate` writes a fresh `APP_KEY` into the environment file. The key signs sessions and application secrets; it should be generated once per environment and rotated deliberately. Rotation is a first-class operation — `kwiva key:generate --rotate` writes a new key and invalidates existing sessions, which makes it the revoke step in an incident runbook rather than a risky maintenance task.
+
+## Upgrade: `kwiva upgrade`
+
+```bash
+kwiva upgrade
+```
+
+`kwiva upgrade` moves an existing project to a newer framework version. It runs codemod recipes over the codebase — transforming files to the new conventions automatically — then bumps dependencies to their new compatible versions. Codemods are transformer-based, so the upgrade is fast and applied consistently across the repo, and convention rules are kept in sync with the recipes rather than drifting. After an upgrade, `kwiva check` is the verification step: if the codemod missed a site, the gate finds it.
+
+## Config Caching: `kwiva config:cache`
+
+```bash
+kwiva config:cache       # v1.x
+```
+
+`config:cache` merges `src/config/*` with defaults and snapshots the result for zero-IO cold starts. After caching, booting reads the merged snapshot instead of re-evaluating every module. Run it after config changes in production; the config folder itself remains the source of truth — the snapshot is an optimization, not a second configuration source. See [Configuration](/docs/core-concepts/configuration).
+
+## Diagnostics: `kwiva doctor`
+
+`kwiva doctor` (v1.x) diagnoses environment, runtime, and dependency health. It validates the environment against the declared env maps, checks runtime compatibility, and flags rule overrides that would weaken the gates — the "am I set up correctly" check you reach for when a fresh checkout misbehaves.
+
+## What's Next
+
+- [Generators](/docs/cli/generators) — the `make:*` surface for new files
+- [Database Commands](/docs/cli/database-commands) — migrations and seeders
+- [Configuration](/docs/core-concepts/configuration) — how `kwiva.config.ts` and `src/config` shape every command
+- [Deployment](/docs/deployment/) — presets, providers, and production builds
+- [Getting Started](/docs/getting-started/create-project) — scaffold your first app

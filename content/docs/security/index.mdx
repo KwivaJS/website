@@ -1,0 +1,110 @@
+---
+title: Security
+description: "Defense in depth across request, session, and tenant boundaries — protective defaults that hold at the framework boundary."
+---
+
+Kwiva treats security as a property of the framework surface, not a checklist that application code must remember. Because requests, sessions, tenant isolation, validation, jobs, and page rendering all pass through framework-owned machinery, the defensive defaults land at every layer without you wiring them in. The security model is: defaults are safe, opt-outs are explicit and loud, and the attack surface of a Kwiva application is smaller than equivalent code written by hand.
+
+## Security at Every Layer
+
+Defenses are placed where the attack actually arrives, across four layers:
+
+| Layer | Defense |
+|---|---|
+| **Request** | Typecasts validate every input at the boundary, security headers ship by default, CSRF protection guards state-changing requests |
+| **Session** | HttpOnly, SameSite, and Secure cookies; constant-time session handling |
+| **Identity** | Argon2id password hashing, rate-limited auth endpoints, enumeration-safe responses |
+| **Tenant** | Query scoping enforced by the tenant layer, missing resources return 404 to avoid information leaks |
+
+The result is a stack where a vulnerability in application code has to defeat the framework boundary first — and the framework boundary is where the defaults are strongest.
+
+## The Threat Model
+
+The security documentation assumes an attacker who can:
+
+- Reach your public endpoints with crafted requests — manipulation of inputs, headers, and cookies
+- Observe session traffic and attempt session hijack or fixation
+- Probe multi-tenant behavior for cross-tenant data access
+- Attempt injection against queries and rendered output
+
+It does not assume an attacker with the database credentials or the production filesystem. Secrets handling, heads-up production configuration, and dependency hygiene are covered separately in the production guide.
+
+## Protective Defaults
+
+The single most important posture in Kwiva: **the safe choice is the default**. A fresh application ships with:
+
+- Typed validation on controllers, models, jobs, events, and channels — unvalidated input never reaches an executor
+- CSRF double-submit token protection on state-changing requests
+- A strict, nonce-based Content Security Policy in production, with report-only mode in development
+- A hardened cookie policy — `HttpOnly`, `SameSite=lax`, `Secure` in production — with the CSRF cookie further restricted
+- Rate limiting on authentication endpoints (strict) and API mutation (default), with the ability to tune per route
+- Security headers middleware enabled by default, sending a conservative header set unless you override it
+- Identical 401 responses for unknown users and wrong passwords, so sign-in endpoints do not enumerate accounts
+- Enforced tenant scoping with 404-masking for cross-tenant resource access
+
+Each default is overridable — but overriding is an explicit, deliberate act with a documented trade-off, not an accident of configuration.
+
+## Tenant Isolation and Authorization
+
+Tenant isolation is enforced in the query layer and in the response path:
+
+- Queries are scoped by the tenant layer to the arranged tenant; a lookup outside it returns nothing without leaking existence
+- Missing cross-tenant resources return 404 rather than 403, so an attacker cannot probe which IDs exist
+- Authorization policies run before side effects — a user cannot create, update, or delete through a route that outruns its policy
+
+Authorization elsewhere is covered by [Policies](/docs/authorization/policies), and the isolation mechanism itself has its own in-depth treatment on [Tenancy Isolation](/docs/tenancy/isolation).
+
+## Where the Levers Are
+
+Each defense ships with a documented override point. The table below maps concerns to pages on this documentation:
+
+| Concern | Page |
+|---|---|
+| Default protections, CSRF, cookies, rate limits | [Default Protections](/docs/security/default-protections) |
+| Security headers, CSP, per-route overrides | [Headers](/docs/security/headers) |
+| Typed validation on every input boundary | [Input Validation](/docs/security/input-validation) |
+| Environment gating, secrets, audits, production-only hardening | [Production](/docs/security/production) |
+
+## Application Code Still Plays a Role
+
+Protective defaults narrow the surface; they do not replace judgment. Three habits keep application code aligned to the framework's posture:
+
+1. **Do not disable defaults.** Most reportable vulnerabilities in Kwiva apps come from overriding a default without substituting a comparable control.
+2. **Log and correlate.** Error handling and observability cooperate: correlation IDs and structured error responses are security tools too, because they turn an incident into a traceable story.
+3. **Follow the lifecycles.** Deleting users, rotating keys, and clearing sessions have framework-supported paths — use them, and keep `key:generate` and its rotation flow in the deploy checklist.
+
+The pages that follow are organized the same way the stack is: default protections first, then headers, then validation, then the production checklist. Each expands one defensive layer from "this exists" to "this is how it behaves under attack."
+
+## Pressing on the Boundaries
+
+A healthy security posture is one you can verify. Because the protections above live in framework-owned machinery, verifying them is a series of concrete, cheap probes rather than an audit of application code:
+
+- Send a state-changing request without the CSRF token — expected: rejected before the handler
+- Fetch a production response and read its headers — expected: the strict, nonce-based CSP and hardened cookie flags
+- Query a resource ID that exists in another tenant — expected: 404, identical to a missing ID
+- Attempt to sign in with an unknown account, then with a wrong password — expected: identical 401 responses
+- Read the response headers of every route you expose — expected: no dev-only headers leaking into production responses
+
+Each probe maps to a documented default on the next pages. When a probe returns something other than the expected result, you have found either an intentional override or a regression to fix — both are discoverable, which is the entire point of defaults.
+
+## The Security Checklist
+
+As a working checklist for an application before it ships:
+
+- [ ] Authentication endpoints rate-limited; `key:generate` has been run and secrets are out of the repository
+- [ ] Sessions are HttpOnly and secure in production; CSRF protection active on mutations
+- [ ] Strict CSP enabled in production; development CSP in report-only mode
+- [ ] Inputs validated at every boundary — controllers, models, jobs, events, and channels
+- [ ] Policies attached to protected routes; tenant scoping verified against a second tenant
+- [ ] Debug and development-only endpoints disabled in production
+- [ ] Dependency audits pass, and the deploy checklist has been reviewed
+
+Each item has a dedicated page. The next five documents expand each defense from "this exists" to "this is how it behaves."
+
+## What's Next
+
+- [Default Protections](/docs/security/default-protections) — what a fresh Kwiva app blocks out of the box
+- [Headers](/docs/security/headers) — the security headers sent by default
+- [Input Validation](/docs/security/input-validation) — typed validation on every boundary
+- [Production](/docs/security/production) — environment gating and the production checklist
+- [Tenancy Isolation](/docs/tenancy/isolation) — the isolation mechanism behind 404-masking

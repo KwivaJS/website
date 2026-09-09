@@ -1,0 +1,180 @@
+---
+title: Error Handling
+description: "The eight-code taxonomy, two renderers, typed helpers, custom codes, and client-side handling."
+---
+
+Kwiva has one error taxonomy and two renderers: JSON for API routes, HTML for pages. Every error — wherever it is thrown — maps to a code in the taxonomy, carries a request ID for correlation, and is typed on the client. There is no second, ad-hoc way to report failures.
+
+The taxonomy is the shared contract of the whole framework, not an HTTP-layer detail. The model layer throws into it, validation produces it, middleware short-circuits with it, and the typed client consumes it. If you learn the eight codes once, you know the shape of every failure the framework can produce.
+
+## The Taxonomy
+
+Every request resolution lands on one of eight codes. Seven are error codes; the first is the success resolution:
+
+| Code | HTTP | Meaning | Produced by |
+|---|---|---|---|
+| `OK` | 200 | Success — the request was handled | Pipeline |
+| `UNAUTHORIZED` | 401 | No session or invalid credentials | Auth, guards |
+| `FORBIDDEN` | 403 | Policy denial | Policies, `permission` |
+| `NOT_FOUND` | 404 | Missing resource or route | `findOrFail`, router |
+| `CONFLICT` | 409 | Uniqueness or optimistic-concurrency violation | Model layer |
+| `VALIDATION` | 422 | Schema failures | Validation stage |
+| `TOO_MANY_REQUESTS` | 429 | Rate limit tripped | Middleware |
+| `INTERNAL_ERROR` | 500 | Unhandled error | Catch-all |
+
+This is the complete contract. Success statuses are the standard set — 200, 201, 204 — and every failure maps into one of these seven error codes plus `OK` for success. On the typed client the discrimination is literal: `res.ok` is the `OK` resolution, and `res.error.code` is the failing code.
+
+## Authoring Errors
+
+Two styles are supported, chosen by context:
+
+```ts
+import { error, NotFoundError, ForbiddenError } from '@kwiva/http'
+
+// helper return — preferred in handlers
+return error('NOT_FOUND', { message: 'no such post' })
+return error('VALIDATION', { issues: [{ path: 'title', message: 'too long' }] })
+
+// typed exceptions — preferred in services and models
+throw new NotFoundError('post', id)
+throw new ForbiddenError('posts.publish')
+```
+
+The `error` helper returns a typed error response from the handler. The typed exceptions throw, which is the right shape from deep inside a service or model where there is no return value to thread. Both end up as the same taxonomy entry.
+
+Unknown errors become `INTERNAL_ERROR` in production with details hidden; in development they surface with the full stack.
+
+> [!NOTE]
+> Returning an error response and throwing are interchangeable at the pipeline level. Both enter the `onError` stage, both produce the same envelope, and both record the same span and metric attributes.
+
+## Custom Codes
+
+The taxonomy is fixed, but it is extensible — not skippable. Custom codes register in `src/config/app.ts > errors` with a status mapping:
+
+```ts
+// src/config/app.ts (excerpt)
+export default defineConfig('app', {
+  defaults: {
+    errors: {
+      PAYMENT_REQUIRED: { status: 402 },
+      TOO_LARGE: { status: 413 },
+    },
+  },
+})
+```
+
+Registered codes map to the matching HTTP status and flow through the same envelope, `onError` stage, and client typing as the built-in codes. The taxonomy definition is the reference list; custom codes extend it, and the client union grows to include them.
+
+## Response Shapes
+
+API errors render as JSON with the taxonomy envelope:
+
+```json
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "no such post",
+    "requestId": "req_..."
+  }
+}
+```
+
+`VALIDATION` adds the field-mapped `issues` array:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION",
+    "message": "input validation failed",
+    "requestId": "req_...",
+    "issues": [
+      { "path": "title", "message": "too long" }
+    ]
+  }
+}
+```
+
+Page errors render as HTML through the route's `errorComponent` or the root error boundary, themed and including the request ID. One taxonomy, two renderers — see [Frontend](/docs/frontend) for the page side.
+
+## The onError Stage
+
+Any throw or `error()` return in any lifecycle stage enters the `onError` stage:
+
+- Mapping order: typed exception, registered custom code, then `INTERNAL_ERROR`.
+- `onError` hooks at app and controller scope can translate domain exceptions before mapping — for example, turning a payment provider failure into a custom `PAYMENT_REQUIRED` code.
+- After mapping, the trace span records the code and metrics count per code and route.
+
+The `onError` hooks run before the taxonomy mapping, so domain translation is the place to widen the taxonomy for application-specific failures. The hooks see the raw exception and the lifecycle stage it came from, and return the taxonomy entry to emit.
+
+## Model-Layer Integration
+
+The model layer throws into the same taxonomy, so handlers rarely map errors manually:
+
+- `findOrFail` throws `NOT_FOUND`.
+- Unique-constraint violations throw `CONFLICT` with the offending field.
+- Soft-deleted rows are invisible by default, so reads of a trashed row return `NOT_FOUND`, not a special deleted state.
+
+See [Models](/docs/data/models) and [Data: soft deletes](/docs/data/soft-deletes).
+
+## Client-Side Typing
+
+The typed client returns discriminated errors with no string matching:
+
+```ts
+const res = await client.posts.get(id)
+
+if (res.ok) {
+  console.log(res.data.title)
+} else {
+  switch (res.error.code) {
+    case 'NOT_FOUND':
+      // handle the missing resource
+      break
+    case 'FORBIDDEN':
+      // handle the policy denial
+      break
+    case 'TOO_MANY_REQUESTS':
+      // handle the limit
+      break
+  }
+}
+```
+
+The success branch narrows to `data`; the failure branch narrows `error` to the taxonomy union plus any registered custom codes.
+
+## Status Code Selection
+
+The taxonomy maps to a fixed status. Whenever you author an error, pick the code that describes the situation — not the status you want — because the mapping is owned by the framework. `NOT_FOUND` is always 404, `CONFLICT` is always 409, and so on. Custom codes declare their own status when registered.
+
+## Validation Issues Path
+
+`VALIDATION` issues use the field path as reported by the schema. Nested fields report dot paths such as `account.email`, and array items report indexes such as `items.0.quantity`. The typed client preserves the shape, so a form can highlight the exact field regardless of nesting depth.
+
+## Errors in Middleware and Guards
+
+Middleware and guards return errors with the same `error` helper, so a short-circuited request is indistinguishable from a handler failure to callers. This produces `UNAUTHORIZED` from the `auth` middleware, `TOO_MANY_REQUESTS` from the rate limiter, and `FORBIDDEN` from a guard check — all through one path, all carrying `requestId`, all visible in the request waterfall.
+
+## Logs and Correlation
+
+Every error response carries `requestId`, the same value as the `x-request-id` header. The structured log line for an error includes `level`, `code`, `route`, `requestId`, `tenantId`, and `traceId`:
+
+```ts
+logger.error({ code, route, requestId, tenantId, traceId }, 'request failed')
+```
+
+Production hides internals for `INTERNAL_ERROR`; the development overlay shows the full stack with source maps. See [Observability: logging](/docs/observability/logging).
+
+## Failure of the Error System
+
+The error system degrades, never loops:
+
+- If the error handler itself throws, the request returns a plain 500 and an alert metric fires.
+- If rendering an error page throws, a minimal built-in fallback page is served.
+
+## What's Next
+
+1. [Validation](/docs/http/validation) — the `VALIDATION` code and issues shape
+2. [Guards](/docs/http/guards) — where `UNAUTHORIZED` and `FORBIDDEN` originate
+3. [API: errors](/docs/api/errors) — the error contract on the typed client
+4. [Observability: logging](/docs/observability/logging) — correlating errors with `requestId`
+5. [Core Concepts: error handling](/docs/core-concepts/error-handling) — taxonomy concepts across the app

@@ -1,0 +1,130 @@
+---
+title: Tenant Isolation
+description: "Isolate tenant state across storage, cache, queue, sessions, and broadcast — and keep every instance interchangeable in multi-instance deployments."
+---
+
+Query scoping protects tenant data at the row level. Tenant isolation extends the same boundary to every piece of derived state a tenant can produce: files, cached values, queued work, sessions, and realtime traffic. Isolation is what makes multi-tenant safe and, at the same time, what makes multi-instance correct.
+
+The pattern is uniform — every key, path, and payload gains the tenant identity, and every consumer of that state expects it. Nothing that crosses a process or instance boundary is tenant-blind, which is the property that makes instances interchangeable.
+
+## Isolation Dimensions
+
+Kwiva isolates tenant state automatically across the infrastructural surfaces:
+
+| Dimension | Mechanism | Example |
+|---|---|---|
+| Storage | tenant-prefixed paths | `storage/{tenantId}/...` |
+| Cache | tenant-prefixed keys | `{tenantId}:{key}` |
+| Queue | tenant id carried in payloads | workers re-hydrate context before handlers |
+| Broadcast | membership policy-checked per tenant | channels reject cross-tenant subscribe |
+| Session | session state belongs to the resolved tenant | sign-in stays tenant-scoped |
+| Audit | audit rows carry the tenant | change history is scoped like data |
+
+The pattern is uniform: **every key, path, and payload gains the tenant identity, and every consumer of that state expects it.** Nothing that crosses a process or instance boundary is tenant-blind.
+
+## Storage Isolation
+
+When the storage config is scoped (the default), uploaded and generated files land in tenant-prefixed paths:
+
+```
+storage/{tenantId}/logos/plan.png
+storage/{tenantId}/exports/report.pdf
+```
+
+A tenant reading, writing, or signing a URL for storage resources gets the tenant-scoped path automatically. Two tenants can store a file named `plan.png` without colliding, and one tenant's file listing never reveals another's. Set `storage: { scoped: false }` only for explicitly shared assets, such as public or product-wide resources.
+
+The storage layer composes with the rest of isolation: keys are prefixed by the same tenant identity that scopes queries, so a file reference and the row that owns it stay in the same boundary.
+
+## Cache Scoping
+
+Cache keys are scoped the same way — `cache.set` and friends compose the tenant prefix into the key:
+
+```
+{tenantId}:posts:list:page-1
+{tenantId}:counts:dashboard
+```
+
+Two consequences follow:
+
+1. **No cross-tenant cache poisoning** — invalidation keys are per tenant, so a product-wide `invalidateTags(['posts'])` cannot evict or serve another tenant's entries incorrectly
+2. **Correct multi-instance behavior** — because keys are distinct per tenant, every instance reads and writes the same logical cache with no shared-state hazards
+
+Tags and TTLs behave unchanged; only the key namespace is tenant-aware.
+
+## Queue Isolation
+
+Queued work is a special case, because a job outlives the request that dispatched it. Kwiva handles this by carrying the tenant in the payload:
+
+- Dispatched jobs carry `tenantId`
+- Workers look up the payload, re-hydrate the tenant context, and run the handler inside it before touching the queue payload's data
+- Every handler's queries are therefore scoped against the same tenant the requester operated under
+
+This closes the gap that plagues naively built multi-tenant queues: a job dispatched for tenant A can never execute its writes against tenant B's rows, because the tenant context is restored before the handler body runs.
+
+The re-hydration step is what makes queue handlers effectively identical to request handlers: by the time the handler runs, `ctx.tenant` is populated, queries scope, and storage and cache keys prefix — nothing in the job body needs to manage tenancy explicitly.
+
+## Broadcast and Realtime Isolation
+
+Realtime channels are checkpoints too. Subscribing to a channel is a policy-checked operation, and membership is evaluated per tenant:
+
+- A channel like `chat.{roomId}` cannot be joined across tenant boundaries
+- Events broadcast with `UserSignedUp.broadcast('user.{id}')` reach only sessions whose tenant context matches
+- Model events broadcast to a public channel naturally ride the tenant-aware key so no cross-tenant push happens
+
+Practically: an operator for tenant A never receives another tenant's realtime traffic, even when both listen to the same channel name. Subscription is checked at the handshake, and delivery is dialed by tenant, so the same channel-name string means different audiences in different tenants.
+
+## Shared Versus Isolated Resources
+
+Not every resource must be isolated, and the framework keeps the choice explicit:
+
+| Resource | Default | When to share |
+|---|---|---|
+| Database rows | scoped via `tenantField` | reference data excluded from `models: '*'` |
+| Storage paths | scoped | public assets, brand media |
+| Cache keys | scoped | product-wide computed values |
+| Connections and pools | shared by design | pooling is economic; isolation is per-key, not per-connection |
+| Tenants themselves | shared (the table is global) | tenant records must be resolvable for lookups |
+
+The rule of thumb: **rows, state, and derived artifacts are scoped; infrastructure is shared.** Sharing a pool or a connection is safe precisely because the isolation happens in the key, path, and query layers above it.
+
+The tenant table is the one table meant to be global — every request must be able to resolve any tenant from it. Its global read surface is deliberate and bounded; every other owned row is scoped.
+
+## Audit
+
+Audit rows inherit the tenant boundary. `{ audit: true }` models record `createdBy` and `updatedBy` from the session, and the resulting history is scoped like the data it describes — a tenant sees its own change history, platform staff with an admin scope see the full trail. The relationship-aware Studio surfaces this per tenant, consistent with its data scoping.
+
+## Multi-Instance Correctness
+
+Isolation is what makes stateless multi-instance deployment truthful:
+
+- All state is externalized — rows carry `tenantId`, cache keys are prefixed, storage is tenant-pathed
+- Instances are interchangeable: no instance holds tenant-local state that another instance cannot see or produce
+- Schedule locks with `onOneServer` prevent per-tenant cron duplication when multiple workers compete for the same schedule
+- Per-tenant rate limits (`rateLimit: { per: 'tenant' }`, v1.x) keep one noisy tenant from exhausting shared infrastructure
+
+The scalability promise — add instances, not locks — holds because tenant state is addressable from anywhere by its tenant-scoped key.
+
+> [!TIP]
+> When you persist a new kind of state, ask the isolation question immediately: does it carry the tenant identity in its key, path, or payload? If not, it becomes tenant-blind state the moment a second instance reads it — exactly the class of bug isolation exists to prevent.
+
+## Testing Isolation
+
+Isolation participates in the test harness exactly like scoping:
+
+```ts
+withApp(async (app) => {
+  const acme = app.asTenant('acme')
+  const client = createTestClient(app, { tenant: acme })
+  // storage and cache writes are tenant-scoped; cross-tenant asserts 404
+})
+```
+
+Fakes apply the same rule: `storage.fake()` records tenant-scoped paths, and `queue.fake()` asserts payloads carrying the tenant identity. An isolation regression — a key without a prefix, a job without a tenant — fails loudly in the harness. The invariant suite (`kwiva test --tenancy`) runs the full matrix across two tenants, so the guarantees hold end-to-end, not merely in unit tests.
+
+## What's Next
+
+- [Scoping](/docs/tenancy/scoping) — the query boundary isolation builds on
+- [Resolution](/docs/tenancy/resolution) — where the tenant identity comes from
+- [Testing](/docs/testing/integration-testing) — exercising tenancy with `withApp` and fakes
+- [Storage](/docs/data/storage) — the disk layer that honors tenant paths
+- [Authorization](/docs/authorization) — how policies gate the same boundaries

@@ -1,0 +1,151 @@
+---
+title: Static Generation
+description: "Build-time prerendering — kwiva build output, static routes, ISR, and the SPA fallback."
+---
+
+Static generation turns routes into **build-time artifacts**: HTML, assets, and JSON that a static host can serve directly — no server round-trip at request time. It is the strongest caching strategy a route can have, and it composes with incremental regeneration for routes that change after the build.
+
+Because the build runs the real pipeline — router match, guards, loaders, rendering — the artifacts are identical to what a server would have streamed, minus the server. The same pipeline that serves dynamic SSR also produces the static files; only the schedule changes.
+
+## What Static Generation Produces
+
+At `kwiva build`, routes marked for static output are rendered once and emitted as files:
+
+```
+dist/
+├─ index.html
+├─ about.html
+├─ posts/
+│  ├─ index.html
+│  └─ widget-1.html ...
+└─ assets/...
+```
+
+A static host serves these directly. Head and meta are serialized per route during the build pass, so a statically generated site ships the same SEO tags a server-rendered one would. See [Pages](/docs/frontend/pages) for the `head` contract.
+
+## Build-Time Crawl or Explicit List
+
+Static output is decided per route, two ways:
+
+| Declaration | Behavior |
+|---|---|
+| `static: true` | The exact route is built once; dynamic segments are enumerated explicitly |
+| `prerender: true` | The build crawls reachable routes and prerenders every one it finds |
+
+For a path with dynamic segments — `posts/$id` — the build needs the concrete set: declare them explicitly or let the crawler discover links from the pages it already renders:
+
+```
+static: true            → build writes these exact paths once
+prerender: true         → crawl from the route tree, prerender everything reachable
+```
+
+The crawler follows the same links users would: a list page that links to detail routes seeds the detail set for the build pass. Anything not reachable by crawling — or not listed explicitly — stays out of the static output.
+
+### Crawl Mechanics
+
+The crawl is driven by the route tree and the rendered pages themselves:
+
+```
+build start
+  → static: true routes render once (exact paths)
+  → prerender: true routes crawl from the route tree
+  → each rendered page yields its links → more routes enter the set
+  → all discovered pages render → artifacts written to dist/
+```
+
+For data-driven paths such as `posts/$id`, the page set is whatever the crawler reaches plus whatever is enumerated explicitly. Content that is not linked from any rendered page — an orphaned draft, an unlisted detail page — must be listed explicitly or it will not be built.
+
+## The Build Pass
+
+Static output is produced by the same pipeline that serves SSR, run once at build:
+
+```
+request (page route)                      kwiva build
+  → router match                             → the same pipeline,
+  → beforeLoad guards                         but once per static page,
+  → loaders run (in-process)                  at build time
+  → suspense-aware HTML
+  → head serialized per route
+```
+
+Guards run during the build pass too — a static page behind `beforeLoad` renders whatever the guard path produces at build time. That is why genuinely private routes do not belong in static output; keep static generation for public content, and keep session-dependent regions on client-side hooks with cached shells. See [Caching Strategies](/docs/rendering/caching).
+
+## Modes
+
+Static output flows from the project mode chosen at scaffold time:
+
+| Mode | Meaning for rendering |
+|---|---|
+| `fullstack` | SSR pages + API routes |
+| `api+spa` | API server + single-page client app |
+| `static` | Static site generation only |
+| `standalone` | API-only, no frontend |
+| `edge` | Optimized for edge runtimes |
+
+In `static` mode the whole site is output to prerendered files and the API, if present, is served separately. In `fullstack` mode, static and ISR rules apply per route on top of the default SSR pipeline. The mode is a projection of the same codebase — see [Deployment](/docs/deployment) for how each mode ships.
+
+## Client-Only Fallback
+
+`api+spa` mode renders differently: pages render **client-only** from the same `definePage` files, and the server serves the app shell plus the API. The page files do not change — the same named exports drive server rendering and single-page rendering alike. Route rules still apply to the API surface; the client build is what the host serves.
+
+```
+api+spa
+  server → app shell + API
+  client → same definePage files, rendered client-side
+```
+
+Because hydration is island-free full hydration, the SPA mode exercises the same component tree, the same data hooks, and the same cache as SSR — the renderer is the only difference. See [Hydration](/docs/rendering/hydration).
+
+## Static Generation vs Caching
+
+Static and cache rules are often confused; the difference is when work happens:
+
+| Strategy | When rendering happens | Request behavior |
+|---|---|---|
+| `static` / `prerender` | At build time | Serves a file, zero rendering |
+| `isr: n` | First request, then regenerated on interval or on demand | Serves cached page while regenerating |
+| `swr: n` | First request; refreshed in background | Serves cached page, refreshes after |
+| `cache: n` | Every cache miss | Cached response, re-rendered on expiry |
+| (default) | Every request | Fully dynamic |
+
+Choose static when content is fixed at build time (docs, marketing, a changelog). Choose ISR when content changes rarely but cannot be frozen at build (a catalog, a blog feed). Choose SWR or cache when pages mutate more frequently but tolerantly. See [Caching Strategies](/docs/rendering/caching) for the full comparison.
+
+## Static + Incremental Regeneration
+
+Static and ISR share one artifact model: a page that is `static` today can be promoted to `isr: n` when its content starts changing — the same route, now regenerated on an interval or on demand via `invalidateTags`. Either way the host keeps serving files; the difference is who does the rendering and when.
+
+```
+static: true    → host serves files, never regenerated
+isr: 300        → host serves files, regenerated every 5 minutes (or on invalidateTags)
+```
+
+On-demand invalidation reaches ISR pages from any job, task, or event handler with server authority — the next request re-renders the page regardless of the interval. See [Caching Strategies](/docs/rendering/caching) for tag invalidation.
+
+## Getting Static Output
+
+```bash
+kwiva build        # renders static + prerender routes, bundles the client
+kwiva preview      # verifies the built artifacts locally
+kwiva deploy       # ships to the configured host
+```
+
+Deploys bust static assets with a new build ID, so a redeploy never serves a stale asset set against fresh HTML. See [Deployment](/docs/deployment) and [First Deployment](/docs/getting-started/first-deployment).
+
+## The Same Codebase, Every Projection
+
+The same codebase ships as a full SSR application, a static site, or a single-page app — the mode and route rules decide, the files do not:
+
+| Want | Choose |
+|---|---|
+| Fully dynamic SSR with per-route caching | `fullstack` |
+| Static site, no server | `static` |
+| SPA over an API | `api+spa` |
+| API only | `standalone` |
+
+## What's Next
+
+- [Caching Strategies](/docs/rendering/caching) — cache rules beside static output
+- [Server-Side Rendering](/docs/rendering/ssr) — the pipeline static generation runs at build
+- [Deployment](/docs/deployment) — hosting the built artifacts
+- [First Deployment](/docs/getting-started/first-deployment) — ship a generated site end to end
+- [Frontend](/docs/frontend) — the page files that produce static output

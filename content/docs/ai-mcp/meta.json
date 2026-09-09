@@ -1,0 +1,9 @@
+{
+  "title": "AI & MCP",
+  "pages": [
+    "index",
+    "mcp-server",
+    "tool-generation",
+    "agent-integration"
+  ]
+}

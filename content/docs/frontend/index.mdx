@@ -1,0 +1,122 @@
+---
+title: Frontend
+description: "The complete frontend — pages, routing, layouts, loaders, data hooks, RPC client, and UI kit."
+---
+
+The frontend is a first-class, fully owned part of the framework. Pages, routing, layouts, loaders, data hooks, the typed RPC client, and the built-in UI kit are all part of the same `defineX` surface — one cohesive narrative instead of a stack of stitched-together libraries. Routing decisions are locked by the framework's ADRs (ADR-0005 owns the router, ADR-0006 owns SSR orchestration), so the engineering ergonomics of the reference router are implemented natively — without the dependency or the version pin.
+
+By default every page is **server-rendered**. Loaders run on the server, the first paint arrives as HTML, and hydration transfers the loaded data into the client-side data-hook cache without a refetch. The exact same `definePage` files can run as a client-rendered single-page application in `api+spa` mode — the page code does not change. Rendering is a framework responsibility, not an add-on.
+
+## The Full-Stack Loop
+
+The frontend sits at the end of a loop that starts in the data layer:
+
+```
+defineModel → defineController → @kwiva/client → definePage loader → data hooks
+```
+
+A model declared once with `defineModel` produces its API. Controllers shape those endpoints and add custom actions. The typed client derives its call signatures from the same route manifest. Page loaders call that client. Data hooks consume the loader's results from the same cache. One type universe flows through the entire loop with **zero code generation** — types are derived at type level from the route manifest and the model IR.
+
+The practical effect is that params, search state, loader data, and mutations are all checked at the call site. A page that reads `params.id` and calls `client.posts.get(params.id)` is validated against the real route file and the real controller before it ever ships. Loaders are lint-gated to the typed client (`no-raw-fetch-in-loaders`), so the loop cannot be bypassed by a stray `fetch`.
+
+## Ownership: Four Packages
+
+The frontend is split across four packages, each with a narrow job:
+
+| Package | Role |
+|---|---|
+| `@kwiva/react` | Page and component bindings — `definePage`, `Providers`, data hooks, navigation hooks |
+| `@kwiva/router` | The owned router core — route tree, matching, loaders, guards, history |
+| `@kwiva/client` | The typed RPC client — end-to-end typed calls, SSR-safe, session-aware |
+| `@kwiva/ui-kit` | The component layer — tokens, primitives, components, and whole-screen patterns |
+
+The router core is runtime-agnostic; `@kwiva/react` binds it to pages and components. The client is used by both, which is why the same call surface works in loaders, hooks, and tests. The UI kit is the only fully replaceable layer — apps may keep it, swap it, or render plain utility-first CSS, provided they maintain the token surface the Studio uses.
+
+## What the Frontend Includes
+
+| Topic | What it covers |
+|---|---|
+| [Pages](/docs/frontend/pages) | `definePage` — the factory for every page: validation, loader, guards, pending/error/not-found UI, head meta, component |
+| [File-Based Routing](/docs/frontend/routing) | The `src/ui/pages/**` file tree, dynamic segments, splats, nested folders, route context |
+| [Nested Layouts](/docs/frontend/layouts) | `__root.tsx`, folder layout files, layout composition, layout-level loaders |
+| [Loaders & Data](/docs/frontend/loaders) | Parallel and streamed loaders, deferred data with `stream()`, `beforeLoad` guards, loader hydration |
+| [Navigation & Link](/docs/frontend/navigation) | Typed `Link`, programmatic navigation, intent preloading, scroll restoration |
+| [Data Hooks](/docs/frontend/data-hooks) | `useResource`, `useList`, `useMutation`, `useInfiniteList`, invalidation, suspense |
+| [RPC Client](/docs/frontend/rpc-client) | `createClient`, end-to-end typed calls, SSR-safe dedupe, subscriptions, testing |
+| [UI Components](/docs/frontend/ui-components) | The built-in UI kit — layout primitives, `Link`, form primitives, Studio screens |
+
+Each page walks one surface in full and cross-links the others, so the set reads as a single reference rather than overlapping tutorials.
+
+## Server-Rendered by Default
+
+Every page participates in the framework-owned rendering pipeline by default:
+
+```
+request (page route)
+  → router match (owned router)
+  → beforeLoad guards (session → login redirects)
+  → loaders execute in parallel (server-side, via the typed client, in-process)
+  → suspense-aware HTML streaming
+  → response stream (status, headers, cookies from the pipeline)
+hydration (client)
+  → state rehydrates into the data-hook cache (no refetch of loader data)
+  → router picks up at the same route with the same search state
+```
+
+Route rules let you choose — per path — whether the response is dynamically rendered, cached for a window, revalidated, or prerendered at build time. See [Rendering](/docs/rendering) for the full pipeline and its knobs, [Loaders & Data](/docs/frontend/loaders) for the server-side data pass, and [Pages](/docs/frontend/pages) for the full `definePage` contract.
+
+## Runtime Selection
+
+React is the default runtime, selected once in UI configuration:
+
+```ts
+// src/config/ui.ts
+export default defineConfig('ui', {
+  defaults: { runtime: 'react', theme: 'kwiva' },
+})
+```
+
+`runtime: 'compact'` swaps in the compact runtime at build time via the framework's own transform — one config flip, mostly smaller bundles, and application code unchanged. Hydration semantics, the data-hook cache, and the render pipeline are identical across runtimes. See [Hydration](/docs/rendering/hydration) for the shared contract.
+
+## One Cache, Client and Server
+
+Loaders and data hooks read and write the same cache. When a loader runs on the server, its results dehydrate into the page stream; on the client they rehydrate into the data-hook cache under identical keys. Navigation reuses what is already present — there is no double fetch between navigate and render. Intent preloading populates that same cache, so hovering a link warms the data the next page is about to render.
+
+Keys are derived from **model identity plus arguments**, never hand-built. `invalidate(Post)` clears every list, detail, and custom entry touching the `Post` model; `invalidateTags([...])` clears route-rule caches on the server. Client freshness and server responses stay consistent because both read from one contract. See [Data Hooks](/docs/frontend/data-hooks) and [Caching Strategies](/docs/rendering/caching).
+
+## Generated Types, No Codegen
+
+The route tree, its params, its search schemas, and its loader return types are compiled into generated types under `src/.kwiva/types`. The framework reads these at type level — there is no runtime codegen step, no build-time code generation, and nothing to commit. The same generated surface powers `Route.useParams()`, `Route.useSearch()`, `Route.useLoaderData()`, typed `<Link>` targets, and navigation calls. Invalid `to`, `params`, or `search` values fail **at compile time** — a broken link is a type error, not a 404 at runtime. See [File-Based Routing](/docs/frontend/routing) for the type-generation pipeline.
+
+## Getting Started
+
+Page files are discovered by convention, so there is nothing to register: drop `index.tsx` into `src/ui/pages/` and the `/` route exists. Generate a typed scaffold with the CLI:
+
+```bash
+kwiva make:page posts.$id
+```
+
+The scaffold ships a typed stub with the provider tree, a loader wired to the typed client, and the streaming suspension points in place. [Your First Page](/docs/getting-started/first-page) walks a page end to end, and [CLI Generators](/docs/cli/generators) lists the scaffold commands.
+
+## Server and Client Execution
+
+`definePage` files execute in two contexts, and both are first-class. On the server, loaders run in-process with the full request context — session, tenant, and config are the same objects HTTP handlers see, so a page can never render past an authorization boundary. On the client, the same loader runs with the provider-resolved context during navigation, and its result lands in the identical cache keys. Single-page mode is a projection of the same files, not a rewrite. See [SSR](/docs/rendering/ssr) and [Hydration](/docs/rendering/hydration).
+
+## Development Experience
+
+The dev side is part of the frontend, not an afterthought:
+
+- The dev overlay lists the route tree, loader timings, and cache state (v1.x)
+- Loader waterfalls and OTel trace ids attach to each request's rendering stages
+- `kwiva make:page posts.$id` scaffolds a full typed page in one command
+- Hydration problems surface as cache-key diagnostics, not silent mismatches
+
+See [Observability: Dev Overlay](/docs/observability/dev-overlay) for the overlay and [CLI Generators](/docs/cli/generators) for scaffolds.
+
+## What's Next
+
+1. [Pages](/docs/frontend/pages) — start with the `definePage` contract
+2. [File-Based Routing](/docs/frontend/routing) — how files become routes
+3. [Loaders & Data](/docs/frontend/loaders) — getting data into pages
+4. [Data Hooks](/docs/frontend/data-hooks) — client-side data access
+5. [Rendering](/docs/rendering) — SSR, streaming, and hydration

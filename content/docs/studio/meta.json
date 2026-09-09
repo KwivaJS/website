@@ -1,0 +1,9 @@
+{
+  "title": "Studio",
+  "pages": [
+    "index",
+    "configuration",
+    "generated-ui",
+    "customization"
+  ]
+}

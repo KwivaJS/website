@@ -1,0 +1,134 @@
+---
+title: E2E Testing
+description: "Browser-level tests through real UI and a real API — projects per app mode, harness-seeded fixtures, and where E2E belongs in CI."
+---
+
+The top of the test pyramid is E2E: a real browser drives the real UI against the real API. E2E is the only layer that proves the shipped experience — pages render, loaders stream, mutations reflect, navigation holds — and it is also the slowest and most environment-sensitive layer. Kwiva treats it as a focused instrument: projects per app mode, fixtures seeded through the same harness as integration tests, and a CI slot that runs after everything that is faster has said yes.
+
+## The Browser Test Runner
+
+E2E tests use the browser test runner bound for Kwiva apps:
+
+```ts
+// tests/e2e/posts.spec.ts
+import { test, expect } from '@kwiva/testing/playwright'
+
+test('publish a post', async ({ page }) => {
+  await page.goto('/posts')
+  await page.getByRole('button', { name: 'New post' }).click()
+  await page.getByLabel('Title').fill('Hello')
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('Hello')).toBeVisible()
+})
+```
+
+The runner opens a real browser, navigates real URLs, and asserts against the rendered page. The test reads like the user's journey — reach the screen, fill the form, submit, and see the result appear. The `test` and `expect` surface matches the unit and integration layers, so moving a test between layers means moving the code, not re-learning an API.
+
+## Projects Per App Mode
+
+The runner configures browser projects per application mode, because each mode serves the user a different shape:
+
+| App mode | What E2E exercises |
+|---|---|
+| `fullstack` | SSR-rendered pages, loaders, streaming, and navigation |
+| `api+spa` | the built client bundle against the API |
+| `static` | prerendered output and client-side hydration |
+| `standalone` | the API-only surface |
+| `edge` | the edge-optimized artifact |
+
+The same `kwiva test --e2e` command runs the suite through each relevant project, so a mode change cannot silently break the browser experience without a test telling you.
+
+## Flows Through Real UI and Real API
+
+The defining property of an E2E test is that nothing on the request path is faked. The browser fetches real pages, the pages call the real API, the API runs real middleware, validation, policies, and tenant scoping, and the UI renders what actually came back.
+
+That makes E2E the place to assert the properties that lower layers cannot see:
+
+- Loader-driven data reaches the page — SSR markup, streamed sections, and deferred data resolve where the user expects
+- Optimistic mutations reflect on screen and settle to server truth
+- Pending and error components appear under real latency and failures
+- Navigation, search params, and scroll restoration behave in a real browser
+- The tenant experience — a logged-in operator sees only their tenant's screens and data
+
+## Fixtures Seed Through the Harness
+
+Test data is seeded the same way integration tests seed theirs — through the harness API and the same factories:
+
+```ts
+// tests/e2e/posts.spec.ts
+test('a seeded dashboard renders', async ({ page }) => {
+  await User.factory().count(5).create()
+  await page.goto('/dashboard')
+  await expect(page.getByText('5 users')).toBeVisible()
+})
+```
+
+Reusing the integration harness for fixtures has two effects:
+
+1. **One way to make data** — factories, tenancy, and seeding behave identically across layer boundaries
+2. **No brittle UI-dependent setup** — fixtures are created through the typed data layer, not by clicking through the browser to reach the state under test
+
+That second property is why E2E stays maintainable: the setup for a flow is a typed factory call, and only the flow itself — the part worth a browser — lives in the browser test.
+
+## Runs Against Real Built Output
+
+E2E runs against a real server, not mocked routes. The two supported targets match the development and production loops:
+
+```bash
+kwiva test --e2e                # dev server
+kwiva test --e2e --server=preview   # the built artifact
+```
+
+Running against the built artifact (`kwiva preview`) is the closer-to-production option: it proves the compiled output serves the same experience the browser tests passed in development. Smoke tests against the build run before the E2E stage in CI so that gross breakage stops the pipeline before the expensive browser stage starts.
+
+> [!TIP]
+> Develop E2E in the dev loop, but let the deployment pipeline's final gate run `kwiva test --e2e --server=preview`. A hydration mismatch or a streamed-section regression only ever shows up against the built artifact.
+
+## When E2E Pays Off
+
+E2E is the right tool for a narrow but crucial set of paths:
+
+- The signup-to-first-value journey — registration, tenant provisioning, first screen
+- Checkout and payment flows where every hop matters
+- Tenant onboarding and identity-critical screens
+- Cross-page workflows that span navigation boundaries
+
+E2E pays off wherever the cost of a broken flow is highest and the lower layers structurally cannot see the bug — a loader that returns the wrong data to the UI, a hydration mismatch, a button that renders but does not dispatch.
+
+It is the wrong tool for the long tail of behaviors the lower layers cover cheaply. The framework philosophy is explicit: applications should reach high coverage on services, policies, and jobs with fast tests, and E2E covers the critical paths only. When an E2E test duplicates assertions that pass in-process, move the assertion down and keep the browser test for the flow itself.
+
+## Keeping E2E Stable
+
+Browser tests are the most environment-sensitive layer. The habits that keep them reliable mirror the harness design:
+
+- **Seed through the harness, not the UI** — fixtures are typed factory calls, deterministic per run
+- **Assert user-visible state** — role and label queries against rendered behavior, not internal selectors
+- **Bound the flows to critical paths** — the fewer browser tests, the less surface for environment flakiness to touch
+- **Isolate the environment** — run E2E against the built artifact in CI, where the server target and port are explicit
+
+## CI Ordering
+
+The E2E stage runs last, behind every faster signal, so a regression is caught at its cheapest. The pipeline a Kwiva project ships in CI:
+
+```text
+lint + format → typecheck → type tests → unit + integration (in-memory) →
+build (multiple presets) → smoke tests → e2e (browser projects)
+```
+
+Each stage gates the next:
+
+- **Lint, format, and typecheck** stop convention and type drift instantly
+- **Type tests** guard the end-to-end inference — model to route to client — at compile time
+- **Unit and integration** prove behavior against the in-memory database in seconds
+- **Build and smoke** verify the artifact for the deployed presets
+- **E2E** runs the browser projects against the built output as the final human-shaped gate
+
+Ordering e2e last is deliberate: it is the slowest stage, and by the time it runs, the only failures it should find are the ones only a real browser can catch.
+
+## What's Next
+
+- [API Testing](/docs/testing/api-testing) — the in-process layer beneath every flow
+- [Integration Testing](/docs/testing/integration-testing) — harness and fixtures shared with E2E
+- [SSR and Rendering](/docs/rendering/ssr) — the streaming surface E2E observes
+- [Project Modes](/docs/getting-started) — the app modes E2E projects target
+- [Testing](/docs/testing) — where E2E belongs in the pyramid

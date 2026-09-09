@@ -1,0 +1,164 @@
+---
+title: Installation
+description: "Install Bun, scaffold a Kwiva project, and start the development server in minutes — one framework for data, APIs, auth, frontend, jobs, realtime and deploy."
+---
+
+Getting a Kwiva application running is a two-step process: install the runtime, then scaffold a project. Kwiva runs on [Bun](https://bun.sh) as its primary runtime, which executes TypeScript natively — no compile step, fast startup, and a single runtime for both your server and your tools.
+
+## Prerequisites
+
+| Requirement | Version | Notes |
+|---|---|---|
+| **Bun** | 1.2 or later | Primary runtime — required for the CLI, the dev server, and builds |
+| **Node.js** | 18+ (optional) | For `node_server` compatibility presets and legacy integrations |
+| **Git** | any (optional) | For version control and addon installs from git |
+
+Install or upgrade Bun:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+bun --version
+```
+
+> [!NOTE]
+> Kwiva is *not* a library layered on top of an existing app. The scaffold creates a complete project with its own configuration, directory conventions, and CLI — you don't wire pieces together afterwards.
+
+## Create a Project
+
+The fastest way to start a Kwiva project is a single scaffold command:
+
+<Tabs items={['Bun (recommended)', 'Direct CLI']}>
+  <Tab value="Bun (recommended)">
+
+  ```bash
+  bun create kwiva my-app
+  ```
+
+  </Tab>
+  <Tab value="Direct CLI">
+
+  ```bash
+  bunx kwiva new my-app
+  ```
+
+  </Tab>
+</Tabs>
+
+This is equivalent to `kwiva new my-app`. It creates a new project in `my-app/` with the default **fullstack** mode — a complete application with SSR frontend pages, API routes, and everything configured with sensible defaults. The scaffold installs dependencies, generates `kwiva.config.ts`, and prepares empty directories for models, controllers, and pages.
+
+### Project Modes
+
+Choose a mode that matches how your application will run. The mode is set once at scaffold time and stays baked into the project's defaults.
+
+```bash
+# Specify a mode
+bun create kwiva my-app --mode=api+spa
+```
+
+| Mode | Description | Deploy default |
+|---|---|---|
+| `fullstack` | SSR pages + API routes (default) | `node_server`, auto-detected in CI |
+| `api+spa` | API server + single-page app frontend | `node_server` + client build |
+| `static` | Static site generation — prerender everything | `static` |
+| `standalone` | API-only, single-file binary output | `bun-server` + compiled binary |
+| `edge` | Optimized for edge runtimes | `cloudflare_worker` |
+
+Each mode is a trimmed profile of the same framework; switching to a richer mode later is a matter of adding the directories the mode omits. See [Create a Project](/docs/getting-started/create-project) for a full comparison.
+
+## What You Can Build
+
+The same conventions carry you from a static site to a high-scale platform. A useful roster of examples:
+
+| From | To | What you add |
+|---|---|---|
+| Static marketing site | [Static site + blog](/docs/getting-started/first-model) | A read-only model, file-based pages, prerendering |
+| CRUD app | Classic todo-style app | One `defineModel` derives the REST API, client, and Studio |
+| SaaS | Dashboard with auth + RBAC | `defineAuth`, policies, guards, Studio screens |
+| Realtime | Multi-tenant chat | Tenancy config, events, channels, jobs |
+| API-only | Backend for a mobile client | Controllers, OpenAPI, rate limits, API keys |
+| AI ops | Internal tool with MCP exposure | Kwiva Studio over models, MCP tools |
+| Platform | Edge + ISR + worker split | Route rules, transactional outbox, deploy presets |
+
+Whatever the shape, the stack is the same: models as the single source of truth, controllers for the API, pages for the UI, and one config model connecting them.
+
+## A First Tour of the CLI
+
+Everything you do with a Kwiva project goes through one `kwiva` binary (run through `bun run` in your project):
+
+| Command | Purpose |
+|---|---|
+| `kwiva dev` | Development server with hot module replacement |
+| `kwiva check` | Format + lint + typecheck in one pass |
+| `kwiva test` | Run the test suite (unit, integration, API, and e2e) |
+| `kwiva build` | Production build for the target runtime |
+| `kwiva deploy` | Build and deploy to a provider |
+| `kwiva console` | REPL with the full app context loaded |
+| `kwiva make:*` | Generators — one command per construct type |
+| `kwiva db:*` | Database lifecycle — migrations, seeding, reset |
+| `kwiva add <addon>` | Install and register a module, plugin, or theme |
+| `kwiva upgrade` | Codemod recipes + dependency bumps across releases |
+
+You'll use `kwiva make:model`, `kwiva db:migrate`, and `kwiva dev` heavily in the tutorials that follow. The CLI is described in full at [CLI](/docs/cli).
+
+## Start the Development Server
+
+```bash
+cd my-app
+bun run dev
+```
+
+The development server starts at `http://localhost:3000` and gives you:
+
+- **Native TypeScript execution** — Bun runs `.ts` files directly, no compile step between edit and reload
+- **Hot module replacement (HMR)** — pages, controllers, and middleware update in place
+- **Auto-discovery** — models, controllers, middleware, and pages in the conventional directories are picked up automatically
+- **Typed configuration** — your config folder and environment variables load and validate at boot
+- **Friendly errors** — missing environment variables, type errors, and runtime failures are surfaced with context instead of raw stack dumps
+
+> [!TIP]
+> Open `http://localhost:3000` right after scaffolding — the default fullstack project ships with a working home page backed by the whole pipeline. See [Development Server](/docs/getting-started/development-server) for what happens under the hood.
+
+## The First Five Minutes
+
+A fast first loop that exercises the whole stack:
+
+```bash
+bun create kwiva my-app && cd my-app
+bun run dev                     # home page at localhost:3000
+kwiva make:model post           # model + migration + factory stub
+kwiva db:migrate                # apply it
+kwiva make:page posts.$id       # a typed page stub
+```
+
+From here you have a data model serving a page — with types flowing from model to database to API to UI. The rest of this guide deepens each step.
+
+## FAQ
+
+<Accordions type="single">
+  <Accordion title="Is Kwiva a library I add to an existing app?">
+    No. The scaffold creates a complete project with its own configuration, directory conventions, and CLI. You build on the framework, not alongside it — there is no wiring step afterwards.
+  </Accordion>
+
+  <Accordion title="Which runtimes does Kwiva support?">
+    Bun is the primary runtime. Node-compatible output is available through deployment presets, and the `edge` mode targets edge runtimes with a documented constraint set. Deploying to a target is a build-time choice.
+  </Accordion>
+
+  <Accordion title="Which project mode should I choose?">
+    Start with the default `fullstack` mode. Choose `static` for a marketing site, `api+spa` when you want a separate client, `standalone` for a single binary, or `edge` for edge runtimes. Modes are trimmed profiles of the same layout — you can add the omitted directories later.
+  </Accordion>
+
+  <Accordion title="What does the scaffold actually include?">
+    A working home page, `kwiva.config.ts`, the typed config folder, and conventional directories for models, controllers, middleware, pages, jobs, and events — plus the CLI wired up. The first model you define is served by a full pipeline, not a stub.
+  </Accordion>
+</Accordions>
+
+## What's Next
+
+After installation, follow the getting-started sequence to build your first real feature:
+
+1. [Understand the project structure](/docs/getting-started/project-structure) — where every kind of file lives
+2. [Configure your application](/docs/getting-started/configuration) — typed config modules and env bindings
+3. [Create your first model](/docs/getting-started/first-model) — the single source of truth for your data
+4. [Create your first API](/docs/getting-started/first-api) — controllers, validation, and typed context
+5. [Create your first page](/docs/getting-started/first-page) — server-rendered UI with typed loaders
+6. [Deploy your first app](/docs/getting-started/first-deployment) — build once, deploy anywhere

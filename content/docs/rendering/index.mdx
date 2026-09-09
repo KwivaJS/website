@@ -1,0 +1,119 @@
+---
+title: Rendering
+description: "SSR, streaming, hydration, caching, static generation — the full rendering pipeline."
+---
+
+The framework owns the entire rendering pipeline — the server renders, the client hydrates, and everything in between is orchestrated by `@kwiva/react`. Because rendering is part of the framework surface rather than an external add-on, pages, loaders, data hooks, and the response cache share one design: the same cache, the same types, the same story from request to pixel. SSR orchestration is a locked decision (ADR-0006): the framework composes the request handler, streaming render, and dehydration instead of inheriting a third-party server-functions model.
+
+Every page defaults to **full server-side rendering**: loaders run on the server, HTML streams to the client, and hydration transfers data without a refetch. From there, route rules let you choose — per path — whether a response is dynamically rendered, cached, revalidated, or prerendered at build time. Rendering is not one switch for the whole app; it is decided per route and composes with the data hooks on the client.
+
+## What Rendering Includes
+
+| Topic | What it covers |
+|---|---|
+| [Server-Side Rendering](/docs/rendering/ssr) | The full SSR pipeline — router match, guards, parallel loaders, HTML, head/meta |
+| [Streaming SSR](/docs/rendering/streaming) | Suspense-aware HTML streaming, deferred segments with `stream()` |
+| [Hydration](/docs/rendering/hydration) | Island-free full hydration, loader data handed to the client cache |
+| [Caching Strategies](/docs/rendering/caching) | Route rules — `cache`, `swr`, `isr`, `static`, `prerender` — and layered caching |
+| [Static Generation](/docs/rendering/prerendering) | Build-time crawling or explicit lists for static output |
+
+## The Server-Side Pipeline
+
+Every page participates in the same pipeline, whether it renders dynamically, from a cache, or at build time:
+
+```
+request (page route)
+  → router match (owned router)
+  → route rules apply (cache hit? serve + bypass pipeline)
+  → beforeLoad guards (session → login redirects)
+  → loaders execute in parallel (server-side, via the typed client — in-process)
+  → suspense-aware HTML streaming
+  → response stream (status, headers, cookies from the pipeline)
+hydration (client)
+  → state rehydrates into the data-hook cache (no refetch of loader data)
+  → router resumes at the same route and search state
+```
+
+Route rules short-circuit **before** context assembly — a cache hit serves the stored response and bypasses the pipeline, including session loading. That is what makes cached public pages fast: the request never reaches the render stage. See [Request Lifecycle](/docs/http/lifecycle) for the full ordering contract.
+
+## Choosing a Strategy per Route
+
+Rendering is not one switch for the whole app — it is decided per route via route rules, and it composes with the data hooks on the client:
+
+| Strategy | Route rule | Fits when |
+|---|---|---|
+| Dynamic SSR | (default) | Personalized, session-dependent, frequently changing content |
+| Cached response | `cache: n` | Public payloads that change on a known window |
+| Stale-while-revalidate | `swr: n` | Read-heavy, mutable data that tolerates staleness |
+| Incremental regeneration | `isr: n` | Public pages that change slowly, built on demand |
+| Static at build | `static` / `prerender: true` | Content fixed at build time — docs, marketing, static apps |
+
+The same application mixes strategies: a marketing site renders statically, product pages regenerate incrementally, and an account section is always dynamic. Route rules are declared per path on server routes, and are covered in full under [Caching Strategies](/docs/rendering/caching).
+
+## Streaming & Deferred Data
+
+Streaming SSR ships the shell of a page the moment blocking data resolves, and streams the rest in as its data resolves. Loaders split their work explicitly — awaited values block, `stream()`-wrapped promises defer:
+
+```tsx
+loader: async ({ params, client }) => ({
+  post: await client.posts.get(params.id),                          // blocking
+  comments: stream(client.comments.list({ postId: params.id })),    // streams in
+})
+```
+
+The rendering runtime flushes each suspense boundary the instant the deferred segment behind it is ready. Route rules operate on the **full stream** — a streamed page is cached as a whole, not piecemeal. See [Streaming SSR](/docs/rendering/streaming).
+
+## Hydration: A Cache Transfer
+
+Hydration is how the server-rendered page becomes a live application. Kwiva hydrates the **whole page** — island-free, no per-widget bootstrapping — and the server's state crosses the gap as a **cache transfer**: loader data and deferred values serialize into the stream and rehydrate into the client's data-hook cache under identical keys. The first interactive frame reads exactly what the server computed; nothing is refetched. See [Hydration](/docs/rendering/hydration).
+
+## Layered Caching
+
+Caching operates on three layers that compose:
+
+```
+route rules   → HTTP response cache (cache / swr / isr / static)
+model cache   → server-side value cache with TTL and tags
+client cache  → data-hook cache (staleTime / gcTime)
+```
+
+| Layer | Answers | Surface |
+|---|---|---|
+| Route rules | "How old may the response be?" | `cache`, `swr`, `isr`, `static`, `prerender` |
+| Model cache | "How long may this derived value live?" | `defineModel` cache option, `cache` API |
+| Client cache | "When should the browser re-pull?" | data-hook `staleTime` / `gcTime` |
+
+Invalidation flows down the stack — `invalidateTags` purges route rules and server values carrying those tags, and `invalidate(Model)` refreshes client queries for the model. Each layer is covered in depth under [Caching Strategies](/docs/rendering/caching).
+
+## Personalization with Cached Shells
+
+Caching does not exclude logged-in users. The split pattern keeps a public shell cacheable (via `isr` or `static`) while user-specific fragments load client-side through data hooks from session-scoped endpoints — keyed per user, never cached:
+
+```
+/products/**  isr cached shell   → same for every visitor
+                └─ session-scoped fragments → loaded client-side, never cached
+```
+
+The framework refuses to cache responses that set `Set-Cookie`, so a cached page can never leak a session to another user. Session-bearing responses stay dynamic by force of contract. See [Hydration](/docs/rendering/hydration) and [Caching Strategies](/docs/rendering/caching).
+
+## Static Generation
+
+The strongest strategy is no server at all. `static` and `prerender` routes render once at `kwiva build` and emit HTML, assets, and JSON that a static host serves directly. Static and ISR share one artifact model — a page that is `static` today can be promoted to `isr: n` when content starts changing. See [Static Generation](/docs/rendering/prerendering).
+
+## The Same Files, Every Mode
+
+The projection modes — `fullstack`, `api+spa`, `static`, `standalone`, `edge` — reuse the same `definePage` files. In `api+spa` the pages render client-only from those exact files while the server serves the shell plus the API; in `fullstack` the full SSR pipeline runs; in `static` the same pipeline runs once at build. The codebase ships as a full SSR application, a static site, or a single-page app — the mode and route rules decide, the files do not. See [Static Generation](/docs/rendering/prerendering).
+
+## Observability of Rendering
+
+Every rendering stage is measurable. The server pass emits spans for total SSR wall time, time-to-first-byte of the stream, shell time, and hydration time — correlated to the request's trace id. The dev overlay shows the loader waterfall per request and the cache decisions behind it. See [Observability](/docs/observability) and [Metrics](/docs/observability/metrics).
+
+The rendering knobs upstream are shared: route rules, guards, and loaders run under the same span tree as the HTTP pipeline, so a slow page traces back to the exact stage — middleware, session, loader, or render. See [Request Lifecycle](/docs/http/lifecycle) for the stage ordering that holds across rendering and API routes alike.
+
+## What's Next
+
+1. [Server-Side Rendering](/docs/rendering/ssr) — what runs on the server
+2. [Streaming SSR](/docs/rendering/streaming) — deferred data on the wire
+3. [Hydration](/docs/rendering/hydration) — how state crosses to the client
+4. [Caching Strategies](/docs/rendering/caching) — route rules per path
+5. [Static Generation](/docs/rendering/prerendering) — build-time output
