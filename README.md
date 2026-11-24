@@ -1,6 +1,8 @@
 # quiva-docs
 
-Official documentation portal for the [Kwiva](https://github.com/kwiva-js/kwiva) framework — the batteries-included TypeScript application framework.
+Official documentation portal for the [Kwiva](https://github.com/kwiva/kwiva) framework — a batteries-included TypeScript application framework (packages at 0.2.0, tracking `main`).
+
+Includes: [docs](/docs), [guides](/guides), [architecture](/architecture), [API reference](/api), [blog](/blog), [research inventories](/docs/research/public-api-inventory).
 
 Built with [Fumapress](https://press.fumadocs.dev) + [Fumadocs](https://fumadocs.dev), React 19, Tailwind CSS v4, Vite, and Bun.
 

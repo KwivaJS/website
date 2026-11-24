@@ -39,7 +39,7 @@ const LAYERS: Layer[] = [
     n: "02",
     icon: Layers,
     title: "Framework API",
-    tag: "@kwiva/* — 17 packages",
+    tag: "@kwiva/* — 19 packages",
     desc: "One coherent, framework-owned surface for every concern — data, HTTP, routing, React, auth, queue, events, Studio, MCP. The only thing your app imports.",
     members: ["core", "schema", "data", "http", "router", "react", "client", "auth", "queue", "mcp", "+7"],
     rule: "Every app-facing construct is a defineX factory (ADR-0019).",

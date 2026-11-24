@@ -4,18 +4,18 @@
   "pages": [
     "index",
     "core",
-    "config",
     "data",
     "http",
-    "router",
-    "react",
+    "ui",
     "client",
     "auth",
-    "queue",
+    "jobs",
     "events",
-    "services",
-    "cli",
-    "studio",
-    "mcp"
+    "mail",
+    "mcp",
+    "search",
+    "storage",
+    "testing",
+    "cli"
   ]
 }

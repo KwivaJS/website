@@ -1,0 +1,24 @@
+---
+title: Testing Standards
+description: "Unit/integration tests, `withApp`, DB lifecycle, CI placement."
+status: implemented
+---
+
+# Testing Standards
+
+## Tests live
+
+`packages/*/src/**/*.test.ts` (colocated).
+
+## Stack
+
+- `bun:test`
+- `@kwiva/testing` harness
+- `@electric-sql/pglite` (dev)
+
+## Quality gates
+
+- `bun test` per package (in-repo)
+- `bun run ci` (typecheck + test + build + functionality)
+
+See also [@kwiva/testing docs](/api/testing).

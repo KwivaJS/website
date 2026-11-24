@@ -51,7 +51,7 @@ const principles: { statement: string; explanation: string; consequence: string 
     statement: "Convention through defineX",
     explanation:
       "Every construct is a factory with one grammar. The syntax you learn for models is the syntax you use for everything.",
-    consequence: "17 factories · one grammar (ADR-0019)",
+    consequence: "20 factories · one grammar (ADR-0019)",
   },
   {
     statement: "Type safety throughout",
@@ -81,7 +81,7 @@ const principles: { statement: string; explanation: string; consequence: string 
 
 const boundaryLayers = [
   { label: "your application", tag: "src/ — yours", desc: "models · controllers · pages · services · jobs · config" },
-  { label: "kwiva public api", tag: "@kwiva/*", desc: "the only surface your code sees — 17 packages" },
+  { label: "kwiva public api", tag: "@kwiva/*", desc: "the only surface your code sees — 19 packages" },
   { label: "kwiva core system", tag: "framework", desc: "lifecycle · IR · generators · auto-discovery" },
   { label: "internal engines", tag: "sealed", desc: "Nitro · Drizzle · Better Auth · TanStack Query · CrossWS · unstorage" },
   { label: "runtime / infrastructure", tag: "presets", desc: "Bun · Node · edge · eight deploy targets" },
@@ -154,7 +154,7 @@ const evolution = [
   { stage: "constraints", desc: "Framework-owned APIs. Hidden engines. One grammar. Runtime flexibility." },
   { stage: "decisions", desc: "Twenty-one architecture decision records, each with consequences made explicit." },
   { stage: "primitives", desc: "Seventeen defineX factories across seventeen @kwiva/* packages." },
-  { stage: "unified dx", desc: "One CLI, one config folder, auto-discovery — the v0.3 docset." },
+  { stage: "unified dx", desc: "One CLI, one config folder, auto-discovery — the 0.2.x (main) docset." },
   { stage: "next", desc: "Phased milestones — kernel, realtime + ops, ecosystem — toward a public 1.0." },
 ];
 
@@ -197,11 +197,11 @@ export default function Page() {
           </Reveal>
           <Reveal delay={180}>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 font-mono text-[11px] uppercase tracking-[0.14em] text-fd-muted-foreground">
-              <span>v0.3 · active development</span>
+              <span>0.2.x · main (active)</span>
               <span className="text-fd-border">/</span>
-              <span>21 decision records</span>
+              <span>24 ADRs</span>
               <span className="text-fd-border">/</span>
-              <span>12 research notes</span>
+              <span>9 research pages</span>
             </div>
           </Reveal>
         </div>
@@ -508,7 +508,7 @@ export default function Page() {
             n="09"
             kicker="Direction"
             title="Where this is going."
-            sub="Kwiva is at v0.3, in active development — built in phases, each with a verifiable milestone."
+            sub="Kwiva is at 0.2.x, tracking main — in active development, built in phases."
           />
           <Reveal>
             <div className="grid gap-4 sm:grid-cols-3">

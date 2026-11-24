@@ -1,0 +1,32 @@
+---
+title: Architecture
+description: "Boundaries, module graph, code standards."
+status: implemented
+---
+
+# Architecture for Contributors
+
+See [Package Boundaries](/docs/advanced/package-boundaries) for the full map.
+
+## Core rules
+
+- App code imports only `@kwiva/*`
+- Engines sealed (oxlint `no-engine-imports` gate)
+- Package graph acyclic
+
+## Adding a new factory
+
+1. Add factory to `@kwiva/<pkg>`
+2. Register in discover.ts if app-facing
+3. Update definex.mdx (documented)
+4. Add API page (api/*.mdx)
+5. Test it
+
+## Coding standards
+
+- strict TS, `verbatimModuleSyntax`, `noUncheckedIndexedAccess`
+- oxlint + tsc + eslint parity
+
+## Tests
+
+Run: `bun test` in package dir; add colocated tests (`*.test.ts`).

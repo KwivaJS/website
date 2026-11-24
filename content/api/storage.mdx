@@ -1,0 +1,59 @@
+---
+title: "@kwiva/storage"
+description: "@kwiva/storage — disks, uploads, signed URLs, assets, fakes, storage errors."
+status: implemented
+---
+
+# @kwiva/storage
+
+Storage package: S3-compatible disks over Files SDK, tenant-scoped paths, signed URLs/uploads, asset helpers, fakes.
+
+## Config
+
+| Symbol | Kind | Signature |
+|---|---|---|
+| `validateStorageConfig(config?)` | function | → `ResolvedStorageConfig{default, disks, tenant?}` |
+| `STORAGE_DRIVERS` | const | `["local","memory","s3","gcs","azure","vercel-blob"]` |
+| Types: `StorageConfig{default?, disks?: Record<string, DiskConfig>, tenant?: StorageTenantConfig{scoped?, prefix?}}`, `DiskConfig{driver, root?, publicUrl?, options?}`, `StorageTenantConfig{scoped?, prefix?}`, `StorageDriver`, `DEFAULT_LOCAL_ROOT = "./storage/app"` | types/const | — |
+
+## Storage facade
+
+| Symbol | Kind | Signature |
+|---|---|---|
+| `class Storage` | class | `configure(config?)`, `disk(name?) => Disk`, `fake()`, `capabilities()`, `put/get/download/head/exists/delete/list/listAll/search/copy/move/url/signedUrl/signedUploadUrl/file(key)` |
+| `storage` (singleton) | value | — |
+| `initStorage(config?)` / `getStorage()` / `resetStorage()` | functions | — |
+
+## Disk
+
+| Symbol | Kind | Signature |
+|---|---|---|
+| `class Disk` | class | `name, config, tenant?`; same methods as Storage (tenant-qualified); `qualify(key)`, `calls()`, `clear()` |
+| `class FakeDisk extends Disk` | class | `name: "fake"` |
+| `FakeStorage{disk, calls, reset, restore}` | type | — |
+| `assertUploaded/assertExists/assertMissing/assertDeleted(disk, key, opts?)` | functions | throw `ValidationError` |
+
+## Errors
+
+| Symbol | Kind | Signature |
+|---|---|---|
+| `StorageError extends KwivaError` | class | `{storageCode, isStorageError, storageCodeOf}` |
+| `StorageErrorCode` | type | `"STORAGE_NOT_FOUND" \| "STORAGE_CONFLICT" \| "STORAGE_INVALID" \| "STORAGE_UNAVAILABLE" \| "STORAGE_TENANT_REQUIRED"` |
+
+## Assets
+
+| Symbol | Kind | Signature |
+|---|---|---|
+| `assetUrl(path, {baseUrl?, manifestPath?})` | function | resolve via `public/assets-manifest.json` |
+| `clearAssetManifestCache()` | function | — |
+
+## Usage
+
+```ts title="src/app/http/controllers/files.ts"
+import { storage } from "@kwiva/storage";
+
+const res = await storage.put("avatar.png", file.arrayBuffer(), { contentType: "image/png" });
+```
+
+> [!TIP]
+> Tenancy-scoped config makes `storage.disk("local").put("a.txt", ...)` prefix-scoped per tenant via `currentTenant()`.

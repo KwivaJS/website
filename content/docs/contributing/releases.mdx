@@ -1,0 +1,30 @@
+---
+title: Releases
+description: "Changesets, versioning, branch rules, checklist."
+status: implemented
+---
+
+# Releases
+
+## Changesets
+
+Kwiva uses changesets (`.changeset/`):
+- Add a changeset file in `.changeset/` for user-facing changes
+- `bunx changeset status` to see pending
+
+## Versioning
+
+Packages: `@kwiva/*` — see [Versioning](/reference/versioning).
+
+## Branch rules
+
+- `main` — only from approved PRs (squash-merge)
+- `feat/`, `fix/`, `chore/` — short-lived
+
+## Checklist
+
+- [ ] Changeset added
+- [ ] Tests pass (`bun test`)
+- [ ] Lint passes (`oxlint`)
+- [ ] Typecheck passes (`bun run typecheck`)
+- [ ] API docs updated (if public)

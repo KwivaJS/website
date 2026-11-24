@@ -13,6 +13,8 @@
     "factories",
     "soft-deletes",
     "database-config",
-    "storage"
+    "storage",
+    "cache",
+    "search"
   ]
 }

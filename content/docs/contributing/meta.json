@@ -1,0 +1,12 @@
+{
+  "title": "Contributing",
+  "root": true,
+  "pages": [
+    "index",
+    "development-environment",
+    "architecture",
+    "testing",
+    "releases",
+    "pr-guidelines"
+  ]
+}

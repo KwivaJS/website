@@ -1,0 +1,14 @@
+{
+  "title": "Research",
+  "pages": [
+    "architecture-inventory",
+    "public-api-inventory",
+    "feature-inventory",
+    "runtime-lifecycle",
+    "dependency-inventory",
+    "documentation-gaps",
+    "implementation-status",
+    "terminology-glossary",
+    "coverage-matrix"
+  ]
+}

@@ -1,0 +1,28 @@
+---
+title: "@kwiva/testing"
+description: "@kwiva/testing — withApp boot, createTestClient, bootAppFromRoot, DB lifecycle helpers, fake fakes (withApp / createTestClient / ./boot)."
+status: implemented
+---
+
+# @kwiva/testing
+
+In-process test harness.
+
+## Main barrel
+
+| Symbol | Kind | Signature |
+|---|---|---|
+| `withApp(fn, options?)` | function | → `WithAppContext{server, handler, client, registry, config, manifest}`; options `{cwd?, name?, db?, routes?, baseUrl?, extraControllers?, clientScript?, extraScripts?, services?, state?}` |
+| `createTestClient(server, options?)` | function | → `TypedClient` |
+| Re-exports: `defineFactory` (@kwiva/data), `setupTestDb/teardownTestDb/truncateAll` (@kwiva/data/testing), `fakeQueue` (@kwiva/jobs), `fakeEvents/assertEmitted/restoreEvents` (@kwiva/events) | — | — |
+
+WithApp semantics: boots the real app in-process (nested calls throw), teardown resets auth/client/query/policies/WS-hub.
+
+## `./boot` subpath — `bootAppFromRoot(options?)` → `BootedRoot{server, registry, config, manifest, models, appUnits}`
+
+## Test DB helpers (@kwiva/data/testing, re-exported here)
+
+`setupTestDb(models)` — fresh in-memory PGLite + `registerModel` + `syncSchema()`; `teardownTestDb()`; `truncateAll()`; `syncSchema()`; `registerFixtures({name, model}[])`.
+
+> [!TIP]
+> With `withApp`, `ctx.client` is the in-process typed client; `ctx.handler(request)` for raw Request handling; `ctx.server` for `handle()`.
