@@ -2,85 +2,44 @@
 
 
 
-This guide walks through creating a model from scaffold to applied migration. In Kwiva the model is the single source of truth — from one `defineModel` declaration the framework derives the database table, migrations, REST routes, typed client, and validation.
+# Create a Model [#create-a-model]
 
-## Prerequisites [#prerequisites]
-
-* A Kwiva project scaffolded with `bun create kwiva my-app`
-* The `@kwiva/data` package installed (it ships with new projects)
-* A running local development setup
-
-## Generate the model [#generate-the-model]
-
-`kwiva make:model` scaffolds a model file plus a migration and factory stub:
+## Step 1: generate [#step-1-generate]
 
 ```bash title="terminal"
-kwiva make:model posts
+kwiva make:model Todo
 ```
 
-This creates `src/app/models/posts.ts` alongside a migration file in `src/database/migrations/`.
+Writes `src/app/models/todo.ts` (class).
 
-## Define fields and relations [#define-fields-and-relations]
+## Step 2: author (or generator template) [#step-2-author-or-generator-template]
 
-Open the generated file and define your fields with the field DSL. Relation fields use lazy references (arrow functions) to avoid circular imports:
+```ts title="src/app/models/todo.ts"
+import { defineModel } from "@kwiva/data";
 
-```ts title="src/app/models/posts.ts"
-// src/app/models/posts.ts
-import { defineModel } from '@kwiva/data'
-
-export default defineModel('posts', (f) => ({
+export const Todo = defineModel("todos", (f) => ({
   id: f.id(),
   title: f.string().validation((s) => s.min(1).max(200)),
-  body: f.text().optional(),
-  status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
-  publishedAt: f.timestamp().optional(),
-  authorId: f.uuid().indexed(),
-  author: f.belongsTo(() => User),
-  comments: f.hasMany(() => Comment),
+  status: f.enum("pending", "done"),
+  createdAt: f.dateTime(),
 }), {
   timestamps: true,
-  permission: 'posts',
-})
+  routes: true,
+  fillable: ["title", "status"],
+  permission: "todos",
+});
 ```
 
-`timestamps: true` adds `createdAt` and `updatedAt` columns. The `permission` option gates all generated routes and Studio screens by policy.
-
-## Preview and run the migration [#preview-and-run-the-migration]
-
-Kwiva generates migrations by diffing the model definition against the live database. Preview the proposal first, then apply it:
+## Step 3: migrate + verify [#step-3-migrate--verify]
 
 ```bash title="terminal"
-kwiva db:diff
-kwiva db:migrate
+kwiva migrate
+kwiva route:list | grep todos
 ```
 
-The migration creates the `posts` table and indexes derived from your field definitions.
+## Extra: policies [#extra-policies]
 
-## Verify it works [#verify-it-works]
+Add `src/app/policies/todo.ts` — discovered automatically.
 
-Confirm the migration was applied, then start the dev server and hit the generated route:
-
-```bash title="terminal"
-kwiva db:status
-kwiva dev
-```
-
-```bash title="terminal"
-curl http://localhost:3000/posts
-```
-
-The list route is derived from the model and returns an empty page:
-
-```json title="verify-it-works.json"
-{ "data": [], "total": 0, "page": 1, "lastPage": 0 }
-```
-
-Create a record through the generated `POST /posts` route, and `GET /posts` reflects it on the next call.
-
-## Related Documentation [#related-documentation]
-
-* [Models](/docs/data/models) — The `defineModel` factory and options
-* [Fields & DSL](/docs/data/fields) — All field types and modifiers
-* [Relations](/docs/data/relations) — `belongsTo`, `hasMany`, `hasOne`, `belongsToMany`
-* [Migrations](/docs/data/migrations) — `db:diff`, `db:migrate`, `db:rollback`
-* [Your First Model](/docs/getting-started/first-model) — Hands-on walkthrough
+> \[!TIP]
+> For one-off: `kwiva db:diff --check` — drifts list.

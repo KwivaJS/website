@@ -2,99 +2,46 @@
 
 
 
-This guide shows the two layers of validation in Kwiva: field-level rules derived from the model DSL, and route-level schemas declared on controller handlers. Both use the Standard Schema interface.
+# Validate Input [#validate-input]
 
-## Prerequisites [#prerequisites]
+## 1. Field DSL (models) [#1-field-dsl-models]
 
-* A model defined with `defineModel` (see [create a model](/guides/create-model))
-* A controller using `defineController`
-* The `@kwiva/http` package installed
-
-## Validate at the field level [#validate-at-the-field-level]
-
-Attach validation directly to fields with the `.validation()` modifier. These rules drive generated API routes, `Post.create`, and `post.update`:
-
-```ts title="src/app/models/posts.ts"
-// src/app/models/posts.ts
-import { defineModel } from '@kwiva/data'
-
-export default defineModel('posts', (f) => ({
-  id: f.id(),
+```ts title="src/app/models/todo.ts"
+import { defineModel } from "@kwiva/data";
+export const Todo = defineModel("todos", (f) => ({
   title: f.string().validation((s) => s.min(1).max(200)),
-  body: f.text().validation((s) => s.min(10)),
-  email: f.string().validation((s) => s.email()),
-  age: f.integer().validation((n) => n.min(0).max(150)),
-  status: f.enum('draft', 'published', 'archived').validation((s) => s.enum(['draft', 'published', 'archived'])),
-}), {})
+  priority: f.integer().validation((i) => i >= 0 && i <= 10),
+}));
 ```
 
-The `.validation()` modifier accepts a function that receives a schema builder and returns a validation rule.
+## 2. Route-level validation [#2-route-level-validation]
 
-## Validate the request body [#validate-the-request-body]
-
-For route-specific shapes that go beyond the model, declare a Standard Schema on the handler. The schema is validated before the handler runs:
-
-```ts title="validate-the-request-body.ts"
-import { defineController } from '@kwiva/http'
-
-export default defineController('posts', (c) => ({
-  create: c.post('/', async ({ body }) => {
-    return Post.create(body)
-  }, {
-    body: v.object({ title: v.string().min(1), body: v.optional(v.string()) }),
-    permission: 'posts.create',
-  }),
-}))
+```ts title="src/app/http/controllers/todos.ts"
+api.post("/", async (ctx) => ctx.store.todos.create(ctx.input.body), {
+  input: {
+    body: CreateTodoBody, // Standard Schema
+    params: ParamsSchema,
+    query: QuerySchema,
+  },
+});
 ```
 
-## Validate query and params [#validate-query-and-params]
+## 3. Contracts [#3-contracts]
 
-The same option object accepts `query`, `params`, `headers`, and `cookies` schemas:
+`defineContract({request, response})` — see [Controllers](/docs/http/controllers#contract).
 
-```ts title="validate-query-and-params.ts"
-c.post('/:id', async ({ body }) => {
-  return Post.update(body)
-}, {
-  body: v.object({ title: v.string().min(1) }),
-  query: v.object({ draft: v.optional(v.string()) }),
-  params: v.object({ id: v.string().uuid() }),
-})
-```
+## Error shape [#error-shape]
 
-Generated list routes also validate query parameters against the model — `where`, `orderBy`, and pagination shapes are schema-checked automatically.
-
-## Validation error responses [#validation-error-responses]
-
-When a schema fails, Kwiva returns HTTP 422 with the `VALIDATION` code and field-mapped issues:
-
-```json title="validation-error-responses.json"
+```json
 {
-  "code": "VALIDATION",
-  "issues": [{ "path": "title", "message": "Invalid value" }]
+  "error": {
+    "code": "VALIDATION",
+    "message": "Invalid input",
+    "fields": { "body.title": ["Too short"] },
+    "requestId": "req_abc"
+  }
 }
 ```
 
-## Verify it works [#verify-it-works]
-
-Send an invalid payload to the route, then a valid one:
-
-```bash title="terminal"
-curl -X POST http://localhost:3000/posts \
-  -H "Content-Type: application/json" \
-  -d '{"body": "too short"}'
-```
-
-This returns 422 with the `VALIDATION` code. A payload matching the schema passes through to the handler:
-
-```bash title="terminal"
-curl -X POST http://localhost:3000/posts \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Hello World", "body": "A sufficiently long body"}'
-```
-
-## Related Documentation [#related-documentation]
-
-* [Validation](/docs/data/validation) — Field-level validation and Standard Schema
-* [Validation](/docs/http/validation) — Per-route body, query, and params schemas
-* [Fields & DSL](/docs/data/fields) — The `.validation()` modifier
-* [Error Handling](/docs/core-concepts/error-handling) — The error taxonomy and response shapes
+> \[!TIP]
+> Custom rules: `.validation((v) => new Error("Custom"))` — returns error on falsey.

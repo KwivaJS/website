@@ -1,321 +1,77 @@
-# Auth (/api/auth)
+# @kwiva/auth (/api/auth)
 
 
 
-The `@kwiva/auth` package exposes `defineAuth`, the single factory that configures authentication for an application. It declares which sign-in strategies are enabled, how sessions are carried, which model backs users, and which lifecycle hooks run on sign-up, sign-in, and account deletion. From that declaration the framework generates the credential, OAuth, session, and passkey endpoints, a typed `session` on every request context, and client-side helpers. The signing engine is sealed; application code only ever sees the surfaces below.
+# @kwiva/auth [#kwivaauth]
 
-## The `defineAuth` Factory [#the-defineauth-factory]
+Auth package: `defineAuth` providers, sessions, identity flows, `definePolicy`/`defineGate`, `requireAuth`, controllers, client hooks.
 
-```ts title="the-defineauth-factory.ts"
-import { defineAuth } from '@kwiva/auth'
+## Providers (`src/config/auth.ts`) [#providers-srcconfigauthts]
+
+```ts
+import { defineAuth, emailPassword, magicLink, oauth, validateAuthConfig } from "@kwiva/auth";
 
 export default defineAuth({
-  providers: {
-    password: { enabled: true, minLength: 10 },
-    oauth: {
-      google: { clientId: env('GOOGLE_CLIENT_ID'), secret: env('GOOGLE_SECRET') },
-      github: true,
-    },
-  },
-  session: {
-    strategy: 'database',
-    expiresIn: 60 * 60 * 24 * 7,
-    cookie: { httpOnly: true, sameSite: 'lax', secure: true },
-  },
-  user: {
-    model: 'users',
-    fields: { email: 'email', name: 'name', role: 'role' },
-  },
-})
+  providers: [emailPassword(), oauth({ id: "google", clientId: process.env.GOOGLE_ID, clientSecret: process.env.GOOGLE_SECRET })],
+  session: { secret: process.env.AUTH_SECRET, maxAge: 604800 },
+  register: { createUser: async ({ email, password }) => ({ email, password }) },
+});
 ```
 
-The file lives at `src/app/http/auth.ts` and is picked up by the framework automatically.
+| Provider                 | Notes                                        |
+| ------------------------ | -------------------------------------------- |
+| `emailPassword()`        | password login/register, verification emails |
+| `magicLink()`            | send-email token                             |
+| `oauth(provider, {...})` | + PKCE where supported                       |
 
-| Argument    | Type                  | Description                                                              |
-| ----------- | --------------------- | ------------------------------------------------------------------------ |
-| `providers` | `AuthProviders`       | Enabled sign-in strategies: `password`, `oauth`, `passkeys`, `magicLink` |
-| `session`   | `SessionConfig`       | How sessions are issued, stored, and transmitted                         |
-| `user`      | `UserConfig`          | The model backing users and its field mapping                            |
-| `hooks`     | `AuthHooks`           | Application lifecycle hooks: `onSignUp`, `onSignIn`, `onDeleteUser`      |
-| `orgs`      | `OrganizationsConfig` | Organization (multi-tenancy) plugin, `{ enabled: true }` (v1.x)          |
+## Session (`src/config/auth.ts`) [#session-srcconfigauthts]
 
-## Providers [#providers]
+`AuthConfig{providers, session: {secret (non-empty), maxAge (positive), cookie?}, register?, remember?, rateLimit?, trustProxy?}` — `validateAuthConfig` throws on malformed shapes. Cookie defaults: `kwiva_session` (httpOnly, sameSite: lax, secure: false); `kwiva_remember` (365d).
 
-Providers are declared under `providers`. Each provider is a key with an options object; a provider omitted from the map is disabled.
+## Middleware [#middleware]
 
-```ts title="providers.ts"
-export default defineAuth({
-  providers: {
-    password: { enabled: true, minLength: 10 },
-    oauth: {
-      google: { clientId: env('GOOGLE_CLIENT_ID'), secret: env('GOOGLE_SECRET') },
-      github: true,
-    },
-    passkeys: { enabled: true },
-    magicLink: { enabled: true },
-  },
-})
-```
+| Factory                                                               | Notes                                         |
+| --------------------------------------------------------------------- | --------------------------------------------- |
+| `requireAuth({secret?, maxAge?, cookie?, store?, users?, policies?})` | attaches `ctx.session`, `ctx.user`, `ctx.can` |
+| `guestOnly({redirectTo?})`                                            | redirects authed users                        |
+| `verified({isVerified?, message?})`                                   | 403 unless email verified                     |
+| `apiTokenAuth({resolve, header?, can?, message?})`                    | token-based (`parseBearer`)                   |
+| `passwordConfirmation({secret?})`                                     | double-submit confirmation middleware         |
 
-### `password` — email and password [#password--email-and-password]
+## Policies (`src/app/policies/*.ts`) [#policies-srcapppoliciests]
 
-| Option      | Type      | Description                                                                 |
-| ----------- | --------- | --------------------------------------------------------------------------- |
-| `enabled`   | `boolean` | Turns the credential strategy on                                            |
-| `minLength` | `number`  | Minimum password length enforced in addition to the engine's hashing policy |
+| API                                                                           | Notes                                                                                                                       |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `definePolicy({view: () => true})`                                            | deny-by-default; `defineGate(check)` — `authorize(policy, user, action, resource?)`, `authorizeGate(gate, user, resource?)` |
+| `can/cannot`, `authorize`, `authorizeGate`, `whereCan`                        | ambient (ALS) + explicit overloads                                                                                          |
+| Registry: `registerPolicies/resetDefaultRegistry/policyFor/normalizeRegistry` | auto-merged from `policiesFromModules` at discovery                                                                         |
 
-Passwords are hashed with argon2id by the internal engine's policy; the configured minimum length is layered on top.
+## Identity flows [#identity-flows]
 
-### `oauth` — OAuth providers [#oauth--oauth-providers]
+| Flow               | API                                                                                                                                       |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Password reset     | `createPasswordReset({secret, ttlSeconds})` → `{request(email), verify(token), reset(token, password)}`                                   |
+| Email verification | `createEmailVerifier({secret, ttlSeconds})` → `{tokenFor, send, verify, inspect}` + `isEmailVerified(user)`                               |
+| Magic link         | `createMagicLink({secret})` → `{send(email), verify(token)}`                                                                              |
+| TOTP               | `generateTotpSecret(), totpCode(secret, {at?, digits?, window?}), verifyTotp, totpUri(...)` + `generateRecoveryCodes/consumeRecoveryCode` |
+| API tokens         | `generateApiToken(prefix = "kwiva_")`, `hashApiToken`, `verifyApiToken`, `parseBearer`, `authorizeHeader`                                 |
+| PKCE OAuth         | `createPkcePair()`, `createOAuthClient({...})` → `{authorizationUrl, exchangeCode, fetchProfile}`                                         |
 
-Each provider key accepts a full credential object or `true` for an identity provider whose credentials are resolved from configuration elsewhere.
+## Controllers [#controllers]
 
-| Option   | Type                                           | Description                                                                 |
-| -------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
-| `google` | `{ clientId: string; secret: string } \| true` | Google OAuth client                                                         |
-| `github` | `true`                                         | GitHub OAuth, credentials from configuration                                |
-| `...`    | `...`                                          | The provider list is open; add keys for other providers the engine supports |
+`createAuthController()` → routes `POST /auth/login`, `POST /auth/logout`, `POST /auth/register`; `createSessionController()` → `GET /session` (with `requireAuth`); `sessionController` (zero-arg).
 
-### `passkeys` — WebAuthn (v1.x) [#passkeys--webauthn-v1x]
+## Client hooks (React) [#client-hooks-react]
 
-| Option    | Type      | Description                                             |
-| --------- | --------- | ------------------------------------------------------- |
-| `enabled` | `boolean` | Enables WebAuthn registration and authentication (v1.x) |
+| Hook                                | Notes                                        |
+| ----------------------------------- | -------------------------------------------- |
+| `useSession(endpoint = "/session")` | → `{session, user, isLoading, refresh}`      |
+| `useCan(ability)`                   | ALS + ambient abilities; `AbilitiesProvider` |
+| `setAmbientAbilities(map)`          | —                                            |
 
-Passkey support exposes registration and authentication endpoints under `/auth/passkeys/*`. When enabled, the engine manages passkey credential columns on the user model automatically.
+## Client-side flows (during login) [#client-side-flows-during-login]
 
-### `magicLink` — passwordless (v1.x) [#magiclink--passwordless-v1x]
+Session/token flows: browser reads `kwiva_session` cookie → `useSession()`; login redirects; `requireAuth`-protected pages redirect.
 
-| Option    | Type      | Description                       |
-| --------- | --------- | --------------------------------- |
-| `enabled` | `boolean` | Enables magic-link sign-in (v1.x) |
-
-Magic links are delivered through the mail integration, so this provider additionally requires a configured mail channel.
-
-## User Model Contract [#user-model-contract]
-
-`defineAuth` does not create a user model; it maps an existing model onto the engine. The model named in `user.model` must declare the fields referenced by `user.fields`.
-
-```ts title="user-model-contract.ts"
-import { defineModel } from '@kwiva/data'
-
-export default defineModel('users', (f) => ({
-  id: f.id(),
-  email: f.string().unique(),
-  name: f.string(),
-  role: f.enum('user', 'admin').default('user').indexed(),
-}), { timestamps: true, permission: 'users' })
-```
-
-### `user` options [#user-options]
-
-| Option        | Type           | Description                                                        |
-| ------------- | -------------- | ------------------------------------------------------------------ |
-| `model`       | `string`       | Name of the model that backs users (e.g. `'users'`)                |
-| `fields`      | `UserFieldMap` | Column mapping for identity and profile fields                     |
-| `verifyEmail` | `boolean`      | Requires email verification before full sign-in (v1.x, needs mail) |
-
-### `fields` mapping [#fields-mapping]
-
-| Key     | Type     | Description                                                 |
-| ------- | -------- | ----------------------------------------------------------- |
-| `email` | `string` | The column holding the email address                        |
-| `name`  | `string` | The column holding the display name                         |
-| `role`  | `string` | The column holding the role (surfaced on the typed session) |
-
-Engine-managed columns — the password hash, session references, OAuth accounts, and passkey credentials — are added to the referenced model automatically at migration time. You never declare them in the model file.
-
-## Sessions [#sessions]
-
-Every authenticated request carries a typed session. On the server it is read from the request context; on the client it is read from a hook.
-
-```ts title="sessions.ts"
-const { session } = ctx
-
-if (!session.user) {
-  return error('UNAUTHORIZED')
-}
-
-const actor = session.user
-```
-
-`session.user` is typed from the configured `user.fields` mapping — for the example above it is `{ id, email, role } | null`. The session is populated by the `session` middleware that ships with the auth package.
-
-### Client hook [#client-hook]
-
-```tsx title="client-hook.tsx"
-import { useSession } from '@kwiva/react'
-
-const { user, signOut, isPending } = useSession()
-```
-
-| Property    | Type                  | Description                                      |
-| ----------- | --------------------- | ------------------------------------------------ |
-| `user`      | `SessionUser \| null` | The signed-in user, or `null` when signed out    |
-| `signOut`   | `() => Promise<void>` | Ends the current session                         |
-| `isPending` | `boolean`             | `true` while the session is still being resolved |
-
-On the server-rendered path the session is loaded from the cookie and hydrated to the client, so `useSession()` is populated before the first client render.
-
-### Session configuration [#session-configuration]
-
-| Option      | Type                                                                            | Description                                    |
-| ----------- | ------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `strategy`  | `'database' \| 'cookie' \| 'jwt'`                                               | How the session identity is carried and stored |
-| `expiresIn` | `number`                                                                        | Session lifetime in seconds                    |
-| `cookie`    | `{ httpOnly: boolean; sameSite: 'lax' \| 'strict' \| 'none'; secure: boolean }` | Attributes of the session cookie               |
-
-### Session stores [#session-stores]
-
-The runtime session store is selected in `src/config/session.ts`.
-
-| Store      | Notes                                                              |
-| ---------- | ------------------------------------------------------------------ |
-| `database` | Default; sessions persisted in the database, revocable server-side |
-| `redis`    | Shared store for multi-instance deployments                        |
-| `cookie`   | Stateless signed cookie sessions                                   |
-
-Sessions use sliding expiry: activity extends the lifetime up to `expiresIn`. Device and session listing is surfaced in Studio (v1.x).
-
-### CSRF protection [#csrf-protection]
-
-Form and state-changing routes are protected by the `csrf` middleware, which applies session-token double-submit validation. The middleware is on by default.
-
-## Client Usage [#client-usage]
-
-Providers render ready-made screens through the ui-kit `AuthScreen` pattern, or you can build custom pages against the generated endpoints and hooks.
-
-```tsx title="client-usage.tsx"
-const { user, signOut } = useSession()
-
-if (user) {
-  return <button onClick={() => signOut()}>Sign out</button>
-}
-
-return <AuthScreen />;
-```
-
-## Generated HTTP Surface [#generated-http-surface]
-
-From a single `defineAuth` declaration the framework mounts the following endpoints and middleware:
-
-| Surface                              | Purpose                                                                 |
-| ------------------------------------ | ----------------------------------------------------------------------- |
-| `POST /auth/sign-up`                 | Create an account (credential strategy)                                 |
-| `POST /auth/sign-in`                 | Sign in with email and password                                         |
-| `POST /auth/sign-out`                | End the current session                                                 |
-| `GET /auth/oauth/:provider`          | Start an OAuth flow for the given provider                              |
-| `GET /auth/oauth/:provider/callback` | OAuth provider callback                                                 |
-| `GET /auth/session`                  | Return the current session (typed)                                      |
-| `POST /auth/passkeys/*`              | WebAuthn registration and authentication (v1.x)                         |
-| Middleware `auth`                    | `requireAuth` semantics, returns `401` / `UNAUTHORIZED` when signed out |
-| Middleware `session`                 | Populates `ctx.session` on every request                                |
-
-## Protecting Routes [#protecting-routes]
-
-### `requireAuth` middleware [#requireauth-middleware]
-
-The `auth` middleware enforces `requireAuth` semantics: it rejects the request with a `401 UNAUTHORIZED` error when `ctx.session.user` is absent. Attach it to the ordered global stack in `src/config/app.ts`, or scope it per route and controller with `middleware: ['auth']`.
-
-```ts title="requireauth-middleware.ts"
-const me = c.get('/me', async ({ session }) => session.user, {
-  middleware: ['auth'],
-})
-```
-
-A custom guard is written with `defineMiddleware` against the typed session:
-
-```ts title="requireauth-middleware-2.ts"
-import { defineMiddleware, error } from '@kwiva/http'
-
-export default defineMiddleware('auth', async (ctx, next) => {
-  if (!ctx.session.user) {
-    return error('UNAUTHORIZED')
-  }
-  return next()
-})
-```
-
-### `beforeLoad` page guards [#beforeload-page-guards]
-
-Pages protect themselves with a `beforeLoad` guard that redirects before the loader runs:
-
-```ts title="beforeload-page-guards.ts"
-import { definePage, redirect } from '@kwiva/react'
-
-export default definePage({
-  beforeLoad: ({ session }) => {
-    if (!session.user) {
-      throw redirect({ to: '/login' })
-    }
-  },
-  component: () => <Dashboard />,
-})
-```
-
-## Hooks [#hooks]
-
-Hooks receive the relevant actor and let application code react to auth lifecycle events. They are a natural place to fan out to jobs and events.
-
-| Hook           | Context    | Description                        |
-| -------------- | ---------- | ---------------------------------- |
-| `onSignUp`     | `{ user }` | Runs when a new account is created |
-| `onSignIn`     | `{ user }` | Runs after a successful sign-in    |
-| `onDeleteUser` | `{ user }` | Runs when an account is deleted    |
-
-```ts title="hooks.ts"
-export default defineAuth({
-  providers: { password: { enabled: true } },
-  session: { strategy: 'database', expiresIn: 60 * 60 * 24 * 7 },
-  user: { model: 'users', fields: { email: 'email', name: 'name', role: 'role' } },
-  hooks: {
-    onSignUp: async ({ user }) => {
-      await SendWelcome.dispatch({ userId: user.id })
-    },
-    onSignIn: async ({ user }) => {
-      await SignedIn.emit({ userId: user.id })
-    },
-    onDeleteUser: async ({ user }) => {
-      await cleanupForUser(user.id)
-    },
-  },
-})
-```
-
-## MFA, Organizations, Admin [#mfa-organizations-admin]
-
-| Feature                            | Surface                                   | Status |
-| ---------------------------------- | ----------------------------------------- | ------ |
-| Multi-factor authentication (TOTP) | Auth plugin                               | v1.x   |
-| Organizations                      | `orgs: { enabled: true }` in `defineAuth` | v1.x   |
-| Admin plugin                       | User management, ban, impersonate         | v1.x   |
-| Email verification                 | `user.verifyEmail`                        | v1.x   |
-
-### Organizations [#organizations]
-
-When organizations are enabled, the organization and membership model maps onto Kwiva tenancy: an organization is a tenant and membership roles become policy roles. This requires the tenancy mode to be set to `org`.
-
-```ts title="organizations.ts"
-export default defineAuth({
-  providers: { password: { enabled: true } },
-  orgs: { enabled: true },
-})
-```
-
-## Security Notes [#security-notes]
-
-* Passwords are hashed with argon2id by the engine's policy, layered with the configured `minLength`.
-* Auth routes are rate-limited by default.
-* Errors are enumeration-safe: a bad email and a bad password both yield `UNAUTHORIZED`.
-* Session cookies default to `httpOnly`, `sameSite: 'lax'`, and `secure`.
-* State-changing requests are protected by the CSRF middleware (session-token double-submit).
-
-## What to Read Next [#what-to-read-next]
-
-* [Auth Configuration](/docs/auth/configuration) — Quick configuration guide
-* [Providers](/docs/auth/providers) — Enabling password, OAuth, passkeys, and magic links
-* [Sessions](/docs/auth/sessions) — Session lifecycle and stores
-* [Client Usage](/docs/auth/client-usage) — `useSession()` and sign-in/sign-out flows
-* [Protecting Routes](/docs/auth/protecting-routes) — Middleware and page guards
-* [Policies](/docs/authorization/policies) — Authorization on top of an authenticated session
-* [API Authentication](/docs/api/authentication) — Sessions, bearer tokens, and API keys for API clients
+> \[!TIP]
+> Built-in session store is per-process (`createMemorySessionStore`). For multi-instance: cookie-only (HMAC signatures) or JWT-based stores.

@@ -1,158 +1,49 @@
-# Fields & DSL (/docs/data/fields)
+# Fields (/docs/data/fields)
 
 
 
-Fields are how you describe every attribute, constraint, and behavior of a resource. Kwiva uses a **function-based DSL** rather than classes: each field is started by a type constructor like `f.string()` and refined by chaining typed modifiers such as `.optional()`, `.default()`, `.indexed()`, and `.validation()`. The assembled chain drives three things at once — the TypeScript type, the validation schema, and the database column — so a field can never be typed one way and validated another.
+# Fields [#fields]
 
-Every field flows through the same pipeline:
+`defineModel` takes `(f) => ({...})` — every value is a field builder.
 
-```plaintext title="fields-dsl.txt"
-Field definition → Type resolution → Modifier chain → Validation schema → Database column
-```
+## Scalar types [#scalar-types]
 
-## Identity [#identity]
+| Method                      | Type      | Column                |
+| --------------------------- | --------- | --------------------- |
+| `f.id()`                    | `id`      | `integer, primaryKey` |
+| `f.uuid()`                  | `uuid`    | `uuid, primaryKey`    |
+| `f.string(len?)`            | `string`  | `varchar(len=255)`    |
+| `f.text()`                  | `text`    | `text`                |
+| `f.integer()`, `f.bigint()` | integers  | —                     |
+| `f.float()`                 | float     | —                     |
+| `f.boolean()`               | bool      | —                     |
+| `f.date()`, `f.time()`      | date/time | —                     |
+| `f.dateTime()`              | timestamp | —                     |
+| `f.json<T>()`               | json      | —                     |
 
-Every model needs a primary key. The default is a UUID primary key, with an autoincrement option:
+## Modifiers [#modifiers]
 
-```ts title="identity.ts"
-id: f.id(),                        // uuid pk by default
-id: f.id('autoincrement'),          // integer autoincrement pk
-```
+| Method                      | Notes                                      |
+| --------------------------- | ------------------------------------------ |
+| `.nullable()`, `.notNull()` | nullability (default: nullable)            |
+| `.indexed()`, `.unique()`   | index/unique constraint                    |
+| `.default(value)`           | DB-level default                           |
+| `.validation(v => v)`       | field-level validator (Error → VALIDATION) |
+| `.description(text)`        | docs/openapi metadata                      |
+| `.as(alias)`                | alias for SQL                              |
 
-## Scalar Types [#scalar-types]
+## Enums [#enums]
 
-| Type            | Database  | Description                           |
-| --------------- | --------- | ------------------------------------- |
-| `f.string()`    | VARCHAR   | Text string                           |
-| `f.text()`      | TEXT      | Long-form text                        |
-| `f.integer()`   | INTEGER   | Whole numbers                         |
-| `f.float()`     | FLOAT     | Decimal numbers                       |
-| `f.boolean()`   | BOOLEAN   | True/false                            |
-| `f.timestamp()` | TIMESTAMP | Date-time with timezone               |
-| `f.datetime()`  | DATETIME  | Date-time without timezone            |
-| `f.date()`      | DATE      | Calendar date                         |
-| `f.json()`      | JSON      | JSON object (typed via `f.json<T>()`) |
-| `f.jsonb()`     | JSONB     | Binary JSON                           |
-| `f.binary()`    | BLOB      | Binary data                           |
-| `f.uuid()`      | UUID      | Universally unique identifier         |
+`f.enum("a", "b")` — creates a check constraint + zod/enum reflection. `enumValues` exposed on `FieldDefinition`.
 
-> \[!NOTE]
-> `f.json<{ readingTime: number }>()` accepts a type parameter so parsed JSON is fully typed in queries, handlers, and the client.
+## Relations [#relations]
 
-## Specialized Types [#specialized-types]
+See [Relations](/docs/data/relations).
 
-| Type                | Description                                     |
-| ------------------- | ----------------------------------------------- |
-| `f.currency()`      | Decimal with currency formatting                |
-| `f.geoPoint()`      | Latitude/longitude                              |
-| `f.geoLineString()` | GeoJSON line                                    |
-| `f.geoPolygon()`    | GeoJSON polygon                                 |
-| `f.email()`         | Email validation                                |
-| `f.url()`           | URL validation                                  |
-| `f.phone()`         | Phone number validation                         |
-| `f.ip()`            | IPv4/IPv6                                       |
-| `f.cidr()`          | Network CIDR                                    |
-| `f.color()`         | Hex color                                       |
-| `f.slug()`          | URL-safe slug                                   |
-| `f.regex()`         | Pattern-matched string                          |
-| `f.file()`          | File upload reference                           |
-| `f.image()`         | Image with dimensions                           |
-| `f.object()`        | JSON object                                     |
-| `f.array()`         | Array of typed elements (`f.array(f.string())`) |
-| `f.map()`           | Key-value map (`f.map(f.string())`)             |
-| `f.enumSet()`       | Set of enum values                              |
+## Query validation [#query-validation]
 
-Specialized types are thin: they map to a standard column and add domain validation. `f.email()` is the same column as `f.string()` with an email rule attached; `f.geoPoint()` stores coordinates with the right spatial column. Typed collection fields — `f.array(f.string())`, `f.map(f.string())`, `f.json<Shape>()` — keep the inner types flowing through queries, validation, and the client.
+Relations participate in queries (`whereHas`, `withCount`); see [Relations](/docs/data/relations).
 
-## Enums and Choices [#enums-and-choices]
+## Internal note [#internal-note]
 
-`f.enum` and `f.enumSet` constrain a field to a fixed vocabulary:
-
-```ts title="enums-and-choices.ts"
-status: f.enum('draft', 'published', 'archived').default('draft').indexed(),
-labels: f.enumSet('red', 'green', 'blue').optional(),
-```
-
-| Type                 | Column      | Semantics            |
-| -------------------- | ----------- | -------------------- |
-| `f.enum(a, b, c)`    | Enum column | Exactly one member   |
-| `f.enumSet(a, b, c)` | Set column  | Zero or more members |
-
-Enum members become literal types end to end — the field type, the validation schema, the query shorthand, and the client all know the vocabulary, so `where('status', 'expired')` fails to compile. Prefer enums over bare strings for anything with a closed set of values; the compile-time check is the cheapest validation you get.
-
-## Relationship Types [#relationship-types]
-
-| Type                                        | Description                            |
-| ------------------------------------------- | -------------------------------------- |
-| `f.belongsTo(() => Model)`                  | Many-to-one                            |
-| `f.hasMany(() => Model)`                    | One-to-many                            |
-| `f.hasOne(() => Model)`                     | One-to-one                             |
-| `f.belongsToMany(() => Model, () => Pivot)` | Many-to-many with optional pivot model |
-| `f.morphTo()`                               | Polymorphic owner                      |
-| `f.morphMany(() => Model)`                  | Polymorphic many                       |
-| `f.morphOne(() => Model)`                   | Polymorphic single                     |
-| `f.morphToMany(() => Model)`                | Polymorphic many-to-many               |
-| `f.foreignId('users').references('id')`     | Explicit foreign key column            |
-
-Relations use **lazy references** (`() => Model`) so models compose without circular imports. See [Relations](/docs/data/relations) for loading, pivots, and cascade behavior.
-
-## Common Modifiers [#common-modifiers]
-
-Modifiers are chained on any field and are typechecked against it — `f.integer().step(0.01)` compiles, `f.string().step(0.01)` does not:
-
-```ts title="common-modifiers.ts"
-f.string().optional().default('draft').indexed().unique().nullable()
-  .validation((s) => s.min(1).max(200)).searchable().orderable()
-  .hidden().readonly().required().fillable().guarded()
-  .comment('Brief description').generatedAs('computed')
-```
-
-| Modifier                     | Effect                                               |
-| ---------------------------- | ---------------------------------------------------- |
-| `.optional()`                | Field may be absent in input; no database `NOT NULL` |
-| `.required()`                | Field must be present                                |
-| `.nullable()`                | Database column allows `NULL`                        |
-| `.default(value)`            | Default applied at the database and on create        |
-| `.indexed()`                 | Single-column index                                  |
-| `.unique()`                  | Unique constraint on the column                      |
-| `.validation(s => ...)`      | Standard Schema rule for the field                   |
-| `.searchable()`              | Opts the field into full-text search                 |
-| `.orderable()`               | Allows ordering by this field in list queries        |
-| `.hidden()`                  | Excluded from API responses                          |
-| `.readonly()`                | Accepted on create, ignored on update                |
-| `.fillable()` / `.guarded()` | Mass-assignment control                              |
-| `.comment(text)`             | Column comment exported to the schema                |
-| `.generatedAs(expr)`         | Generated column backed by an expression             |
-
-Numeric and string types add constraint modifiers: `f.string().min(1).max(200)`, `f.integer().min(0).max(1_000_000)`, `f.float().step(0.01)`.
-
-## Validation Integration [#validation-integration]
-
-`validation()` compiles the field rule into the request schema for generated routes, and into the same schema used by the client and Studio:
-
-```ts title="validation-integration.ts"
-f.string().validation((s) => s.min(1).max(200))
-f.email().validation((s) => s.email())
-f.integer().validation((s) => s.min(0).max(1000000))
-```
-
-The rule callback receives a Standard Schema builder and returns a constraint set. The default validator is Valibot; the implementation is switchable in `src/config/app.ts` under the `validator` key — see [Validation](/docs/data/validation).
-
-## Defaults, Computed, and Mutators [#defaults-computed-and-mutators]
-
-Three ways to produce a value for a field:
-
-| Mechanism                 | When it runs                       | Example                                          |
-| ------------------------- | ---------------------------------- | ------------------------------------------------ |
-| `.default(value)`         | At insert, database or model level | `f.enum('draft', 'published').default('draft')`  |
-| `.computed((row) => ...)` | On read, derived and read-only     | `f.string().computed((r) => fullName(r))`        |
-| `.mutator((val) => ...)`  | Before persist, transforms input   | `f.string().mutator((v) => hash(v, 'argon2id'))` |
-
-Defaults are validated against the field type, computed fields never hit the database, and mutators run before hooks and before insert so every derived value is consistent.
-
-## What's Next [#whats-next]
-
-1. [Models](/docs/data/models) — how fields compose into a `defineModel`
-2. [Relations](/docs/data/relations) — relationship fields and loading
-3. [Validation](/docs/data/validation) — rules, Standard Schema, and custom rules
-4. [Your First Model](/docs/getting-started/first-model) — using fields in practice
+`defineModel` compiles to core `ModelDefinition` via `compileIR`. Field kinds: `id, uuid, string, text, integer, bigint, float, boolean, date, time, dateTime, enum, json`.

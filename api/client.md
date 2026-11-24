@@ -167,4 +167,4 @@ See [API Testing](/docs/testing/api-testing) and [Integration Testing](/docs/tes
 * [Controllers](/docs/http/controllers) — The server surface the client types against
 * [Errors](/docs/http/errors) — Typed error contract
 * [Client-Side Realtime](/docs/realtime/client-usage) — Channel hooks and SSE fallback
-* [`@kwiva/react`](/api/react) — `definePage`, `Providers`, and data hooks
+* [`@kwiva/ui`](/api/ui) — `definePage`, `Providers`, and pages/navigation

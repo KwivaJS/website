@@ -1,0 +1,34 @@
+# How do I implement caching? (/guides/caching)
+
+
+
+# Implement Caching [#implement-caching]
+
+## Setup [#setup]
+
+```ts title="src/config/cache.ts"
+export default defineConfig({
+  driver: "memory", // "memory" | "file" | "sqlite" | "redis" | "postgres"
+  prefix: "kwiva",
+  defaultTtl: 60_000,
+  tags: true,
+});
+```
+
+## Use [#use]
+
+```ts
+import { getCache } from "@kwiva/core";
+const cache = getCache();
+await cache.set("user:1", user, { ttl: 60_000, tags: ["user"] });
+await cache.invalidateTags(["user"]);
+```
+
+## Query caching [#query-caching]
+
+```ts
+const cached = await cache.wrap("todos:list", () => db.posts.all(), { ttl: 60_000 });
+```
+
+> \[!TIP]
+> For Keyv Redis adapter, see `@kwiva/store-redis`.

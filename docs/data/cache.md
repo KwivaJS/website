@@ -1,0 +1,41 @@
+# Cache (/docs/data/cache)
+
+
+
+# Cache [#cache]
+
+`@kwiva/core` cache — Keyv v6 sealed backend with TTL, tags, wrap/remember (single-flight), SWR grace, tenant-aware keys.
+
+## API [#api]
+
+```ts
+import { getCache, initCache, resetCache } from "@kwiva/core";
+
+const cache = getCache(); // or initCache({driver: "redis", url: process.env.REDIS_URL})
+
+await cache.set("user:1", value, { ttl: 60_000, tags: ["user"] });
+await cache.get("user:1");
+await cache.delete("user:1");
+await cache.wrap("user:1", async () => expensive(), { ttl: 60_000 });
+await cache.invalidateTags(["user"]);
+```
+
+## Config — `src/config/cache.ts` [#config--srcconfigcachets]
+
+```ts
+export default defineConfig({
+  driver: "memory", // "memory" | "file" | "sqlite" | "redis" | "postgres"
+  prefix: "kwiva",
+  defaultTtl: 60_000, // 0 = no expiry
+  tags: true, // tag-based invalidation
+});
+```
+
+## Notes [#notes]
+
+* Single-flight on `wrap` (concurrent misses share one compute).
+* SWR via `CacheWrapOptions{swr?: {staleWhileRevalidate: boolean, staleWhileUpdating: boolean}}` — `staleWhileRevalidate` serves while update happens; `staleWhileUpdating` similar for updates.
+* Tenant: keys prefixed via `currentTenant()` when set.
+
+> \[!TIP]
+> Model-level caching lives in `@kwiva/data` via `cache` option on models? (See advanced/model-ir note — caching is core-level; models write to `cache.wrap`.)

@@ -2,94 +2,37 @@
 
 
 
-Realtime pushes updates to connected clients the moment they happen. Kwiva's realtime layer is WebSocket channels over the server's upgrade path, domain events for broadcasting, and React hooks for subscribing on the client.
+# Enable Realtime [#enable-realtime]
 
-## Prerequisites [#prerequisites]
+## 1. Define a channel [#1-define-a-channel]
 
-* A Kwiva project running on the bun or node server preset (WebSocket capable)
-* Sessions in place — channel policies check `session.user`
-* A React client using `@kwiva/react` hooks to subscribe
-
-## Define the channel [#define-the-channel]
-
-Declare a channel with the `channel()` factory, using a namespaced pattern. Subscriptions are checked on upgrade by `.policy`, using the same policy shape as REST:
-
-```ts title="define-the-channel.ts"
-import { channel, broadcast } from '@kwiva/http'
-
-export const chat = channel('chat.{roomId}')
-  .policy(({ params, session }) => session.user && isMember(session.user, params.roomId))
-  .on('message', ({ payload }) => broadcast(payload))
+```ts title="src/app/http/ws/channels.ts"
+import { channel } from "@kwiva/http";
+export const TodoUpdates = channel("todos.updates").policy((user) => !!user);
 ```
 
-A client can only subscribe to `chat.{roomId}` when the policy returns a value — the session user must be a member of the room. `params.roomId` is typed from the pattern. Messages arriving from subscribers hit the `on('message')` handler; relaying the payload with `broadcast` fans it out to every subscribed client.
+## 2. Hook to events [#2-hook-to-events]
 
-## Broadcast messages [#broadcast-messages]
-
-Broadcast an event into a channel either by emitting a domain event or by calling `broadcast` directly from server code.
-
-```ts title="broadcast-messages.ts"
-import { defineEvent } from '@kwiva/events'
-
-export const MessagePosted = defineEvent('message.posted', (f) => ({
-  roomId: f.uuid(),
-  messageId: f.uuid(),
-}), {
-  broadcast: (e) => `chat.${e.roomId}`,
-})
+```ts title="src/app/events/todo-updated.ts"
+import { defineEvent, broadcast } from "@kwiva/events";
+export const TodoUpdated = defineEvent<{ id: string; title: string }>({
+  broadcastOn: { module: "todos" },
+  broadcastAs: "todos.updated",
+});
 ```
 
-```ts title="broadcast-messages-2.ts"
-import { MessagePosted } from '../app/events/message-posted'
+## 3. Client [#3-client]
 
-await MessagePosted.emit({ roomId: message.roomId, messageId: message.id })
+```tsx
+import { useWsSubscription } from "@kwiva/client";
+const { data, error, status } = useWsSubscription("TodosUpdates");
 ```
 
-The event's `broadcast` function maps the event to the channel name, and the broadcast is policy-checked against the channel. Listener functions attached to an event run on the queue when the event is defined with `queued: true`.
+## 4. Broadcast from server [#4-broadcast-from-server]
 
-## Subscribe from the client [#subscribe-from-the-client]
-
-Use `useChannel` in a React component. Payloads are typed from the event definitions, and the hook reconnects with backoff:
-
-```tsx title="subscribe-from-the-client.tsx"
-import { useChannel, usePresence } from '@kwiva/react'
-
-const { messages, send } = useChannel(`chat.${roomId}`, {
-  onMessage: (m) => setMessages((prev) => [...prev, m]),
-})
-
-const { members } = usePresence(`chat.${roomId}`)
+```ts
+export function broadcastUpdate(todo) { broadcast("todos.updates", todo); }
 ```
 
-`messages` is the incoming list for the channel and `send` transmits over it. When the channel enables presence tracking, `usePresence` exposes the current `members` joining and leaving the room.
-
-## Fall back to SSE [#fall-back-to-sse]
-
-Where WebSockets are unavailable — restrictive proxies or edge restrictions — streams use server-sent events with the same channel policy semantics. For one-directional feeds:
-
-```ts title="fall-back-to-sse.ts"
-c.get('/feed', ({ stream }) =>
-  stream((controller) => {
-    posts.on('message', (m) => controller.enqueue(m))
-    return () => controller.close()
-  }),
-)
-```
-
-On static presets realtime is disabled and the client degrades gracefully.
-
-## Verify it works [#verify-it-works]
-
-1. Start the app and open two browser tabs on a page that mounts `useChannel` for the same room.
-2. Send a message from the first tab; the second tab receives it instantly through the broadcast.
-3. Connect a third client that fails the membership policy and confirm its subscription is rejected.
-4. With presence enabled, watch `members` change as tabs join and leave.
-
-## Related Documentation [#related-documentation]
-
-* [Channels](/docs/realtime/channels) — The `channel()` API and policies
-* [Events & Broadcasting](/docs/realtime/events) — `defineEvent` and listeners
-* [Client-Side Realtime](/docs/realtime/client-usage) — `useChannel`, `usePresence`
-* [Scaling Realtime](/docs/realtime/scaling) — Multi-instance fan-out
-* [WebSockets](/docs/http/websockets) — Lower-level `c.ws()` connections
-* [Jobs](/docs/background-work/jobs) — Queue-backed listeners
+> \[!TIP]
+> For non-WS events: [Client-Side Realtime](/docs/realtime/client-usage).

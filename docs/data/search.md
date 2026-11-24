@@ -1,0 +1,52 @@
+# Search (/docs/data/search)
+
+
+
+# Search [#search]
+
+`@kwiva/search` — Postgres full-text search over model IR.
+
+## Model config [#model-config]
+
+```ts title="src/app/models/post.ts"
+import { defineModel } from "@kwiva/data";
+
+export const Post = defineModel("posts", (f) => ({
+  id: f.id(),
+  title: f.string(),
+  body: f.text(),
+}), {
+  search: {
+    fields: [{ field: "title", weight: "A" }, { field: "body", weight: "B" }],
+    language: "english", // regconfig-style Postgres FTS config
+  },
+});
+```
+
+## Query-time search [#query-time-search]
+
+```ts
+const { items, total } = await Post.search("github", { includeRank: true }).limit(20).all();
+// items[i].__searchRank — ts_rank-like score
+```
+
+## Reindex [#reindex]
+
+```bash title="terminal"
+kwiva search:reindex        # all searchable models
+kwiva search:reindex Post   # one
+```
+
+## Federated search [#federated-search]
+
+```ts
+import { searchAcross } from "@kwiva/search";
+const hits = await searchAcross([Post, Comment], "deploy", 10);
+// hits: [{model, row, rank}]
+```
+
+## Config — `src/config/search.ts` [#config--srcconfigsearchts]
+
+```ts
+export default defineConfig({ engine: "postgres", language: "english" });
+```

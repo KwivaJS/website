@@ -2,39 +2,40 @@
 
 
 
-This section contains the complete API reference for all Kwiva packages.
+# API Reference [#api-reference]
 
-## Packages [#packages]
+Index of Kwiva's public package surface. All entries mirror the Kwiva framework's source-of-truth inventories (`research/public-api-inventory.md`, `research/feature-inventory.md`). Stability markers: **Implemented** = public API on `main` (0.2.0+).
 
-| Package                            | Description                                               |
-| ---------------------------------- | --------------------------------------------------------- |
-| [`@kwiva/core`](/api/core)         | Application kernel, context, DI, config, errors, policies |
-| [`@kwiva/config`](/api/config)     | Configuration system, config folder, typed env            |
-| [`@kwiva/data`](/api/data)         | Models, field DSL, query builder, transactions, relations |
-| [`@kwiva/http`](/api/http)         | Controllers, middleware, server routes, lifecycle, guards |
-| [`@kwiva/router`](/api/router)     | File-based router, loaders, typed navigation              |
-| [`@kwiva/react`](/api/react)       | Pages, SSR, data hooks, providers                         |
-| [`@kwiva/client`](/api/client)     | Typed RPC SDK, end-to-end types                           |
-| [`@kwiva/auth`](/api/auth)         | Authentication, sessions, providers                       |
-| [`@kwiva/queue`](/api/queue)       | Jobs, workers, retries, backoff                           |
-| [`@kwiva/events`](/api/events)     | Events, listeners, broadcasting                           |
-| [`@kwiva/services`](/api/services) | Services, typed injection                                 |
-| [`@kwiva/cli`](/api/cli)           | CLI commands reference                                    |
-| [`@kwiva/studio`](/api/studio)     | Generated admin UI                                        |
-| [`@kwiva/mcp`](/api/mcp)           | MCP server, tools, transport                              |
+## Package pages [#package-pages]
 
-## Stability Indicators [#stability-indicators]
+| Package                                  | Stability   | Version | Role                                                                                                                                                                                          | Page                        |
+| ---------------------------------------- | ----------- | ------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `@kwiva/core`                            | Implemented |   0.2.0 | App kernel: `defineApp`, `defineConfig`, config sections (`app`/`logger`/`cache`/`kv`), context/ALS, errors (8-code taxonomy), logger, model IR, cache, KV, store, helpers/collection barrels | [core](/api/core)           |
+| `@kwiva/data`                            | Implemented |   0.2.0 | Models, query builder, relations, transactions, migrations, seeders, factories, Postgres FTS, `./testing`                                                                                     | [data](/api/data)           |
+| `@kwiva/http`                            | Implemented |   0.2.0 | Controllers, contracts, middleware, pipeline, routes, REST, SSE/stream, WebSockets, OpenAPI                                                                                                   | [http](/api/http)           |
+| `@kwiva/ui`                              | Implemented |   0.2.0 | Pages, layouts, SSR/streaming/islands, navigation, SEO, `./server`                                                                                                                            | [ui](/api/ui)               |
+| `@kwiva/client`                          | Implemented |   0.2.0 | Typed RPC (Eden + TanStack Query), reads/mutations/upload/infinite hooks, cache persistence, WS                                                                                               | [client](/api/client)       |
+| `@kwiva/auth`                            | Implemented |   0.2.0 | `defineAuth`, providers, sessions, identity, policies, gates, controllers, client hooks                                                                                                       | [auth](/api/auth)           |
+| `@kwiva/jobs`                            | Implemented |   0.2.0 | Jobs, queues, workers, middleware, outbox, scheduler, failed registry, metrics                                                                                                                | [jobs](/api/jobs)           |
+| `@kwiva/events`                          | Implemented |   0.2.0 | Events, listeners, broadcast, subscribers, config, fakes                                                                                                                                      | [events](/api/events)       |
+| `@kwiva/mail`                            | Implemented |   0.2.0 | `defineMail`, templates, transports (memory/console/smtp/resend), config                                                                                                                      | [mail](/api/mail)           |
+| `@kwiva/mcp`                             | Implemented |   0.1.0 | MCP v2 config, tool generation, `./server` handler/stdio                                                                                                                                      | [mcp](/api/mcp)             |
+| `@kwiva/search`                          | Implemented |   0.1.0 | Config, Postgres FTS, federated search, reindex                                                                                                                                               | [search](/api/search)       |
+| `@kwiva/storage`                         | Implemented |   0.1.0 | Disks, uploads, signed URLs, assets, fakes                                                                                                                                                    | [storage](/api/storage)     |
+| `@kwiva/testing`                         | Implemented |   0.1.0 | `withApp`, `createTestClient`, `./boot`, DB lifecycle, fakes                                                                                                                                  | [testing](/api/testing)     |
+| `@kwiva/cli`                             | Implemented |   0.3.0 | `kwiva` binary, 20 commands, 19 generators, codegen                                                                                                                                           | [cli](/api/cli)             |
+| `@kwiva/auth-better-auth`                | Implemented |   0.0.1 | Sealed Better Auth engine (`./server`)                                                                                                                                                        | — (not public on main site) |
+| `@kwiva/jobs-pg-boss`                    | Implemented |   0.0.1 | pg-boss queue transport                                                                                                                                                                       | —                           |
+| `@kwiva/mail-smtp`, `@kwiva/mail-resend` | Implemented |   0.0.1 | Mail transports                                                                                                                                                                               | —                           |
+| `@kwiva/store-redis`                     | Implemented |   0.0.1 | Redis StoreDriver                                                                                                                                                                             | —                           |
 
-| Status           | Meaning                                   |
-| ---------------- | ----------------------------------------- |
-| **Stable**       | Production-ready, documented capabilities |
-| **Experimental** | Available but subject to change           |
-| **Planned**      | Roadmap capabilities, not yet implemented |
-| **Internal**     | Framework-internal, not for public use    |
+## Engine packages (not public on this site) [#engine-packages-not-public-on-this-site]
 
-## Reading Guide [#reading-guide]
+`kysely`, `elysia`, `better-auth`, `files-sdk`, `nodemailer`, `resend`, `pg-boss`, `ioredis`, `marked`, `@modelcontextprotocol/server`, `evlog`, `keyv`, `marked` — sealed engines. See [architecture](/architecture/package-boundaries).
 
-* **New to Kwiva?** Start with [Getting Started](/docs/getting-started)
-* **Looking for a specific API?** Use the search (Cmd/Ctrl+K)
-* **Need examples?** See [Core Concepts](/docs/core-concepts)
-* **Architecture deep dive?** See [Architecture](/architecture)
+## Related [#related]
+
+* [Command reference](/api/cli) — full `kwiva` command catalog
+* [Config sections](/api/core#configuration) — the 12 config sections table
+* [Research](/docs/research/public-api-inventory) — complete per-package symbol inventory with signatures
+* [Versioning & compatibility](/reference/versioning)

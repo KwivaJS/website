@@ -2,36 +2,31 @@
 
 
 
-Guides answer specific "How do I..." questions. Each guide is narrowly scoped and focused on a single task.
+# Guides [#guides]
 
-## Available Guides [#available-guides]
+How-to recipes for the most common Kwiva tasks.
 
-Guides will cover topics such as:
+## Full list [#full-list]
 
-* How do I protect a route?
-* How do I create a model?
-* How do I create a custom controller?
-* How do I validate input?
-* How do I paginate results?
-* How do I create a background job?
-* How do I schedule a task?
-* How do I enable realtime?
-* How do I configure tenancy?
-* How do I add authentication?
-* How do I add a policy?
-* How do I handle file uploads?
-* How do I generate OpenAPI docs?
-* How do I deploy?
+| Guide                                             | Purpose                              |
+| ------------------------------------------------- | ------------------------------------ |
+| [Create a Model](/guides/create-model)            | `kwiva make:model`, diff/migrate     |
+| [Create a Controller](/guides/create-controller)  | `defineController` handlers          |
+| [Validate Input](/guides/validate-input)          | Field DSL + Standard Schema          |
+| [Paginate Results](/guides/pagination)            | `.page()` and cursor                 |
+| [Protect Routes](/guides/protect-routes)          | `requireAuth` + guards               |
+| [Authenticate Users](/guides/authentication)      | `defineAuth` + sessions              |
+| [Add Policies](/guides/policies)                  | `definePolicy`, wiring               |
+| [Handle File Uploads](/guides/file-uploads)       | `ctx.file()`, storage                |
+| [Create Background Jobs](/guides/background-jobs) | `defineJob`, dispatch                |
+| [Schedule Tasks](/guides/schedule-tasks)          | `defineTask`, cron                   |
+| [Enable Realtime](/guides/realtime)               | channels, broadcast                  |
+| [Configure Tenancy](/guides/tenancy)              | modes, scoping                       |
+| [Generate OpenAPI](/guides/openapi)               | `/openapi.json`, `/docs`             |
+| [Deploy](/guides/deploy)                          | presets, runtime modes               |
+| [Configure Cache & Search](/guides/caching)       | `@kwiva/core` Cache, `@kwiva/search` |
+| [Connect AI via MCP](/guides/mcp)                 | enable MCP, tool generation          |
+| [Test Your App](/guides/testing)                  | withApp, createTestClient            |
 
-## Guides vs Tutorials vs Documentation [#guides-vs-tutorials-vs-documentation]
-
-| Type              | Scope                             | Example                                         |
-| ----------------- | --------------------------------- | ----------------------------------------------- |
-| **Documentation** | Complete reference for a feature  | "Models" — all model options, fields, relations |
-| **Guide**         | How to accomplish a specific task | "How do I create a model with relations?"       |
-| **Tutorial**      | Step-by-step learning experience  | "Build a blog with Kwiva"                       |
-
-## What to Read Next [#what-to-read-next]
-
-* [Documentation](/docs) — Complete reference
-* [Core Concepts](/docs/core-concepts) — Foundational understanding
+> \[!TIP]
+> Each guide is a small, practical recipe with a complete example.

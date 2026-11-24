@@ -1,119 +1,103 @@
-# CLI (/api/cli)
+# @kwiva/cli (/api/cli)
 
 
 
-`kwiva` is the single CLI for the entire application lifecycle. It's built on the Rust-speed toolchain, so every command — dev server, build, check, generators, database, queue, and schedule — runs fast and consistently. Commands are discovered from built-ins first, then application console commands (`src/app/console/`), then modules.
+# @kwiva/cli [#kwivacli]
 
-## Project & Lifecycle [#project--lifecycle]
+The `kwiva` binary (`bin/kwiva` → `src/index.ts`; `import.meta.main` guard).
 
-| Command                                      | Action                                                                                |
-| -------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `kwiva new <name> --mode=<mode>`             | Scaffold an app (modes: `fullstack`, `api+spa`, `static`, `standalone`, `edge`)       |
-| `kwiva dev [--port] [--cluster]`             | Start the dev server with HMR                                                         |
-| `kwiva build [--preset] [--binary] [--docs]` | Production build (client + server)                                                    |
-| `kwiva preview`                              | Serve the built output locally                                                        |
-| `kwiva deploy [provider]`                    | Build then run the provider's deploy path                                             |
-| `kwiva check [--fix] [--audit]`              | Format, lint, and typecheck; `--fix` auto-fixes, `--audit` checks dependencies (v1.x) |
-| `kwiva test [--e2e] [--watch] [filter]`      | Run tests; `--e2e` runs end-to-end tests                                              |
-| `kwiva console`                              | REPL with the app context (config, models, client)                                    |
-| `kwiva upgrade`                              | Run codemod recipes and dependency bumps                                              |
-| `kwiva key:generate`                         | Generate `APP_KEY` into `.env`                                                        |
-| `kwiva doctor`                               | Environment/runtime/dependency diagnostics (v1.x)                                     |
+## Framework commands (dispatch order) [#framework-commands-dispatch-order]
 
-## Generators (`kwiva make:*`) [#generators-kwiva-make]
+| Command                                          | Syntax                      | Behavior                                                                                                                                                                                                                                                              |
+| ------------------------------------------------ | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create <name>`                                  | `kwiva create my-app`       | Validated name (`^[a-z][a-z0-9-]*$`); refuses if exists. Scaffolds `bootstrap/`, `src/config/{app,database,cache,kv,storage,mcp}.ts`, `src/app/models/`, `src/app/http/controllers/`, `src/database/{migrations,seeders}/`, `package.json` (scripts `dev/build/test`) |
+| `dev`                                            | `kwiva dev [--port <n>]`    | Dev server. `--port` default 3000; invalid → exit 1.                                                                                                                                                                                                                  |
+| `build`                                          | `kwiva build [--out <dir>]` | Bundles client entry + regenerates route tree (`src/.kwiva/entry.client.tsx`, `src/.kwiva/types/route-tree.gen.ts`). Logs `kwiva build → <outFile> (<routes> routes, <pages> pages)`                                                                                  |
+| `test`                                           | `kwiva test [-- <args>]`    | Spawns `bun test` in app root; args after `--` pass through                                                                                                                                                                                                           |
+| `migrate`                                        | —                           | Apply migrations from `src/database/migrations` (flat scan, name order)                                                                                                                                                                                               |
+| `migrate:status`                                 | —                           | `applied: …` / `pending: …`                                                                                                                                                                                                                                           |
+| `migrate:down`                                   | —                           | Roll back last batch                                                                                                                                                                                                                                                  |
+| `migrate:generate`                               | —                           | Generate DDL from model IR diff                                                                                                                                                                                                                                       |
+| `seed`                                           | `kwiva seed [name]`         | Run all/one seeders from `src/database/seeders`                                                                                                                                                                                                                       |
+| `task <name>`                                    | —                           | Run task by name (`runTask`)                                                                                                                                                                                                                                          |
+| `route:list`                                     | —                           | Print `METHOD  fullPath  routeId` lines                                                                                                                                                                                                                               |
+| `key:generate`                                   | —                           | Append `APP_KEY` to `.env` (0600, refuses overwrite)                                                                                                                                                                                                                  |
+| `storage:sync <from> <to> [--prune] [--dry-run]` | —                           | Copy objects between disks; skips unchanged; `--prune` deletes target-only; `--dry-run` reports                                                                                                                                                                       |
+| `storage:clear [disk] [--force]`                 | —                           | Clear a disk (S3/GCS/Azure/Blob need `--force`)                                                                                                                                                                                                                       |
+| `search:reindex [model]`                         | —                           | Requires `database` section                                                                                                                                                                                                                                           |
+| `mcp`                                            | —                           | Serve MCP on stdio (auth forced `none`) — generated model + controller tools + custom tools from `src/app/mcp/tools/`                                                                                                                                                 |
+| `mcp:print-config`                               | —                           | Print agent config JSON                                                                                                                                                                                                                                               |
+| `doctor`                                         | —                           | Validate storage/search/mcp; exit 1 on failure                                                                                                                                                                                                                        |
+| `help` / `none` / `--help`                       | —                           | Prints HELP + `App commands:` list                                                                                                                                                                                                                                    |
 
-| Command                  | Creates                                          |
-| ------------------------ | ------------------------------------------------ |
-| `make:model <name>`      | `src/app/models/<name>.ts` + migration + factory |
-| `make:controller <name>` | `src/app/http/controllers/<name>.ts`             |
-| `make:middleware <name>` | `src/app/http/middleware/<name>.ts`              |
-| `make:auth`              | `src/app/http/auth.ts` + users model check       |
-| `make:service <name>`    | `src/app/services/<name>.ts`                     |
-| `make:job <name>`        | `src/app/jobs/<name>.ts`                         |
-| `make:event <name>`      | `src/app/events/<name>.ts`                       |
-| `make:policy <name>`     | `src/app/policies/<name>.ts`                     |
-| `make:task <name>`       | `src/app/tasks/<name>.ts`                        |
-| `make:command <name>`    | `src/app/console/<name>.ts`                      |
-| `make:page <path>`       | `src/ui/pages/<path>.tsx`                        |
-| `make:seeder <name>`     | `src/database/seeders/<name>.ts`                 |
-| `make:module <name>`     | `modules/<name>/` scaffold                       |
-| `make:test <name>`       | Matching test file                               |
+**App commands** (`defineCommand`, from `src/app/commands/`) are discovered and listed after framework commands — discoverable via `loadAppCommands`.
 
-All generators follow the naming conventions (lowercase, kebab-case) and emit typed stubs that pass `kwiva check`.
+## Generators (`kwiva make:<kind> <Name>`) [#generators-kwiva-makekind-name]
 
-## Database [#database]
+| Kind         | Target                     | Ext    | Dated? | Suffix       |
+| ------------ | -------------------------- | ------ | ------ | ------------ |
+| `config`     | `src/config`               | `.ts`  | —      | —            |
+| `service`    | `src/app/services`         | `.ts`  | —      | `Service`    |
+| `model`      | `src/app/models`           | `.ts`  | —      | —            |
+| `controller` | `src/app/http/controllers` | `.ts`  | —      | `Controller` |
+| `middleware` | `src/app/http/middleware`  | `.ts`  | —      | `Middleware` |
+| `contract`   | `src/app/http/contracts`   | `.ts`  | —      | `Contract`   |
+| `policy`     | `src/app/policies`         | `.ts`  | —      | `Policy`     |
+| `gate`       | `src/app/policies`         | `.ts`  | —      | `Gate`       |
+| `job`        | `src/app/jobs`             | `.ts`  | —      | `Job`        |
+| `task`       | `src/app/tasks`            | `.ts`  | —      | `Task`       |
+| `event`      | `src/app/events`           | `.ts`  | —      | `Event`      |
+| `listener`   | `src/app/events`           | `.ts`  | —      | `Listener`   |
+| `mail`       | `src/app/mail`             | `.ts`  | —      | `Mail`       |
+| `factory`    | `src/database/factories`   | `.ts`  | —      | `Factory`    |
+| `migration`  | `src/database/migrations`  | `.ts`  | ✅      | `Migration`  |
+| `seeder`     | `src/database/seeders`     | `.ts`  | —      | `Seeder`     |
+| `page`       | `src/ui/pages`             | `.tsx` | —      | `Page`       |
+| `mcp-tool`   | `src/app/mcp/tools`        | `.ts`  | —      | `Tool`       |
+| `command`    | `src/app/commands`         | `.ts`  | —      | `Command`    |
 
-| Command                                | Action                                                            |
-| -------------------------------------- | ----------------------------------------------------------------- |
-| `db:migrate` / `db:rollback --steps=n` | Apply or revert migrations                                        |
-| `db:status` / `db:diff`                | Show applied/pending migrations; propose a model-vs-database diff |
-| `db:seed [--seeder]`                   | Run seeders                                                       |
-| `db:reset`                             | Drop → migrate → seed                                             |
-| `db:push`                              | Push the schema to dev without migration files (v1.x)             |
-| `db:browse`                            | Data browser (v1.x)                                               |
+Behavior: refuses overwrites, `created <path>` output. Templates are minimal valid `defineX` bodies (e.g. `defineController({prefix: "/${base}", routes: (api) => api.get("/", () => ({ok: true}))})`).
 
-## Queue & Schedule [#queue--schedule]
+## DefineCommand — app commands [#definecommand--app-commands]
 
-| Command                                                        | Action                             |
-| -------------------------------------------------------------- | ---------------------------------- |
-| `queue:work --queue=... --concurrency=n`                       | Run workers                        |
-| `queue:listen`                                                 | Verbose worker for development     |
-| `queue:failed` / `queue:retry <id\|--all>` / `queue:clear <q>` | Dead-letter queue management       |
-| `schedule:list [--json]`                                       | List scheduled tasks and next runs |
-| `schedule:work` / `schedule:run`                               | Foreground scheduler / single tick |
-| `task:run <name> [--payload]`                                  | Run one task manually              |
-
-## Config & Addons [#config--addons]
-
-| Command                 | Action                                                      |
-| ----------------------- | ----------------------------------------------------------- |
-| `config:cache` (v1.x)   | Snapshot the merged configuration                           |
-| `module:build`          | Package a module for distribution                           |
-| `add <addon>`           | Install and register an addon in one step                   |
-| `addons list`           | List installed addons (name, version, contribution summary) |
-| `addons search [query]` | Search the addon registry (v1.x)                            |
-| `addons info <addon>`   | Description, contributions, requirements, changelog         |
-| `addons remove <addon>` | Unregister and uninstall (migrations left intact, flagged)  |
-| `addons update [addon]` | Update within the compatibility range                       |
-| `addons outdated`       | List addons with newer compatible versions                  |
-
-## App-Defined Commands [#app-defined-commands]
-
-Applications define their own commands with `defineCommand`, auto-discovered from `src/app/console/`:
-
-```ts title="src/app/console/import-legacy.ts"
-// src/app/console/import-legacy.ts
-import { defineCommand } from '@kwiva/cli'
-
-export default defineCommand('import:legacy', {
-  description: 'Import users from the legacy export',
-  signature: 'import:legacy {file} {--dry-run}',
-  handle: async ({ input, output, models, config }) => {
-    const file = input.argument('file')
-    const dry = input.option('dry-run')
-    const bar = output.progress(rows.length)
-    for (const row of rows) {
-      // process...
-      bar.tick()
-    }
-    output.info(`imported ${n} users`)
+```ts title="src/app/commands/deploy.ts"
+import { defineCommand } from "@kwiva/cli";
+export const DeployCommand = defineCommand({
+  name: "deploy",
+  description: "Deploy the app",
+  options: { stage: { type: "option", default: "production" } },
+  handler(options) {
+    console.log(options.stage);
   },
-})
+});
 ```
 
-Command signatures use the standard `{arg}` / `{--flag}` form. Helpers include progress bars, tables, and styled output. Run it as:
+### Parsing [#parsing]
 
-```bash title="terminal"
-kwiva import:legacy export.csv --dry-run
-```
+| Syntax                          | Parsed as                                    |
+| ------------------------------- | -------------------------------------------- |
+| `--name=value` / `--name value` | option value                                 |
+| `--flag`                        | `true`; `--flag=false` for false             |
+| `-h` / `--help`                 | generated help (exit 0)                      |
+| positional args                 | `errors` entry (`unexpected argument "..."`) |
 
-## Global Flags [#global-flags]
+### Option resolution [#option-resolution]
 
-`--env <file>` · `--no-color` · `--json` (machine-readable where sensible) · `--verbose`
+`optionKind(option)`: explicit `type` wins; else boolean default → `flag`, string default or required → `option`. Defaults applied; missing required → error.
 
-## What to Read Next [#what-to-read-next]
+## Codegen [#codegen]
 
-* [Project Commands](/docs/cli/project-commands) — Lifecycle commands in detail
-* [Generators](/docs/cli/generators) — The `make:*` commands
-* [Database Commands](/docs/cli/database-commands) — Migration and seed workflows
-* [Addon Commands](/docs/cli/addon-commands) — Installing and managing addons
+| API                                                  | Notes                                                                                       |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `collectRoutes(root)`                                | → `CollectedRoute[]{id, method, path, params[], input{params?,query?,body?}, output, isWS}` |
+| `collectPages(root)`                                 | → `CollectedPage[]`                                                                         |
+| `scanLayoutFiles(root)`                              | → `src/ui/layouts` paths                                                                    |
+| `writeRouteTree(root)`                               | → `src/.kwiva/types/route-tree.gen.ts`                                                      |
+| `emitClientEntry(pages, layouts, clientConfigPath?)` | generated `src/.kwiva/entry.client.tsx`                                                     |
+
+## Library exports [#library-exports]
+
+`loadAppConfig(root)`, `applyConfigSections(config)`, `buildClientBundle(root, {minify, outDir})`, `discoverPageFiles(root)`, `bootDevServer(root, {port?, clientScript?, skipBuild?})`, `emitServeFile()`, `bumpGeneration/readGeneration`, `loadAppCommands(root?)`, `dispatchAppCommand(root, argv)`, `main(argv)`, `runMake(root, cmd, argv)`, `planConstruct(kind, name)`, `writeConstruct(root, kind, name)`, `MAKE_KINDS`, `introspect(schema)`, `loadAppCommands`.
+
+> \[!TIP]
+> `kwiva new` scaffolds a real Kwiva app — run `bun install` then `kwiva dev` (default port 3000).

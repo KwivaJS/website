@@ -1,0 +1,37 @@
+# How do I write app tests? (/guides/testing)
+
+
+
+# Write App Tests [#write-app-tests]
+
+```ts
+import { withApp, createTestClient } from "@kwiva/testing";
+
+describe("TodosController", () => {
+  await withApp(async ({ server }) => {
+    const client = await createTestClient(server);
+    const res = await client.Todos.create({ title: "Test" });
+    expect(res.data.title).toBe("Test");
+  });
+});
+```
+
+## Patterns [#patterns]
+
+| API                           | Purpose                                |
+| ----------------------------- | -------------------------------------- |
+| `withApp(fn)`                 | boots app in-process, tears down after |
+| `createTestClient(server)`    | typed client for in-process requests   |
+| `bootAppFromRoot(opts?)`      | manual boot for advanced flows         |
+| `setupTestDb(models)`         | in-memory PGLite for DB tests          |
+| `fakeQueue()`, `fakeEvents()` | event system fakes                     |
+
+## Database tests [#database-tests]
+
+```ts
+setupTestDb([Todo]);
+const todo = await Todo.create({ title: "x" });
+```
+
+> \[!TIP]
+> For unit tests of services: `setupTestDb` + mock services, no HTTP.
