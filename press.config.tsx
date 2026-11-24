@@ -118,10 +118,10 @@ const config = defineConfig({
   },
   site: {
     name: "Kwiva",
-    // baseUrl: process.env.DEV ? "http://localhost:4000" : "https://kwiva.js.org",
+    baseUrl: "https://kwiva.js.org",
     git: {
       user: "KwivaJS",
-      repo: "kwiva",
+      repo: "website",
       branch: "main",
     },
   },
